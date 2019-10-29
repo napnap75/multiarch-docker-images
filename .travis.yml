@@ -1,6 +1,7 @@
 language: bash
 services: docker
 sudo: required
+dist: bionic
 addons:
   apt:
     packages:
@@ -21,6 +22,7 @@ install:
   - export BUILDKIT_HOST=tcp://0.0.0.0:1234
   
 script:
+  - buildctl --help
   - buildctl build \
     --frontend=dockerfile.v0 \
     --local context=${IMAGE} \
