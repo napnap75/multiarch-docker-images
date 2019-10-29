@@ -19,7 +19,7 @@ install:
 script:
   - if [ "${TRAVIS_BRANCH}" == "master" ]; then
       docker login -u="${DOCKER_USERNAME}" -p="${DOCKER_PASSWORD}" ;
-      buildctl build --frontend dockerfile.v0 --local context=${IMAGE} --local dockerfile=${IMAGE} --frontend-opt platform=linux/amd64 --frontend-opt platform=linux/arm64/v8 --frontend-opt platform=linux/armhf --output type=image,name=docker.io/napnap75/${IMAGE},push=true ;
+      buildctl build --frontend dockerfile.v0 --local context=${IMAGE} --local dockerfile=${IMAGE} --frontend-opt platform=linux/armhf --output type=image,name=docker.io/napnap75/${IMAGE},push=true ;
     else
       buildctl build --frontend dockerfile.v0 --local context=${IMAGE} --local dockerfile=${IMAGE} ;
     fi
