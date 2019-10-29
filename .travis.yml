@@ -1,11 +1,6 @@
 language: bash
 services: docker
 sudo: required
-dist: bionic
-addons:
-  apt:
-    packages:
-      - docker-ce
    
 notifications:
   email: false
@@ -24,7 +19,7 @@ install:
 script:
   - buildctl --help
   - buildctl build \
-    --frontend=dockerfile.v0 \
+    --frontend dockerfile.v0 \
     --local context=${IMAGE} \
     --local dockerfile=${IMAGE}
   - docker image ls
