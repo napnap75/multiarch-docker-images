@@ -1,0 +1,33 @@
+language: bash
+services: docker
+sudo: required
+addons:
+  apt:
+    packages:
+      - docker-ce
+   
+notifications:
+  email: false
+   
+env:
+  - IMAGE=test
+
+install:
+  - echo '{"experimental":true}' | sudo tee /etc/docker/daemon.json
+  - sudo service docker restart
+  - sudo docker run --privileged linuxkit/binfmt:v0.6
+  - sudo docker run -d --privileged -p 1234:1234 --name buildkit moby/buildkit:latest --addr tcp://0.0.0.0:1234 --oci-worker-platform linux/amd64 --oci-worker-platform linux/arm64/v8 --oci-worker-platform linux/armhf
+  - sudo docker cp buildkit:/usr/bin/buildctl /usr/bin/
+  - export BUILDKIT_HOST=tcp://0.0.0.0:1234
+  
+script:
+  - buildctl build --frontend dockerfile.v0 \
+    --frontend=dockerfile.v0 \
+    --local context=${IMAGE} \
+    --local dockerfile=${IMAGE}
+  - docker images
+
+after_success:
+  - if [ "${TRAVIS_BRANCH}" == "master" ]; then
+      make push ;
+fi
