@@ -25,7 +25,7 @@ script:
     --frontend=dockerfile.v0 \
     --local context=${IMAGE} \
     --local dockerfile=${IMAGE}
-  - docker images
+  - docker image ls
 
 after_success:
   - if [ "${TRAVIS_BRANCH}" == "master" ]; then
