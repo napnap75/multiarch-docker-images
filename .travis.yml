@@ -21,7 +21,7 @@ install:
   - export BUILDKIT_HOST=tcp://0.0.0.0:1234
   
 script:
-  - buildctl build --frontend dockerfile.v0 \
+  - buildctl build \
     --frontend=dockerfile.v0 \
     --local context=${IMAGE} \
     --local dockerfile=${IMAGE}
