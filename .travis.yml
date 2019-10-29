@@ -17,4 +17,9 @@ install:
   - export BUILDKIT_HOST=tcp://0.0.0.0:1234
   
 script:
-  - buildctl build --frontend dockerfile.v0 --local context=${IMAGE} --local dockerfile=${IMAGE} --output type=image,name=docker.io/napnap75/${IMAGE},push=true
+  - if [ "${TRAVIS_BRANCH}" == "master" ]; then
+      docker login -u="${DOCKER_USERNAME}" -p="${DOCKER_PASSWORD}" ;
+      buildctl build --frontend dockerfile.v0 --local context=${IMAGE} --local dockerfile=${IMAGE} --output type=image,name=docker.io/napnap75/${IMAGE},push=true ;
+    elif
+      buildctl build --frontend dockerfile.v0 --local context=${IMAGE} --local dockerfile=${IMAGE} ;
+    fi
