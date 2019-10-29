@@ -30,4 +30,4 @@ script:
 after_success:
   - if [ "${TRAVIS_BRANCH}" == "master" ]; then
       make push ;
-fi
+    fi
