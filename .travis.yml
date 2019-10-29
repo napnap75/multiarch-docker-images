@@ -19,8 +19,7 @@ install:
   - export BUILDKIT_HOST=tcp://0.0.0.0:1234
   
 script:
-  - buildctl build --help
-  - buildctl build --frontend dockerfile.v0 --local context=${IMAGE} --local dockerfile=${IMAGE}
+  - buildctl build --frontend dockerfile.v0 --local context=${IMAGE} --local dockerfile=${IMAGE} --output type=image,name=docker.io/napnap75/${IMAGE}
   - docker image ls
 
 after_success:
