@@ -1,25 +1,26 @@
 language: bash
 services: docker
 sudo: required
-   
+
 notifications:
   email: false
-   
+  slack:
+    rooms:
+      - secure: 3iUauEp7w5F6YDXXuJnKSLR9TZjndwhwWcDa+1KkAp9qv0NBAn1DWntl5iPUGzuZ0KdpQlI3QbvSMn0jYbsXgMDLgZRvCGaQ+TXrJblTPvlZXVxeGM3mCr6yEpt0foe8qqhiWAMer8ioM7QKncBiQfGbB2VctvuH8YqG2JuRSVe/dZxd+Jjn7J8SQyW97GQ0wpsYHQV7V2hg8KOF5/KNNk8Y93RGvnvEVX7XNVI+h+cdsxjBys9qxvC3gRpcngXw/v3mPM2sXN0LHjkobu9P9E7v9RHNwCz3i7FMzmOX82wcoPr06pnvnmecnU6pY3Uwmobed71KnTERSXt0S0Qpjvhod004vFBvzZovHKaucsUOzq0FdN+KaOhOZMr+LfCNty3iWZrEiYiuntFDAmr38xE0q4nb3dmljzEav8nTRO3/9DezWV98CBictzhwxknD/aPpWl7kXEl21K/jnprcJXypqNVscjJ/jylNiwebmFsv7oHlgeyzA9IbG8U7yO8kxCx86214FmPAJBkyAfevrQq9hOcigVwNuV7EoW5zqLTYb1pTyOkHSz/W9dKawjeG4c8ZTBsS1x6c+jQj735/MsQK0WMuaybOeTrVu6akKwXpiyZ4OGO7krHfCByXryZ56BNl7kb1J7aTjaLi0sifdc1X/eI6Y9nsHhc+Zyvv4AA=
+    on_success: change
+    
 env:
-  - IMAGE=test
+  - IMAGE=restic-auto
 
 install:
-  - echo '{"experimental":true}' | sudo tee /etc/docker/daemon.json
-  - sudo systemctl restart docker
-  - sudo docker run --privileged linuxkit/binfmt:v0.6
-  - sudo docker run -d --privileged -p 1234:1234 --name buildkit moby/buildkit:latest --addr tcp://0.0.0.0:1234 --oci-worker-platform linux/amd64 --oci-worker-platform linux/arm/v6 --oci-worker-platform linux/arm/v7 --oci-worker-platform linux/arm64
-  - sudo docker cp buildkit:/usr/bin/buildctl /usr/bin/
-  - export BUILDKIT_HOST=tcp://0.0.0.0:1234
-  
+  - docker run --rm --privileged multiarch/qemu-user-static:register --credential yes
+
 script:
+  - cd ${IMAGE}
+  - make build
+  - docker images
+
+after_success:
   - if [ "${TRAVIS_BRANCH}" == "master" ]; then
-      docker login -u="${DOCKER_USERNAME}" -p="${DOCKER_PASSWORD}" ;
-      buildctl build --frontend dockerfile.v0 --local context=${IMAGE} --local dockerfile=${IMAGE} --frontend-opt platform=linux/amd64,linux/arm/v6,linux/arm/v7,linux/arm64 --output type=image,name=docker.io/napnap75/${IMAGE},push=true ;
-    else
-      buildctl build --frontend dockerfile.v0 --local context=${IMAGE} --local dockerfile=${IMAGE} --frontend-opt platform=linux/amd64,linux/arm/v6,linux/arm/v7,linux/arm64 ;
+      make push ;
     fi
