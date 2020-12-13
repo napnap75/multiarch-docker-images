@@ -37,4 +37,4 @@ jobs:
           platforms: linux/amd64,linux/arm/v6,linux/arm64
           push: true
           tags: |
-            ${{ secrets.DOCKER_HUB_USERNAME }}/${{ matrix.node_version }}:latest
+            ${{ secrets.DOCKER_HUB_USERNAME }}/${{ matrix.repository }}:latest
