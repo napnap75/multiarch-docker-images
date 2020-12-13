@@ -6,7 +6,7 @@ RUN apk add --no-cache curl \
 	&& bunzip2 restic.bz2 \
 	&& chmod +x restic
 
-FROM amd64/alpine:latest
+FROM alpine:latest
 
 COPY --from=builder restic /usr/bin/
 
@@ -15,4 +15,5 @@ RUN apk add --no-cache bash curl jq openssh-client dcron tzdata
 COPY restic-auto docker-entrypoint.sh docker-command.sh /usr/local/bin/
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+
 CMD ["/usr/local/bin/docker-command.sh"]
