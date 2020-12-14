@@ -1,7 +1,10 @@
 FROM alpine:latest AS builder
 
-RUN apk add --no-cache curl \
-	&& while [ "$DOWNLOAD_URL" == "" ] ; do DOWNLOAD_URL=$(curl -s https://api.github.com/repos/restic/restic/releases/latest | grep "browser_download_url" | grep "linux_amd64\." | cut -d\" -f4) ; done \
+ARG TARGETPLATFORM
+
+RUN DOWNLOAD_ARCH=$(echo ${TARGETPLATFORM} | cut -d"/" -f 2) \
+	&& apk add --no-cache curl \
+	&& DOWNLOAD_URL=$(curl -s https://api.github.com/repos/restic/restic/releases/latest | grep "browser_download_url" | grep "linux_"${DOWNLOAD_ARCH}"\." | cut -d\" -f4) \
 	&& curl --retry 3 -L -s -o restic.bz2 ${DOWNLOAD_URL} \
 	&& bunzip2 restic.bz2 \
 	&& chmod +x restic
