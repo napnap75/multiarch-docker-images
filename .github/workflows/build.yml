@@ -1,12 +1,6 @@
 name: CI to Docker Hub
 
-on:
-  push:
-    branches: [ master, github-actions ]
-  pull_request:
-    branches: [ master ]
-
-  workflow_dispatch:
+on: [push, pull_request, workflow_dispatch]
 
 jobs:
   multi:
@@ -15,6 +9,11 @@ jobs:
       matrix:
         repository: [restic-auto]
     steps:
+      - name: Load specific environment
+        uses: falti/dotenv-action@v0.2.5
+        with:
+          path: ${{ matrix.repository }}/.build-env
+        
       - name: Checkout
         uses: actions/checkout@v2
         
