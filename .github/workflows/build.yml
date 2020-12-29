@@ -4,6 +4,8 @@ on: [push, pull_request, workflow_dispatch]
 
 jobs:
   multi:
+    env: |
+      BUILD_PLATFORMS=linux/amd64,linux/arm/v6,linux/arm/v7,linux/arm64
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -28,12 +30,6 @@ jobs:
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
-
-      - name: Test environment
-        run: |
-          env
-          echo $BUILD_PLATFORMS
-          echo ${{ env.BUILD_PLATFORMS }}
           
       - name: Build and push
         uses: docker/build-push-action@v2
