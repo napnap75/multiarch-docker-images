@@ -14,6 +14,7 @@ jobs:
       - name: Load specific environment
         run: |
           if [ -f ${{ matrix.repository }}/.build-env ] ; then cat ${{ matrix.repository }}/.build-env >> $GITHUB_ENV ; fi
+          echo "BUILD_PLATFORMS=linux/arm64" >> $GITHUB_ENV
 
       - name: Checkout
         uses: actions/checkout@v2
