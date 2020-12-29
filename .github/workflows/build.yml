@@ -6,9 +6,9 @@ jobs:
   multi:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         repository: [restic-auto]
-        fail-fast: false
 
     steps:
       - name: Load specific environment
