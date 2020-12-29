@@ -13,6 +13,7 @@ jobs:
     steps:
       - name: Load specific environment
         run: |
+          cat ${{ matrix.repository }}/.build-env
           if [ -f ${{ matrix.repository }}/.build-env ] ; then while IFS= read -r line; do echo $line >> $GITHUB_ENV ; done < ${{ matrix.repository }}/.build-env ; fi
 
       - name: Checkout
