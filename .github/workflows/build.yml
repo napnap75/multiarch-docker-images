@@ -33,6 +33,8 @@ jobs:
       - name: Test environment
         run: |
           env
+          echo $BUILD_PLATFORMS
+          echo ${{ env.BUILD_PLATFORMS }}
           
       - name: Build and push
         uses: docker/build-push-action@v2
