@@ -11,13 +11,11 @@ jobs:
         repository: [restic-auto]
 
     steps:
-      - name: Load specific environment
-        run: |
-          cat ${{ matrix.repository }}/.build-env
-          if [ -f ${{ matrix.repository }}/.build-env ] ; then while IFS= read -r line; do echo $line >> $GITHUB_ENV ; done < ${{ matrix.repository }}/.build-env ; fi
-
       - name: Checkout
         uses: actions/checkout@v2
+
+      - name: Load specific environment
+        run: if [ -f ${{ matrix.repository }}/.build-env ] ; then cat ${{ matrix.repository }}/.build-env >> $GITHUB_ENV ; fi
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
