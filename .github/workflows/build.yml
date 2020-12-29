@@ -15,8 +15,8 @@ jobs:
     steps:
       - name: Load specific environment
         run: 
-          cat $GITHUB_ENV
-          if [ -f ${{ matrix.repository }}/.build-env ] ; then cat ${{ matrix.repository }}/.build-env >> $GITHUB_ENV ; fi
+          cat $GITHUB_ENV ;
+          if [ -f ${{ matrix.repository }}/.build-env ] ; then cat ${{ matrix.repository }}/.build-env >> $GITHUB_ENV ; fi ;
           cat $GITHUB_ENV
 
       - name: Checkout
