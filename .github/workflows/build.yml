@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        repository: [restic-auto, influxdb]
+        repository: [restic-auto, influxdb, telegraf]
 
     steps:
       - name: Checkout
