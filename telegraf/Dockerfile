@@ -5,7 +5,7 @@ ARG TARGETPLATFORM
 RUN apk add --no-cache curl jq \
 	&& VERSION=$(curl -s https://api.github.com/repos/influxdata/telegraf/releases/latest | jq '.name' | sed -E "s/.*([0-9]+\.[0-9]+\.[0-9]+).*/\1/") \
 	&& curl -s -o entrypoint.sh https://raw.githubusercontent.com/influxdata/influxdata-docker/master/telegraf/1.17/alpine/entrypoint.sh \
-	&& DOWNLOAD_ARCH=$(echo ${TARGETPLATFORM} | sed "s#/#_#") \
+	&& DOWNLOAD_ARCH=$(echo ${TARGETPLATFORM} | sed "s#arm/v6#armel#" | sed "s#arm/v7#armhf#" | sed "s#/#_#") \
 	&& curl -s -o telegraf.tgz https://dl.influxdata.com/telegraf/releases/telegraf-${VERSION}_${DOWNLOAD_ARCH}.tar.gz \
 	&& tar -z -x -f telegraf.tgz
 
