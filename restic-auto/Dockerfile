@@ -13,7 +13,7 @@ FROM alpine:latest
 
 COPY --from=builder restic /usr/bin/
 
-RUN apk add --no-cache bash curl jq openssh-client dcron tzdata
+RUN apk add --no-cache bash curl jq openssh-client dcron tzdata docker
 
 COPY restic-auto docker-entrypoint.sh docker-command.sh /usr/local/bin/
 
