@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        repository: [restic-auto, telegraf, piwigo-souvenirs]
+        repository: [restic-auto, telegraf, piwigo-souvenirs, docker2mqtt]
 
     steps:
       - name: Checkout
