@@ -196,7 +196,7 @@ func runLoop(param parameters) error {
 	<-time.After(3 * time.Second)
 	defer wac.Disconnect()
 
-	// Connect to MySQL and execute the query
+	// Connect to MySQL and execute the first query
 	db, err := sql.Open("mysql", param.mysqlURL + "?parseTime=true")
 	if err != nil {
 		return fmt.Errorf("Error connecting to MySQL: %v", err)
@@ -241,6 +241,49 @@ func runLoop(param parameters) error {
 
 			// Send the message
 			sendMessage(wac, param.whatsappGroup, fmt.Sprintf("Il y a %d an(s) : %s", time.Now().Year()-albumDate.Year(), url), albumName, thumbnail)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending message to WhatsApp for album '%s': %v\n", albumName, err)
+				continue
+			}
+		}
+	}
+
+	// Connect to MySQL and execute the second query
+	results, err = db.Query("SELECT piwigo_sharealbum.code, piwigo_categories.name, representatives.path, representatives.representative_ext, piwigo_sharealbum.creation_date AS date_creation FROM piwigo_sharealbum JOIN piwigo_categories ON piwigo_sharealbum.cat = piwigo_categories.id JOIN piwigo_image_category ON piwigo_image_category.category_id = piwigo_categories.id JOIN piwigo_images ON piwigo_image_category.image_id = piwigo_images.id JOIN piwigo_images AS representatives ON piwigo_categories.representative_picture_id = representatives.id WHERE piwigo_sharealbum.creation_date IS NOT NULL GROUP BY piwigo_sharealbum.id;")
+	if err != nil {
+		return fmt.Errorf("Error executing MySQL query: %v", err)
+	}
+	defer results.Close()
+
+	var shareDate time.Time
+	for results.Next() {
+		err = results.Scan(&albumCode, &albumName, &representativePath, &representativeExt, &shareDate)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error retrieving MySQL results for album '%s': %v\n", albumName, err)
+			continue
+		}
+
+		if (shareDate.Month() == time.Now().AddDate(0, 0, -1).Month()) && (shareDate.Day() == time.Now().AddDate(0, 0, -1).Day()) {
+			// Prepare the message
+			url := fmt.Sprintf("%s/?xauth=%s", param.piwigoBaseURL, albumCode)
+			imagePath := representativePath
+			if (strings.HasPrefix(imagePath, "./")) {
+				imagePath = imagePath[2:len(imagePath)]
+			}
+			imageExt := imagePath[strings.LastIndex(imagePath, ".")+1:len(imagePath)]
+			if representativeExt.Valid {
+				imageExt = representativeExt.String
+				imagePath = imagePath[0:strings.LastIndex(imagePath, "/")] + "/pwg_representative" + imagePath[strings.LastIndex(imagePath, "/"):len(imagePath)]
+			}
+			imagePath = imagePath[0:strings.LastIndex(imagePath, ".")] + "-th." + imageExt
+			thumbnail, err := ioutil.ReadFile(fmt.Sprintf("%s/%s", param.piwigoImageFolder, imagePath))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error reading thumbnail for album '%s': %v\n", albumName, err)
+				continue
+			}
+
+			// Send the message
+			sendMessage(wac, param.whatsappGroup, fmt.Sprintf("Nouvel album : %s", url), albumName, thumbnail)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending message to WhatsApp for album '%s': %v\n", albumName, err)
 				continue
