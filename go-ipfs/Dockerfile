@@ -6,7 +6,7 @@ ENV IPFS_VERSION v0.10.0
 RUN set -eux; \
     dpkgArch="$(dpkg --print-architecture)"; \
     case "${dpkgArch##*-}" in \
-        "armhf") dpkgArch="arm" ;;\
+        "armhf" | "armel") dpkgArch="arm" ;;\
     esac; \
   cd /tmp \
   && curl -L -s -o go-ipfs.tgz https://github.com/ipfs/go-ipfs/releases/download/$IPFS_VERSION/go-ipfs_${IPFS_VERSION}_linux-${dpkgArch}.tar.gz \
@@ -18,7 +18,7 @@ ENV TINI_VERSION v0.19.0
 RUN set -eux; \
     dpkgArch="$(dpkg --print-architecture)"; \
     case "${dpkgArch##*-}" in \
-        "amd64" | "armhf" | "arm64") tiniArch="tini-static-$dpkgArch" ;;\
+        "amd64" | "armhf" | "armel" | "arm64") tiniArch="tini-static-$dpkgArch" ;;\
         *) echo >&2 "unsupported architecture: ${dpkgArch}"; exit 1 ;; \
     esac \
   && cd /tmp \

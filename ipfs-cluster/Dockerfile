@@ -7,7 +7,7 @@ ENV IPFS_CLUSTER_VERSION v0.14.1
 RUN set -eux; \
     dpkgArch="$(dpkg --print-architecture)"; \
     case "${dpkgArch##*-}" in \
-        "armhf") dpkgArch="arm";; \
+        "armhf" | "armel") dpkgArch="arm";; \
     esac \
   && cd /tmp \
   && for BINARY in ipfs-cluster-ctl ipfs-cluster-follow ipfs-cluster-service ; do \
@@ -21,7 +21,7 @@ ENV TINI_VERSION v0.19.0
 RUN set -eux; \
     dpkgArch="$(dpkg --print-architecture)"; \
     case "${dpkgArch##*-}" in \
-        "amd64" | "armhf" | "arm64") tiniArch="tini-static-$dpkgArch" ;;\
+        "amd64" | "armhf" | "armel" | "arm64") tiniArch="tini-static-$dpkgArch" ;;\
         *) echo >&2 "unsupported architecture: ${dpkgArch}"; exit 1 ;; \
     esac; \
   cd /tmp \
