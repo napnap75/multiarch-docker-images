@@ -134,7 +134,7 @@ func testConnexions(param parameters) error {
 	if err != nil {
 		return fmt.Errorf("Error creating connection to WhatsApp: %v", err)
 	}
-	wac.SetClientVersion(2, 2142, 12)
+	wac.SetClientVersion(2, 3147, 10)
 	err = login(wac, param.whatsappSessionFile)
 	if err != nil {
 		return fmt.Errorf("Error logging in WhatsApp: %v", err)
@@ -184,7 +184,7 @@ func runLoop(param parameters) error {
 	if err != nil {
 		return fmt.Errorf("Error creating connection to WhatsApp: %v", err)
 	}
-	wac.SetClientVersion(2, 2142, 12)
+	wac.SetClientVersion(2, 3147, 10)
 	err = login(wac, param.whatsappSessionFile)
 	if err != nil {
 		time.Sleep(30 * time.Second)
