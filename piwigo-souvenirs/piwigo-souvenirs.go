@@ -263,7 +263,7 @@ func runLoop(param parameters) error {
 			continue
 		}
 
-		if (shareDate.Month() == time.Now().AddDate(0, 0, -1).Month()) && (shareDate.Day() == time.Now().AddDate(0, 0, -1).Day()) {
+		if (shareDate.Year() == time.Now().AddDate(0, 0, -1).Year()) && (shareDate.Month() == time.Now().AddDate(0, 0, -1).Month()) && (shareDate.Day() == time.Now().AddDate(0, 0, -1).Day()) {
 			// Prepare the message
 			url := fmt.Sprintf("%s/?xauth=%s", param.piwigoBaseURL, albumCode)
 			imagePath := representativePath
