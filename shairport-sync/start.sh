@@ -1,6 +1,6 @@
 #!/bin/sh
-rm -rf /var/run
-mkdir -p /var/run/dbus
+rm -rf /var/run /run/dbus
+mkdir -p /var/run/dbus /run/dbus
 dbus-uuidgen --ensure
 dbus-daemon --system
 avahi-daemon --daemonize --no-chroot
