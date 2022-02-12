@@ -65,7 +65,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "Error while listening for docker events: %v\n", err)
 
 			case msg := <-msgs:
-				mqttClient.Publish(*mqttTopic + "/events", 0, false, fmt.Sprintf("{ \"time\": %d, \"type\": \"%s\", \"name\": \"%s\", \"action\": \"%s\"}", msg.Time, msg.Type, msg.Actor.Attributes["name"], msg.Action))
+				mqttClient.Publish(*mqttTopic + "/events", 0, false, fmt.Sprintf("{ \"time\": %d, \"type\": %q, \"name\": %q, \"action\": %q}", msg.Time, msg.Type, msg.Actor.Attributes["name"], msg.Action))
 		}
 	}
 }
