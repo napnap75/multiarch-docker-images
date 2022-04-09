@@ -8,6 +8,7 @@ RUN apk add --update -t build-deps curl libc-dev gcc libgcc jq \
 	&& go build -o /usr/local/bin/webhook
 
 FROM alpine:3.11
+RUN apk add --no-cache openssl expect
 COPY --from=build /usr/local/bin/webhook /usr/local/bin/webhook
 WORKDIR /etc/webhook
 VOLUME ["/etc/webhook"]
