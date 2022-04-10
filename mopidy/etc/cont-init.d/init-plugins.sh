@@ -1,4 +1,4 @@
-#!/usr/bin/with-contenv sh
+#!/command/with-contenv sh
 
 if [ "$MOPIDY_PLUGINS" != "" ]; then
 	echo "Installing plugins $MOPIDY_PLUGINS"
