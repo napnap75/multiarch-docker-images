@@ -3,7 +3,7 @@ FROM alpine:edge AS builder
 ARG TARGETPLATFORM
 
 RUN apk add --no-cache curl jq \
-	&& DOWNLOAD_ARCH=$(echo ${TARGETPLATFORM} | sed "s#linux/arm/v6#arm#" | sed "s#linux/arm/v7#armhf#" | sed "s#linux/arm64#aarch64#" | sed "s#linux/amd64#amd64#") \
+	&& DOWNLOAD_ARCH=$(echo ${TARGETPLATFORM} | sed "s#linux/arm/v6#arm#" | sed "s#linux/arm/v7#armhf#" | sed "s#linux/arm64#aarch64#" | sed "s#linux/amd64#x86_64#") \
 	&& echo "DOWNLOAD_ARCH=${DOWNLOAD_ARCH}" \
 	&& S6_DOWNLOAD_URL=$(curl -s https://api.github.com/repos/just-containers/s6-overlay/releases/latest | jq -r '.assets | map(select(.name == "s6-overlay-'${DOWNLOAD_ARCH}'.tar.xz"))[0].browser_download_url') \
 	&& curl --retry 3 -L -s -o /tmp/s6-overlay.tar.xz $S6_DOWNLOAD_URL \
