@@ -4,7 +4,7 @@
 function backup_dir {
 	# Check if the dir to backup is mounted as a subdirectory of /root inside this container
 	if [ -d "/root_fs$1" ]; then
-		restic backup /root_fs$1
+		restic backup $RESTIC_BACKUP_FLAGS /root_fs$1
 		return $?
 	else
 		echo "[ERROR] Directory $1 not found. Have you mounted the root fs from your host with the following option : '-v /:/root_fs:ro' ?"
@@ -14,7 +14,7 @@ function backup_dir {
 
 # Backup one file
 function backup_file {
-	cat $1 | restic backup --stdin --stdin-filename $2
+	cat $1 | restic backup $RESTIC_BACKUP_FLAGS --stdin --stdin-filename $2
 	return $?
 }
 
