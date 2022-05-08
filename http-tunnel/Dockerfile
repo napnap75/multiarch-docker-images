@@ -3,8 +3,9 @@ FROM alpine:latest AS builder
 ARG TARGETPLATFORM
 
 RUN DOWNLOAD_ARCH=$(echo ${TARGETPLATFORM} | cut -d"/" -f 2) \
-	&& apk add --no-cache curl \
-	&& DOWNLOAD_URL=$(curl -s https://api.github.com/repos/mmatczuk/go-http-tunnel/releases/latest | grep "browser_download_url" | grep "tunnel_linux_"${DOWNLOAD_ARCH}"\." | cut -d\" -f4) \
+	&& if [[ $DOWNLOAD_ARCH == arm* ]] ; then DOWNLOAD_ARCH=arm ; fi \
+	&& apk add --no-cache curl jq \
+	&& DOWNLOAD_URL=$(curl -s https://api.github.com/repos/mmatczuk/go-http-tunnel/releases/latest | jq -r '.assets | map(select(.name == "tunnel_linux_'${DOWNLOAD_ARCH}'.tar.gz"))[0].browser_download_url') \
 	&& curl --retry 3 -L -s -o tunnel_linux_arm.tar.gz ${DOWNLOAD_URL} \
 	&& tar zxvf tunnel_linux_arm.tar.gz
 
