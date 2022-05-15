@@ -1,21 +1,24 @@
 package main
 
 import (
+	"context"
 	"database/sql"
-	"encoding/gob"
-	"encoding/hex"
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"math/rand"
 	"os"
 	"os/signal"
 	"strings"
 	"time"
 	_ "github.com/go-sql-driver/mysql"
-	qrcodeTerminal "github.com/Baozisoftware/qrcode-terminal-go"
-	"github.com/Rhymen/go-whatsapp"
-	"github.com/Rhymen/go-whatsapp/binary/proto"
+	"github.com/mdp/qrterminal/v3"
+	_ "github.com/mattn/go-sqlite3"
+	"google.golang.org/protobuf/proto"
+	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/store/sqlstore"
+	waProto "go.mau.fi/whatsmeow/binary/proto"
+	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
 type parameters struct {
@@ -37,122 +40,93 @@ func loadParameters() (parameters) {
 	return *param
 }
 
-func login(wac *whatsapp.Conn, sessionFile string) error {
-	// Load saved session
-	session, err := readSession(sessionFile)
-	if err == nil {
-		// Restore session
-		session, err = wac.RestoreWithSession(session)
+func connect(param parameters) (*whatsmeow.Client, error) {
+	dbLog := waLog.Stdout("Database", "ERROR", true)
+	container, err := sqlstore.New("sqlite3", "file:" + param.whatsappSessionFile + "?_foreign_keys=on", dbLog)
+	if err != nil {
+		return nil, err
+	}
+	deviceStore, err := container.GetFirstDevice()
+	if err != nil {
+		return nil, err
+	}
+	clientLog := waLog.Stdout("Client", "ERROR", true)
+	client := whatsmeow.NewClient(deviceStore, clientLog)
+
+	if client.Store.ID == nil {
+		// No ID stored, new login
+		qrChan, _ := client.GetQRChannel(context.Background())
+		err = client.Connect()
 		if err != nil {
-			return fmt.Errorf("restoring failed: %v", err)
+			return nil, err
+		}
+		for evt := range qrChan {
+			if evt.Event == "code" {
+				qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
+				fmt.Println("QR code:", evt.Code)
+			} else {
+				fmt.Println("Login event:", evt.Event)
+			}
 		}
 	} else {
-		// No saved session -> regular login
-		qr := make(chan string)
-		go func() {
-			terminal := qrcodeTerminal.New()
-			terminal.Get(<-qr).Print()
-		}()
-		session, err = wac.Login(qr)
+		// Already logged in, just connect
+		err = client.Connect()
 		if err != nil {
-			return fmt.Errorf("error during login: %v", err)
+			return nil, err
 		}
 	}
 
-	// Save session
-	err = writeSession(session, sessionFile)
-	if err != nil {
-		return fmt.Errorf("error saving session: %v", err)
-	}
-	return nil
+	return client, nil
 }
 
-func readSession(sessionFile string) (whatsapp.Session, error) {
-	session := whatsapp.Session{}
-	file, err := os.Open(sessionFile)
+func sendMessage(client *whatsmeow.Client, group string, message string, title string, thumbnail []byte) error {
+	jid, err := types.ParseJID(group)
 	if err != nil {
-		return session, err
+		return fmt.Errorf("Incorrect group identifier '%s': %v", group, err)
 	}
-	defer file.Close()
-	decoder := gob.NewDecoder(file)
-	err = decoder.Decode(&session)
-	if err != nil {
-		return session, err
-	}
-	return session, nil
-}
 
-func writeSession(session whatsapp.Session, sessionFile string) error {
-	file, err := os.Create(sessionFile)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	encoder := gob.NewEncoder(file)
-	err = encoder.Encode(session)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func sendMessage(wac *whatsapp.Conn, group string, message string, title string, thumbnail []byte) error {
-	ts := uint64(time.Now().Unix())
-	status := proto.WebMessageInfo_PENDING
-	b := make([]byte, 10)
-	rand.Read(b)
-	id := strings.ToUpper(hex.EncodeToString(b))
-	fromMe := true
-	msg := &proto.WebMessageInfo{
-		Key: &proto.MessageKey{
-			FromMe: &fromMe,
-			Id: &id,
-			RemoteJid: &group,
-		},
-		MessageTimestamp: &ts,
-		Message: &proto.Message{
-			ExtendedTextMessage: &proto.ExtendedTextMessage{
-				Title: &title,
-				Text: &message,
-				JpegThumbnail: thumbnail,
-			},
-		},
-		Status: &status,
-	}
-	msgId, err := wac.Send(msg)
+	msg := &waProto.Message{ExtendedTextMessage: &waProto.ExtendedTextMessage{
+		Text:          proto.String(message),
+		Description:   proto.String(title),
+		JpegThumbnail: thumbnail,
+	}}
+	ts, err := client.SendMessage(jid, "", msg)
 	if err != nil {
 		return fmt.Errorf("Error sending message with title '%s': %v", title, err)
 	}
 
-	fmt.Fprintf(os.Stdout, "Message with title '%s' and id '%d' sent\n", title, msgId)
+	fmt.Fprintf(os.Stdout, "Message with title '%s' sent (timestamp: %s)\n", title, ts)
 	return nil
 }
 
 func testConnexions(param parameters) error {
 	// Create new WhatsApp connection and connect
-	wac, err := whatsapp.NewConn(20 * time.Second)
+	client, err := connect(param)
 	if err != nil {
-		return fmt.Errorf("Error creating connection to WhatsApp: %v", err)
-	}
-	wac.SetClientVersion(2, 3147, 10)
-	err = login(wac, param.whatsappSessionFile)
-	if err != nil {
-		return fmt.Errorf("Error logging in WhatsApp: %v", err)
+		return fmt.Errorf("Error connecting to WhatsApp: %v", err)
 	}
 	<-time.After(3 * time.Second)
-	defer wac.Disconnect()
+	defer client.Disconnect()
 
 	// Prints the available groups if none provided
 	if param.whatsappGroup == "" {
 		fmt.Fprintf(os.Stdout, "No WhatsApp group provided, showing all available groups\n")
-		for _, chatNode := range wac.Store.Chats {
-			fmt.Fprintf(os.Stdout, "%s | %s\n", chatNode.Jid, chatNode.Name)
+		groups, err := client.GetJoinedGroups()
+		if err != nil {
+			return fmt.Errorf("Error getting groups list: %v", err)
+		}
+		for _, groupInfo := range groups {
+			fmt.Fprintf(os.Stdout, "%s | %s\n", groupInfo.JID, groupInfo.GroupName)
 		}
 
 		return fmt.Errorf("No WhatsApp group provided")
 	} else {
-		_, exists := wac.Store.Chats[param.whatsappGroup]
-		if (!exists) {
+		jid, err := types.ParseJID(param.whatsappGroup)
+		if err != nil {
+			return fmt.Errorf("Incorrect group identifier '%s': %v", param.whatsappGroup, err)
+		}
+		_, err = client.GetGroupInfo(jid)
+		if err != nil {
 			return fmt.Errorf("Unknown WhatsApp group %s", param.whatsappGroup)
 		}
 	}
@@ -180,21 +154,12 @@ func testConnexions(param parameters) error {
 
 func runLoop(param parameters) error {
 	// Create new WhatsApp connection and connect
-	wac, err := whatsapp.NewConn(20 * time.Second)
+	client, err := connect(param)
 	if err != nil {
 		return fmt.Errorf("Error creating connection to WhatsApp: %v", err)
 	}
-	wac.SetClientVersion(2, 3147, 10)
-	err = login(wac, param.whatsappSessionFile)
-	if err != nil {
-		time.Sleep(30 * time.Second)
-		err = login(wac, param.whatsappSessionFile)
-		if err != nil {
-			return fmt.Errorf("Error logging in WhatsApp: %v", err)
-		}
-	}
 	<-time.After(3 * time.Second)
-	defer wac.Disconnect()
+	defer client.Disconnect()
 
 	// Connect to MySQL and execute the first query
 	db, err := sql.Open("mysql", param.mysqlURL + "?parseTime=true")
@@ -240,7 +205,7 @@ func runLoop(param parameters) error {
 			}
 
 			// Send the message
-			sendMessage(wac, param.whatsappGroup, fmt.Sprintf("Il y a %d an(s) : %s", time.Now().Year()-albumDate.Year(), url), albumName, thumbnail)
+			sendMessage(client, param.whatsappGroup, fmt.Sprintf("Il y a %d an(s) : %s", time.Now().Year()-albumDate.Year(), url), albumName, thumbnail)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending message to WhatsApp for album '%s': %v\n", albumName, err)
 				continue
@@ -283,7 +248,7 @@ func runLoop(param parameters) error {
 			}
 
 			// Send the message
-			sendMessage(wac, param.whatsappGroup, fmt.Sprintf("Nouvel album : %s", url), albumName, thumbnail)
+			sendMessage(client, param.whatsappGroup, fmt.Sprintf("Nouvel album : %s", url), albumName, thumbnail)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending message to WhatsApp for album '%s': %v\n", albumName, err)
 				continue
