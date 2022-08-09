@@ -79,7 +79,7 @@ func connect(param parameters) (*whatsmeow.Client, error) {
 	return client, nil
 }
 
-func sendMessage(client *whatsmeow.Client, group string, message string, title string, thumbnail []byte) error {
+func sendMessage(client *whatsmeow.Client, group string, message string, url string, title string, thumbnail []byte) error {
 	jid, err := types.ParseJID(group)
 	if err != nil {
 		return fmt.Errorf("Incorrect group identifier '%s': %v", group, err)
@@ -87,10 +87,13 @@ func sendMessage(client *whatsmeow.Client, group string, message string, title s
 
 	msg := &waProto.Message{ExtendedTextMessage: &waProto.ExtendedTextMessage{
 		Text:          proto.String(message),
+		Title:         proto.String(title),
 		Description:   proto.String(title),
+		CanonicalUrl:  proto.String(url),
+		MatchedText:   proto.String(url),
 		JpegThumbnail: thumbnail,
 	}}
-	ts, err := client.SendMessage(jid, "", msg)
+	ts, err := client.SendMessage(context.Background(), jid, "", msg)
 	if err != nil {
 		return fmt.Errorf("Error sending message with title '%s': %v", title, err)
 	}
@@ -205,7 +208,7 @@ func runLoop(param parameters) error {
 			}
 
 			// Send the message
-			sendMessage(client, param.whatsappGroup, fmt.Sprintf("Il y a %d an(s) : %s", time.Now().Year()-albumDate.Year(), url), albumName, thumbnail)
+			sendMessage(client, param.whatsappGroup, fmt.Sprintf("Il y a %d an(s) : %s", time.Now().Year()-albumDate.Year(), url), url, albumName, thumbnail)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending message to WhatsApp for album '%s': %v\n", albumName, err)
 				continue
@@ -248,7 +251,7 @@ func runLoop(param parameters) error {
 			}
 
 			// Send the message
-			sendMessage(client, param.whatsappGroup, fmt.Sprintf("Nouvel album : %s", url), albumName, thumbnail)
+			sendMessage(client, param.whatsappGroup, fmt.Sprintf("Nouvel album : %s", url), url, albumName, thumbnail)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending message to WhatsApp for album '%s': %v\n", albumName, err)
 				continue
