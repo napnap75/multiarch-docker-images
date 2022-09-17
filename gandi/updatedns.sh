@@ -22,7 +22,12 @@ while true ; do
       if [[ $? == 0 ]] ; then
         # Send a notification to Slack
         if [[ "$SLACK_URL" != "" ]] ; then
-          curl -o /dev/null -s -X POST -d "payload={\"username\": \"gandi\", \"icon_emoji\": \":dart:\", \"text\": \"New IP $my_ip for host $GANDI_HOST.$GANDI_DOMAIN\"}" $SLACK_URL
+          curl -o /dev/null -s -m 10 --retry 5 -X POST -d "payload={\"username\": \"gandi\", \"icon_emoji\": \":dart:\", \"text\": \"New IP $my_ip for host $GANDI_HOST.$GANDI_DOMAIN\"}" $SLACK_URL
+        fi
+
+        # Send a notification to Gotify
+        if [[ "$GOTIFY_URL" != "" ]] ; then
+          curl -o /dev/null -s -m 10 --retry 5 -X POST -H "accept: application/json" -H "Content-Type: application/json" -d "{\"priority\": 5, \"title\": \"New IP for host $GANDI_HOST.$GANDI_DOMAIN\", \"message\": \"New IP $my_ip for host $GANDI_HOST.$GANDI_DOMAIN, the old IP was $current_ip\"}" $GOTIFY_URL
         fi
 
         # Send a notification to Healthchecks
