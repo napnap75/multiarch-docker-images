@@ -94,7 +94,12 @@ done
 
 # Send a notification to Slack
 if [[ "$SLACK_URL" != "" ]] ; then
-	curl -s -X POST --data-urlencode "payload={\"username\": \"rpi-docker-backup\", \"icon_emoji\": \":dvd:\", \"text\": \"Backup finished on host $HOSTNAME : $count_success succeeded, $count_failure failed\"}" $SLACK_URL
+	curl -o /dev/null -s -m 10 --retry 5 -X POST --data-urlencode "payload={\"username\": \"rpi-docker-backup\", \"icon_emoji\": \":dvd:\", \"text\": \"Backup finished on host $HOSTNAME : $count_success succeeded, $count_failure failed\"}" $SLACK_URL
+fi
+
+# Send a notification to Gotify
+if [[ "$GOTIFY_URL" != "" ]] ; then
+	curl -o /dev/null -s -m 10 --retry 5 -X POST -H "accept: application/json" -H "Content-Type: application/json" -d "{\"priority\": 5, \"title\": \"Backup finished on host $HOSTNAME\", \"message\": \"Backup finished on host $HOSTNAME : $count_success succeeded, $count_failure failed\"}" $GOTIFY_URL
 fi
 
 # Return a non zero exit code if an error happened
