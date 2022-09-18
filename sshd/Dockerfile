@@ -1,4 +1,4 @@
-FROM alpine:edge AS builder
+FROM alpine:latest AS builder
 
 ARG TARGETPLATFORM
 
@@ -12,7 +12,7 @@ RUN apk add --no-cache curl jq \
 	&& curl --retry 3 -L -s -o /tmp/s6-overlay.tar.xz $S6_DOWNLOAD_URL \
 	&& tar -xf /tmp/s6-overlay.tar.xz -C /tmp/s6-overlay
 
-FROM alpine:edge
+FROM alpine:latest
 
 RUN apk add --no-cache bash curl openssh-server rsync rrsync borgbackup
 COPY --from=builder /tmp/s6-overlay /
