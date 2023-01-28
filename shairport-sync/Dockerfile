@@ -1,4 +1,4 @@
-FROM alpine:latest AS builder
+FROM alpine:3.16 AS builder
 
 RUN apk update \
 	&& apk add git build-base autoconf automake libtool alsa-lib-dev libdaemon-dev popt-dev libressl-dev soxr-dev avahi-dev libconfig-dev curl asio-dev flac-dev libvorbis-dev mosquitto-dev \
@@ -14,7 +14,7 @@ RUN apk update \
 RUN cd /root/shairport-sync \
 	&& make install
 
-FROM alpine:latest
+FROM alpine:3.16
 
 RUN apk add --no-cache avahi-libs dbus libdaemon popt libressl soxr avahi libconfig mosquitto-libs su-exec \
 	&& addgroup shairport-sync \
