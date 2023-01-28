@@ -93,7 +93,7 @@ func sendMessage(client *whatsmeow.Client, group string, message string, url str
 		MatchedText:   proto.String(url),
 		JpegThumbnail: thumbnail,
 	}}
-	ts, err := client.SendMessage(context.Background(), jid, "", msg)
+	ts, err := client.SendMessage(context.Background(), jid, msg)
 	if err != nil {
 		return fmt.Errorf("Error sending message with title '%s': %v", title, err)
 	}
