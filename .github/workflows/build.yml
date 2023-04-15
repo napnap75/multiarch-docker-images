@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        repository: [sshd, webhook, docker2mqtt, gandi, http-tunnel, mopidy, piwigo-souvenirs, restic-auto, restic-rest, shairport-sync, slack-eraser, snapserver, telegraf]
+        repository: [rsync-server, sshd, webhook, docker2mqtt, gandi, http-tunnel, mopidy, piwigo-souvenirs, restic-auto, restic-rest, shairport-sync, snapserver, telegraf]
 
     steps:
       - name: Checkout
