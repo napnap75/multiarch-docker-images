@@ -50,6 +50,4 @@ done
 
 chmod 0400 /etc/rsyncd.secrets
 
-cat  /etc/rsyncd.conf
-
-#exec /usr/bin/rsync --no-detach --daemon --config /etc/rsyncd.conf
+exec /usr/bin/rsync --no-detach --daemon --config /etc/rsyncd.conf
