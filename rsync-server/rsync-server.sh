@@ -28,6 +28,8 @@ for i in {0..9} ; do
 		GROUPID=${!testvar:-root}
 		testvar=RSYNC_READONLY_$i
 		READONLY=${!testvar:-false}
+		testvar=RSYNC_USECHROOT_$i
+		USECHROOT=${!testvar:-no}
 
 		echo "$USERNAME:$PASSWORD" >> /etc/rsyncd.secrets
 
@@ -38,6 +40,7 @@ for i in {0..9} ; do
 	hosts deny = *
 	hosts allow = ${ALLOW}
 	read only = ${READONLY}
+	use chroot = ${USECHROOT}
 	path = ${DIRECTORY}
 	comment = ${VOLUME} directory
 	auth users = ${USERNAME}
