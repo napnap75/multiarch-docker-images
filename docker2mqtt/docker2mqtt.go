@@ -8,14 +8,17 @@ import (
 	"os/signal"
 	"time"
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/eclipse/paho.mqtt.golang"
 )
 
 func restartHandler(client mqtt.Client, msg mqtt.Message, dockerClient *client.Client, dockerContext context.Context) {
 	fmt.Printf("Received message: %s from topic: %s\n", msg.Payload(), msg.Topic())
-	var timeout = 30*time.Second
-	err := dockerClient.ContainerRestart(dockerContext, string(msg.Payload()), &timeout)
+	var timeout = int(30*time.Second)
+	var options container.StopOptions
+	options.Timeout = &timeout
+	err := dockerClient.ContainerRestart(dockerContext, string(msg.Payload()), options)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to restart container %s: %v\n", msg.Payload(), err)
 	} else {
