@@ -36,10 +36,18 @@ for container_id in $(docker ps -aq) ; do
 	container_json=$(docker inspect $container_id)
 	# Get the name and namespace (in case of a container run in a swarm stack)
 	container_name=$(echo $container_json | jq -r '.[].Name' | cut -d'/' -f2)
-#	namespace=$(echo $container | jq -r ".Labels | .[\"com.docker.stack.namespace\"]")
+
+	# Ignore containers listed in env variable BACKUP_EXCLUDES
+	if [[ ${BACKUP_EXCLUDES} =~ (^|[[:space:]])${container_name}($|[[:space:]]) ]] ; then
+		continue
+	fi
+
+	# Ignore containers not listed in env variable BACKUP_INCLUDES, if it is set
+	if [[ ! -z ${BACKUP_INCLUDES} && ! ${BACKUP_INCLUDES} =~ (^|[[:space:]])${container_name}($|[[:space:]]) ]] ; then
+		continue
+	fi
 
 	# Backup the dirs labelled with "napnap75.backup.dirs"
-
 	backup_dirs=$(echo $container_json | jq -r '.[].Config.Labels."napnap75.backup.dirs"')
 	if [ "$backup_dirs" != "null" ] ; then
 		for dir_name in $backup_dirs ; do
@@ -57,7 +65,6 @@ for container_id in $(docker ps -aq) ; do
 	backup_volumes=$(echo $container_json | jq -r '.[].Config.Labels."napnap75.backup.volumes"')
 	if [ "$backup_volumes" != "null" ] ; then
 		for volume_name in $backup_volumes ; do
-#			if [ $namespace != "null" ] ; then volume_name="${namespace}_${volume_name}" ; fi
 			volume_mount=$(echo $container_json | jq -r ".[].Mounts[] | select(.Name==\"$volume_name\") | .Source")
 			echo "[INFO] Backing up volume" $volume_name "with mount" $volume_mount "for container" $container_name
 			backup_dir $volume_mount
