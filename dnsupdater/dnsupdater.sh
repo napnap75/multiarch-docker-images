@@ -9,7 +9,8 @@ while true ; do
   if [[ "$GANDI_API_KEY" != "" ]] ; then
     current_ip=$(curl -s -H"X-Api-Key: $GANDI_API_KEY" https://dns.api.gandi.net/api/v5/domains/$DNS_DOMAIN/records | jq -r '.[] | select(.rrset_name == "'$DNS_HOST'") | select(.rrset_type == "A") | .rrset_values[0]')
   elif [[ "$OVH_USERNAME" != "" ]] ; then
-    current_ip=$(dig +short @dns13.ovh.net $DNS_HOST.$DNS_DOMAIN)
+    master_server=$(dig +short -t NS $DNS_DOMAIN | head -n 1)
+    current_ip=$(dig +short @$master_server $DNS_HOST.$DNS_DOMAIN)
   fi
 
   # Check if both IP addresses are correct
@@ -24,7 +25,7 @@ while true ; do
         curl -s -X PUT -H "Content-Type: application/json" -H "X-Api-Key: $GANDI_API_KEY" -d '{"rrset_ttl": '$current_ttl', "rrset_values":["'$my_ip'"]}' https://dns.api.gandi.net/api/v5/domains/$DNS_DOMAIN/records/$DNS_HOST/A
 	result=$?
       elif [[ "$OVH_USERNAME" != "" ]] ; then
-        curl --user "$OVH_USERNAME:$OVH_PASSWORD" "http://www.ovh.com/nic/update?system=dyndns&hostname=$DNS_HOST.$DNS_DOMAIN&myip=$my_ip"
+        curl -s --user "$OVH_USERNAME:$OVH_PASSWORD" "http://www.ovh.com/nic/update?system=dyndns&hostname=$DNS_HOST.$DNS_DOMAIN&myip=$my_ip"
 	result=$?
       fi
 
