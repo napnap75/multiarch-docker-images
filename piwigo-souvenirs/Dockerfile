@@ -1,4 +1,4 @@
-FROM golang:alpine AS builder
+FROM golang:1.21-alpine AS builder
 
 WORKDIR $GOPATH/src/napnap75/piwigo-souvenirs/
 COPY piwigo-souvenirs.go .

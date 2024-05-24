@@ -89,9 +89,9 @@ func sendMessage(client *whatsmeow.Client, group string, message string, url str
 		Text:          proto.String(message),
 		Title:         proto.String(title),
 		Description:   proto.String(title),
-		CanonicalUrl:  proto.String(url),
+		CanonicalURL:  proto.String(url),
 		MatchedText:   proto.String(url),
-		JpegThumbnail: thumbnail,
+		JPEGThumbnail: thumbnail,
 	}}
 	ts, err := client.SendMessage(context.Background(), jid, msg)
 	if err != nil {
