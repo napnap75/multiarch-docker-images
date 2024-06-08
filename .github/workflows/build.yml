@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        repository: [dnsupdater, rsync-server, sshd, webhook, gandi, http-tunnel, piwigo-souvenirs, restic-auto, restic-rest, shairport-sync, telegraf]
+        repository: [immich-souvenirs, dnsupdater, rsync-server, sshd, webhook, gandi, http-tunnel, piwigo-souvenirs, restic-auto, restic-rest, shairport-sync, telegraf]
 
     steps:
       - name: Checkout
