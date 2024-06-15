@@ -11,7 +11,6 @@ import (
 	"os/signal"
 	"net/http"
 	"time"
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/mdp/qrterminal/v3"
 	_ "github.com/mattn/go-sqlite3"
 	"google.golang.org/protobuf/proto"
@@ -27,6 +26,7 @@ type parameters struct {
 	immichKey string
 	whatsappSessionFile string
 	whatsappGroup string
+	runOnce bool
 }
 
 func loadParameters() (parameters) {
@@ -35,6 +35,7 @@ func loadParameters() (parameters) {
 	flag.StringVar(&param.immichKey, "immich-key", "", "The API KEY to use with Immich")
 	flag.StringVar(&param.whatsappSessionFile, "whatsapp-session-file", "", "The file to save the WhatsApp session to")
 	flag.StringVar(&param.whatsappGroup, "whatsapp-group", "", "The ID of the WhatsApp group to send the message to")
+	flag.BoolVar(&param.runOnce, "run-once", false, "Run once and exits (default to false)")
 	flag.Parse()
 	return *param
 }
@@ -137,25 +138,25 @@ func testConnexions(param parameters) error {
 	spaceClient := http.Client{
 		Timeout: time.Second * 10,
 	}
-	req, err := http.NewRequest(http.MethodGet, param.immichURL + "/api/album", nil)
+	req, err := http.NewRequest(http.MethodGet, param.immichURL + "/api/albums", nil)
 	if err != nil {
 		return fmt.Errorf("Error connecting to Immich with URL '%s': %v", param.immichURL, err)
 	}
 	req.Header.Set("x-api-key", param.immichKey)
 	req.Header.Set("Accept", "application/json")
 
-	res, getErr := spaceClient.Do(req)
-	if getErr != nil {
+	res, err := spaceClient.Do(req)
+	if err != nil {
 		return fmt.Errorf("Error connecting to Immich with URL '%s': %v", param.immichURL, err)
 	}
 	if res.Body != nil {
 		defer res.Body.Close()
 	}
 	if res.StatusCode != 200 {
-		return fmt.Errorf("Error connecting to Immich with URL '%s': Status code %n", param.immichURL, res.StatusCode)
+		return fmt.Errorf("Error connecting to Immich with URL '%s': Status code %d", param.immichURL, res.StatusCode)
 	}
-	body, readErr := ioutil.ReadAll(res.Body)
-	if readErr != nil {
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
 		return fmt.Errorf("Error connecting to Immich with URL '%s': %v", param.immichURL, err)
 	}
 	var albums []map[string]interface{}
@@ -175,24 +176,24 @@ func getSharingKey(album map[string]interface{}, param parameters) (string, erro
 	albumName := album["albumName"].(string)
 	if (album["hasSharedLink"].(bool)) {
 		// Retrieve the existing key
-		req, err := http.NewRequest(http.MethodGet, param.immichURL + "/api/shared-link", nil)
+		req, err := http.NewRequest(http.MethodGet, param.immichURL + "/api/shared-links", nil)
 		if err != nil {
 			return "", fmt.Errorf("Error retrieving sharing key for album '%s': %v", albumName, err)
 		}
 		req.Header.Set("x-api-key", param.immichKey)
 		req.Header.Set("Accept", "application/json")
-		res, getErr := spaceClient.Do(req)
-		if getErr != nil {
+		res, err := spaceClient.Do(req)
+		if err != nil {
 			return "", fmt.Errorf("Error retrieving sharing key for album '%s': %v", albumName, err)
 		}
 		if res.Body != nil {
 			defer res.Body.Close()
 		}
 		if res.StatusCode != 200 {
-			return "", fmt.Errorf("Error retrieving sharing key for album '%s': Status code %n", albumName, res.StatusCode)
+			return "", fmt.Errorf("Error retrieving sharing key for album '%s': Status code %d", albumName, res.StatusCode)
 		}
-		body, readErr := ioutil.ReadAll(res.Body)
-		if readErr != nil {
+		body, err := ioutil.ReadAll(res.Body)
+		if err != nil {
 			return "", fmt.Errorf("Error retrieving sharing key for album '%s': %v", albumName, err)
 		}
 		var keys []map[string]interface{}
@@ -217,25 +218,25 @@ func getSharingKey(album map[string]interface{}, param parameters) (string, erro
 			"showMetadata": true,
 			"type": "ALBUM"
 		}`)
-		req, err := http.NewRequest(http.MethodPost, param.immichURL + "/api/shared-link", bytes.NewBuffer(jsonData))
+		req, err := http.NewRequest(http.MethodPost, param.immichURL + "/api/shared-links", bytes.NewBuffer(jsonData))
 		if err != nil {
 			return "", fmt.Errorf("Error creating missing key for album '%s': %v", albumName, err)
 		}
 		req.Header.Set("x-api-key", param.immichKey)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/octet-stream")
-		res, getErr := spaceClient.Do(req)
-		if getErr != nil {
+		res, err := spaceClient.Do(req)
+		if err != nil {
 			return "", fmt.Errorf("Error creating missing key for album '%s': %v", albumName, err)
 		}
 		if res.Body != nil {
 			defer res.Body.Close()
 		}
 		if res.StatusCode != 201 {
-			return "", fmt.Errorf("Error creating missing key for album '%s': Status code %n", albumName, res.StatusCode)
+			return "", fmt.Errorf("Error creating missing key for album '%s': Status code %d", albumName, res.StatusCode)
 		}
-		body, readErr := ioutil.ReadAll(res.Body)
-		if readErr != nil {
+		body, err := ioutil.ReadAll(res.Body)
+		if err != nil {
 			return "", fmt.Errorf("Error creating missing key for album '%s': %v", albumName, err)
 		}
 		var key map[string]interface{}
@@ -253,24 +254,24 @@ func getThumbnail(album map[string]interface{}, param parameters) ([]byte, error
 	}
 	albumName := album["albumName"].(string)
 
-	req, err := http.NewRequest(http.MethodGet, param.immichURL + "/api/asset/thumbnail/" + album["albumThumbnailAssetId"].(string), nil)
+	req, err := http.NewRequest(http.MethodGet, param.immichURL + "/api/assets/" + album["albumThumbnailAssetId"].(string) + "/thumbnail?size=preview", nil)
 	if err != nil {
 		return nil, fmt.Errorf("Error retrieving thumbnail for album '%s': %v", albumName, err)
 	}
 	req.Header.Set("x-api-key", param.immichKey)
 	req.Header.Set("Accept", "application/octet-stream")
-	res, getErr := spaceClient.Do(req)
-	if getErr != nil {
+	res, err := spaceClient.Do(req)
+	if err != nil {
 		return nil, fmt.Errorf("Error retrieving thumbnail for album '%s': %v", albumName, err)
 	}
 	if res.Body != nil {
 		defer res.Body.Close()
 	}
 	if res.StatusCode != 200 {
-		return nil, fmt.Errorf("Error retrieving thumbnail for album '%s': Status code %n", albumName, res.StatusCode)
+		return nil, fmt.Errorf("Error retrieving thumbnail for album '%s': Status code %d", albumName, res.StatusCode)
 	}
-	thumbnail, readErr := ioutil.ReadAll(res.Body)
-	if readErr != nil {
+	thumbnail, err := ioutil.ReadAll(res.Body)
+	if err != nil {
 		return nil, fmt.Errorf("Error retrieving thumbnail for album '%s': %v", albumName, err)
 	}
 
@@ -291,25 +292,25 @@ func runLoop(param parameters) error {
 	spaceClient := http.Client{
 		Timeout: time.Second * 10,
 	}
-	req, err := http.NewRequest(http.MethodGet, param.immichURL + "/api/album", nil)
+	req, err := http.NewRequest(http.MethodGet, param.immichURL + "/api/albums", nil)
 	if err != nil {
 		return fmt.Errorf("Error connecting to Immich with URL '%s': %v", param.immichURL, err)
 	}
 	req.Header.Set("x-api-key", param.immichKey)
 	req.Header.Set("Accept", "application/json")
 
-	res, getErr := spaceClient.Do(req)
-	if getErr != nil {
+	res, err := spaceClient.Do(req)
+	if err != nil {
 		return fmt.Errorf("Error connecting to Immich with URL '%s': %v", param.immichURL, err)
 	}
 	if res.Body != nil {
 		defer res.Body.Close()
 	}
 	if res.StatusCode != 200 {
-		return fmt.Errorf("Error connecting to Immich with URL '%s': Status code %n", param.immichURL, res.StatusCode)
+		return fmt.Errorf("Error connecting to Immich with URL '%s': Status code %d", param.immichURL, res.StatusCode)
 	}
-	body, readErr := ioutil.ReadAll(res.Body)
-	if readErr != nil {
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
 		return fmt.Errorf("Error connecting to Immich with URL '%s': %v", param.immichURL, err)
 	}
 	var albums []map[string]interface{}
@@ -334,19 +335,19 @@ func runLoop(param parameters) error {
 		if isShared && (albumDate.Month() == time.Now().Month()) && (albumDate.Day() == time.Now().Day()) {
 			// Retrieve the sharing key
 			sharingKey, err := getSharingKey(album, param)
-			if readErr != nil {
+			if err != nil {
 				return fmt.Errorf("Error retrieving the sharing key for album '%s': %v", albumName, err)
 			}
 
 			// Retrieve the thumbnail
 			thumbnail, err := getThumbnail(album, param)
-			if readErr != nil {
+			if err != nil {
 				return fmt.Errorf("Error retrieving thumbnail for album '%s': %v", albumName, err)
 			}
-		
+
 			// Send the message
 			link := param.immichURL + "/share/" + sharingKey
-			sendMessage(client, param.whatsappGroup, fmt.Sprintf("Il y a %d an(s) : %s", time.Now().Year()-albumDate.Year(), link), link, albumName, thumbnail)
+			err = sendMessage(client, param.whatsappGroup, fmt.Sprintf("Il y a %d an(s) : %s", time.Now().Year()-albumDate.Year(), link), link, albumName, thumbnail)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending message to WhatsApp for album '%s': %v\n", albumName, err)
 				continue
@@ -357,19 +358,19 @@ func runLoop(param parameters) error {
 		if isShared && (createDate.Year() == time.Now().AddDate(0, 0, -1).Year()) && (createDate.Month() == time.Now().AddDate(0, 0, -1).Month()) && (createDate.Day() == time.Now().AddDate(0, 0, -1).Day()) {
 			// Retrieve the sharing key
 			sharingKey, err := getSharingKey(album, param)
-			if readErr != nil {
+			if err != nil {
 				return fmt.Errorf("Error retrieving the sharing key for album '%s': %v", albumName, err)
 			}
 
 			// Retrieve the thumbnail
 			thumbnail, err := getThumbnail(album, param)
-			if readErr != nil {
+			if err != nil {
 				return fmt.Errorf("Error retrieving thumbnail for album '%s': %v", albumName, err)
 			}
-		
+
 			// Send the message
 			link := param.immichURL + "/share/" + sharingKey
-			sendMessage(client, param.whatsappGroup, fmt.Sprintf("Nouvel album : %s", link), link, albumName, thumbnail)
+			err = sendMessage(client, param.whatsappGroup, fmt.Sprintf("Nouvel album : %s", link), link, albumName, thumbnail)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending message to WhatsApp for album '%s': %v\n", albumName, err)
 				continue
@@ -395,30 +396,36 @@ func main() {
 
 	// Load the parameters
 	param := loadParameters()
-
-	// Test the connexion on startup
-	err := testConnexions(param)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to connect: %v\n", err)
-		return
-	}
-
-	// Run the loop everyday at 7
-	for {
-		t := time.Now()
-		n := time.Date(t.Year(), t.Month(), t.Day(), 7, 0, 0, 0, t.Location())
-		d := n.Sub(t)
-		if d < 0 {
-			n = n.Add(24 * time.Hour)
-			d = n.Sub(t)
-		}
-		fmt.Fprintf(os.Stderr, "Sleeping for: %s\n", d)
-		time.Sleep(d)
-
+	if param.runOnce {
 		err := runLoop(param)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			continue
+		}
+	} else {
+		// Test the connexion on startup
+		err := testConnexions(param)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Unable to connect: %v\n", err)
+			return
+		}
+
+		// Run the loop everyday at 7
+		for {
+			t := time.Now()
+			n := time.Date(t.Year(), t.Month(), t.Day(), 7, 0, 0, 0, t.Location())
+			d := n.Sub(t)
+			if d < 0 {
+				n = n.Add(24 * time.Hour)
+				d = n.Sub(t)
+			}
+			fmt.Fprintf(os.Stderr, "Sleeping for: %s\n", d)
+			time.Sleep(d)
+
+			err := runLoop(param)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				continue
+			}
 		}
 	}
 }
