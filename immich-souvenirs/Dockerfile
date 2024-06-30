@@ -8,6 +8,7 @@ RUN apk add --no-cache git gcc musl-dev \
 	&& go build -ldflags="-w -s" -o /go/bin/immich-souvenirs
 
 FROM alpine:latest
+RUN apk add --no-cache tzdata
 COPY --from=builder /go/bin/immich-souvenirs /usr/bin/
 VOLUME /tmp/messages
 ENTRYPOINT ["/usr/bin/immich-souvenirs"]
