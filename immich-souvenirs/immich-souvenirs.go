@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math"
+	"net/http"
 	"os"
 	"os/signal"
-	"net/http"
+	"strconv"
+	"strings"
 	"time"
 	"github.com/mdp/qrterminal/v3"
 	_ "github.com/mattn/go-sqlite3"
@@ -25,6 +28,7 @@ type Parameters struct {
 	ImmichKey		string
 	WhatsappSessionFile	string
 	WhatsappGroup		string
+	TimeToRun		string
 	RunOnce			bool
 	HealthchecksURL		string
 }
@@ -372,6 +376,27 @@ func runLoop(param Parameters) error {
 	return nil
 }
 
+func parseTime(timeStr string) (int, int, error) {
+	// Split the string into hours and minutes
+	parts := strings.Split(timeStr, ":")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid format: %s", timeStr)
+	}
+
+	// Convert the parts to integers
+	hours, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("error converting hours: %v", err)
+	}
+
+	minutes, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("error converting minutes: %v", err)
+	}
+
+	return hours, minutes, nil
+}
+
 func main() {
 	// Handle interrupts to clean properly
 	c := make(chan os.Signal)
@@ -390,6 +415,7 @@ func main() {
 	param.ImmichKey = os.Getenv("IMMICH-KEY")
 	param.WhatsappSessionFile = os.Getenv("WHATSAPP-SESSION-FILE")
 	param.WhatsappGroup = os.Getenv("WHATSAPP-GROUP")
+	param.TimeToRun = os.Getenv("TIME-TO-RUN")
 	param.HealthchecksURL = os.Getenv("HEALTHCHECKS-URL")
 	_, param.RunOnce = os.LookupEnv("RUN-ONCE")
 
@@ -406,10 +432,17 @@ func main() {
 			return
 		}
 
-		// Run the loop everyday at 7
+		// Run the loop everyday
 		for {
+			// First, wait for the appropriate time
+			hours, minutes, err := parseTime(param.TimeToRun)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Unable to read the time provided: %v\n", err)
+				return
+			}
+
 			t := time.Now()
-			n := time.Date(t.Year(), t.Month(), t.Day(), 7, 0, 0, 0, t.Location())
+			n := time.Date(t.Year(), t.Month(), t.Day(), hours, minutes, 0, 0, t.Location())
 			d := n.Sub(t)
 			if d < 0 {
 				n = n.Add(24 * time.Hour)
@@ -418,7 +451,19 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Sleeping for: %s\n", d)
 			time.Sleep(d)
 
-			err := runLoop(*param)
+			// Then try to run it 3 times in case of error
+			for i := 0; i < 3; i++ {
+				err = runLoop(*param)
+				if err == nil {
+					continue
+				}
+				// Print the error and attempt number
+				fmt.Fprintf(os.Stderr, "Attempt %d failed: %v\n", i+1, err)
+				// Wait before the next attempt
+				time.Sleep(time.Duration(math.Pow(2, float64(i))) * 30 * time.Second)
+			}
+
+			// Manage the error
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				continue

@@ -9,6 +9,7 @@ RUN apk add --no-cache git gcc musl-dev \
 
 FROM alpine:latest
 RUN apk add --no-cache tzdata
+ENV TIME-TO-RUN="7:00"
 COPY --from=builder /go/bin/immich-souvenirs /usr/bin/
 VOLUME /tmp/messages
 ENTRYPOINT ["/usr/bin/immich-souvenirs"]
