@@ -455,8 +455,9 @@ func main() {
 			for i := 0; i < 3; i++ {
 				err = runLoop(*param)
 				if err == nil {
-					continue
+					break
 				}
+
 				// Print the error and attempt number
 				fmt.Fprintf(os.Stderr, "Attempt %d failed: %v\n", i+1, err)
 				// Wait before the next attempt
