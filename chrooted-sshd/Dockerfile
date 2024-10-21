@@ -6,4 +6,4 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
-CMD ["/usr/sbin/sshd", "-D", "-E", "/var/log/sshd.log"]
+CMD ["/usr/sbin/sshd", "-D", "-e"]
