@@ -94,14 +94,23 @@ func sendMessage(client *whatsmeow.Client, group string, message string, url str
 		return fmt.Errorf("Incorrect group identifier '%s': %v", group, err)
 	}
 
-	msg := &waProto.Message{ExtendedTextMessage: &waProto.ExtendedTextMessage{
-		Text:          proto.String(message),
-		Title:         proto.String(title),
-		Description:   proto.String(title),
-		CanonicalUrl:  proto.String(url),
-		MatchedText:   proto.String(url),
-		JPEGThumbnail: thumbnail,
-	}}
+//	msg := &waProto.Message{ExtendedTextMessage: &waProto.ExtendedTextMessage{
+//		Text:          proto.String(message),
+//		Title:         proto.String(title),
+//		Description:   proto.String(title),
+//		CanonicalUrl:  proto.String(url),
+//		MatchedText:   proto.String(url),
+//		JPEGThumbnail: thumbnail,
+//	}}
+	msg := &waProto.Message{
+		ExtendedTextMessage: &waProto.ExtendedTextMessage{
+			Text: proto.String(fmt.Sprintf("%s\n%s\n%s", title, message, url)),
+			Title: proto.String(title),
+			Description: proto.String(message),
+			PreviewType: proto.Uint32(0), // 0 pour un lien standard
+			JpegThumbnail: thumbnail,
+		},
+	}
 	ts, err := client.SendMessage(context.Background(), jid, msg)
 	if err != nil {
 		return fmt.Errorf("Error sending message with title '%s': %v", title, err)
