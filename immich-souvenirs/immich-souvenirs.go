@@ -51,11 +51,11 @@ type Key struct {
 
 func connect(param Parameters) (*whatsmeow.Client, error) {
 	dbLog := waLog.Stdout("Database", "ERROR", true)
-	container, err := sqlstore.New("sqlite3", "file:" + param.WhatsappSessionFile + "?_foreign_keys=on", dbLog)
+	container, err := sqlstore.New(context.Background(), "sqlite3", "file:" + param.WhatsappSessionFile + "?_foreign_keys=on", dbLog)
 	if err != nil {
 		return nil, err
 	}
-	deviceStore, err := container.GetFirstDevice()
+	deviceStore, err := container.GetFirstDevice(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func sendMessage(client *whatsmeow.Client, group string, message string, url str
 		Text:          proto.String(message),
 		Title:         proto.String(title),
 		Description:   proto.String(title),
-		CanonicalURL:  proto.String(url),
+		CanonicalUrl:  proto.String(url),
 		MatchedText:   proto.String(url),
 		JPEGThumbnail: thumbnail,
 	}}
