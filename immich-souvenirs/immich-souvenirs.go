@@ -107,8 +107,8 @@ func sendMessage(client *whatsmeow.Client, group string, message string, url str
 			Text: proto.String(fmt.Sprintf("%s\n%s\n%s", title, message, url)),
 			Title: proto.String(title),
 			Description: proto.String(message),
-			PreviewType: proto.Uint32(0), // 0 pour un lien standard
-			JpegThumbnail: thumbnail,
+//			PreviewType: proto.Uint32(0), // 0 pour un lien standard
+			JPEGThumbnail: thumbnail,
 		},
 	}
 	ts, err := client.SendMessage(context.Background(), jid, msg)
