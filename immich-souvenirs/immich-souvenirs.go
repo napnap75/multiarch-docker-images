@@ -29,13 +29,14 @@ type Parameters struct {
 	WhatsappSessionFile	string
 	WhatsappGroup		string
 	TimeToRun		string
-	RunOnce			bool
+	DevelopmentMode		string
 	HealthchecksURL		string
 }
 
 type Album struct {
 	ID			string		`json:"id"`
 	Name			string		`json:"albumName"`
+	Description		string		`json:"description"`
 	Shared			bool		`json:"shared"`
 	HasSharedLink		bool		`json:"hasSharedLink"`
 	StartDate		time.Time	`json:"startDate"`
@@ -88,26 +89,18 @@ func connect(param Parameters) (*whatsmeow.Client, error) {
 	return client, nil
 }
 
-func sendMessage(client *whatsmeow.Client, group string, message string, url string, title string, thumbnail []byte) error {
+func sendMessage(client *whatsmeow.Client, group string, title string, description string, message string, url string, thumbnail []byte) error {
 	jid, err := types.ParseJID(group)
 	if err != nil {
 		return fmt.Errorf("Incorrect group identifier '%s': %v", group, err)
 	}
 
-//	msg := &waProto.Message{ExtendedTextMessage: &waProto.ExtendedTextMessage{
-//		Text:          proto.String(message),
-//		Title:         proto.String(title),
-//		Description:   proto.String(title),
-//		CanonicalUrl:  proto.String(url),
-//		MatchedText:   proto.String(url),
-//		JPEGThumbnail: thumbnail,
-//	}}
 	msg := &waProto.Message{
 		ExtendedTextMessage: &waProto.ExtendedTextMessage{
-			Text: proto.String(fmt.Sprintf("%s\n%s\n%s", title, message, url)),
 			Title: proto.String(title),
-			Description: proto.String(message),
-//			PreviewType: proto.Uint32(0), // 0 pour un lien standard
+			Description: proto.String(description),
+			Text: proto.String(message),
+			MatchedText: proto.String(url),
 			JPEGThumbnail: thumbnail,
 		},
 	}
@@ -218,7 +211,7 @@ func getSharingKey(album Album, param Parameters) (string, error) {
 			return "", fmt.Errorf("Error retrieving sharing key for album '%s': %v", album.Name, err)
 		}
 		for _, key := range keys {
-			if (album.ID == key.Album.ID) {
+			if (key.Album != nil && album.ID == key.Album.ID) {
 				return key.Key, nil
 			}
 		}
@@ -292,6 +285,29 @@ func getThumbnail(album Album, param Parameters) ([]byte, error) {
 	return thumbnail, nil
 }
 
+func eventHandler(evt interface{}) {
+		fmt.Println("Received a message!", evt)
+}
+
+func listen(param Parameters) error {
+	// Create new WhatsApp connection and connect
+	client, err := connect(param)
+	if err != nil {
+		return fmt.Errorf("Error creating connection to WhatsApp: %v", err)
+	}
+	<-time.After(3 * time.Second)
+	defer client.Disconnect()
+
+	client.AddEventHandler(eventHandler)
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	<-c
+
+	return nil
+}
+
+
 func runLoop(param Parameters) error {
 	// Create new WhatsApp connection and connect
 	client, err := connect(param)
@@ -334,51 +350,56 @@ func runLoop(param Parameters) error {
 	}
 
 	for _, album := range albums {
-		// Get albums from x years ago
-		if album.Shared && (album.StartDate.Month() == time.Now().Month()) && (album.StartDate.Day() == time.Now().Day()) {
-			// Retrieve the sharing key
-			sharingKey, err := getSharingKey(album, param)
-			if err != nil {
-				return fmt.Errorf("Error retrieving the sharing key for album '%s': %v", album.Name, err)
+		if album.Shared {
+			// Get albums from x years ago
+			if param.DevelopmentMode == "run-last" || (album.StartDate.Month() == time.Now().Month()) && (album.StartDate.Day() == time.Now().Day()) {
+				// Retrieve the sharing key
+				sharingKey, err := getSharingKey(album, param)
+				if err != nil {
+					return fmt.Errorf("Error retrieving the sharing key for album '%s': %v", album.Name, err)
+				}
+
+				// Retrieve the thumbnail
+				thumbnail, err := getThumbnail(album, param)
+				if err != nil {
+					return fmt.Errorf("Error retrieving thumbnail for album '%s': %v", album.Name, err)
+				}
+
+				// Send the message
+				link := param.ImmichURL + "/share/" + sharingKey
+				err = sendMessage(client, param.WhatsappGroup, album.Name, album.Description, fmt.Sprintf("Il y a %d an(s) : %s", time.Now().Year()-album.StartDate.Year(), link), link, thumbnail)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error sending message to WhatsApp for album '%s': %v\n", album.Name, err)
+					continue
+				}
 			}
 
-			// Retrieve the thumbnail
-			thumbnail, err := getThumbnail(album, param)
-			if err != nil {
-				return fmt.Errorf("Error retrieving thumbnail for album '%s': %v", album.Name, err)
+			if param.DevelopmentMode == "run-last" {
+				return nil
 			}
 
-			// Send the message
-			link := param.ImmichURL + "/share/" + sharingKey
-			err = sendMessage(client, param.WhatsappGroup, fmt.Sprintf("Il y a %d an(s) : %s", time.Now().Year()-album.StartDate.Year(), link), link, album.Name, thumbnail)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error sending message to WhatsApp for album '%s': %v\n", album.Name, err)
-				continue
-			}
-		}
+			// Get albums created yesterday
+			if album.CreatedAt.Year() == time.Now().AddDate(0, 0, -1).Year() && (album.CreatedAt.Month() == time.Now().AddDate(0, 0, -1).Month()) && (album.CreatedAt.Day() == time.Now().AddDate(0, 0, -1).Day()) {
+				// Retrieve the sharing key
+				sharingKey, err := getSharingKey(album, param)
+				if err != nil {
+					return fmt.Errorf("Error retrieving the sharing key for album '%s': %v", album.Name, err)
+				}
 
-		// Get albums created yesterday
-		if album.Shared && (album.CreatedAt.Year() == time.Now().AddDate(0, 0, -1).Year()) && (album.CreatedAt.Month() == time.Now().AddDate(0, 0, -1).Month()) && (album.CreatedAt.Day() == time.Now().AddDate(0, 0, -1).Day()) {
-			// Retrieve the sharing key
-			sharingKey, err := getSharingKey(album, param)
-			if err != nil {
-				return fmt.Errorf("Error retrieving the sharing key for album '%s': %v", album.Name, err)
-			}
+				// Retrieve the thumbnail
+				thumbnail, err := getThumbnail(album, param)
+				if err != nil {
+					return fmt.Errorf("Error retrieving thumbnail for album '%s': %v", album.Name, err)
+				}
 
-			// Retrieve the thumbnail
-			thumbnail, err := getThumbnail(album, param)
-			if err != nil {
-				return fmt.Errorf("Error retrieving thumbnail for album '%s': %v", album.Name, err)
+				// Send the message
+				link := param.ImmichURL + "/share/" + sharingKey
+				err = sendMessage(client, param.WhatsappGroup, album.Name, album.Description, fmt.Sprintf("Nouvel album : %s", link), link, thumbnail)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error sending message to WhatsApp for album '%s': %v\n", album.Name, err)
+					continue
+				}
 			}
-
-			// Send the message
-			link := param.ImmichURL + "/share/" + sharingKey
-			err = sendMessage(client, param.WhatsappGroup, fmt.Sprintf("Nouvel album : %s", link), link, album.Name, thumbnail)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error sending message to WhatsApp for album '%s': %v\n", album.Name, err)
-				continue
-			}
-
 		}
 	}
 
@@ -426,10 +447,15 @@ func main() {
 	param.WhatsappGroup = os.Getenv("WHATSAPP-GROUP")
 	param.TimeToRun = os.Getenv("TIME-TO-RUN")
 	param.HealthchecksURL = os.Getenv("HEALTHCHECKS-URL")
-	_, param.RunOnce = os.LookupEnv("RUN-ONCE")
+	param.DevelopmentMode = os.Getenv("DEVELOPMENT-MODE")
 
-	if param.RunOnce {
+	if param.DevelopmentMode == "run-once" || param.DevelopmentMode == "run-last" {
 		err := runLoop(*param)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
+	} else if param.DevelopmentMode == "listen" {
+		err := listen(*param)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		}
