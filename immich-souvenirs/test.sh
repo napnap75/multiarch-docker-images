@@ -7,4 +7,4 @@ echo "go mod tidy"
 echo "env CGO_ENABLED=1 env DEVELOPMENT-MODE=run-once go run immich-souvenirs.go"
 echo "-----------------------------------------------------------------------"
 
-docker run -it -v $(pwd)/immich-souvenirs.go:/app/immich-souvenirs.go -w /app -v immich-souvenirs_config:/config --env-file test.env --rm golang:1.23-alpine /bin/sh
+docker run -it -v $(pwd)/immich-souvenirs.go:/app/immich-souvenirs.go -v $(pwd)/internals:/app/internals -w /app -v immich-souvenirs_config:/config --env-file test.env --rm golang:1.23-alpine /bin/sh
