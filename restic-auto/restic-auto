@@ -3,7 +3,10 @@
 # Backup one directory
 function backup_dir {
 	# Check if the dir to backup is mounted as a subdirectory of /root inside this container
-	if [ -d "/root_fs$1" ]; then
+	if [ "$1" = "" ]; then
+		echo "[ERROR] Cannot backup the root directory. Have you correctly configured the volumes to backup for this container ?"
+		return -1
+	elif [ -d "/root_fs$1" ]; then
 		restic backup $RESTIC_BACKUP_FLAGS /root_fs$1
 		return $?
 	else
