@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        repository: [chrooted-sshd, immich-souvenirs, dnsupdater, webhook, restic-auto, shairport-sync]
+        repository: [immich-souvenirs, dnsupdater, webhook, restic-auto, shairport-sync]
 
     steps:
       - name: Checkout
