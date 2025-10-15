@@ -1,0 +1,46 @@
+{
+    "log-fetcher":{
+        "type": "loki",
+        "config": {
+            "url": "http://fileserver.home:3100"
+        }
+    },
+    "alert-manager":{
+        "type": "gotify",
+        "config": {
+            "url": "https://paris.nappez.com/gotify/message",
+            "token-from-env": "{GOTIFY_TOKEN}"
+        }
+    },
+    "check-interval": 60,
+    "log-alerts": [
+        {
+            "name": "SSH outside connection",
+            "filters": {
+                "labels": {
+                    "container": "openssh-server"
+                },
+                "text": "Accepted",
+                "match": "Accepted (?P<method>\\w+) for (?P<username>\\w+) from (?P<ip>[^\\s]+)"
+            },
+            "alert": {
+                "title": "Outside SSH login",
+                "message": "New SSH login for {username} on {instance} from ip {ip} (method: {method})"
+            }
+        },
+        {
+            "name": "SSH local connection",
+            "filters": {
+                "labels": {
+                    "filename": "/var/log/host/auth.log"
+                },
+                "text": "Accepted",
+                "match": "Accepted (?P<method>\\w+) for (?P<username>\\w+) from (?P<ip>[^\\s]+)"
+            },
+            "alert": {
+                "title": "Local SSH login",
+                "message": "New SSH login for {username} on {instance} from ip {ip} (method: {method})"
+            }
+        }
+    ]
+}
