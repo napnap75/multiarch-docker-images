@@ -1,4 +1,4 @@
-FROM golang:alpine3.11 AS build
+FROM golang:1-alpine AS build
 WORKDIR /go/src/github.com/adnanh/webhook
 RUN apk add --update -t build-deps curl libc-dev gcc libgcc jq \
 	&& DOWNLOAD_URL=$(curl -s https://api.github.com/repos/adnanh/webhook/releases/latest | jq -r '.tarball_url') \
@@ -7,7 +7,7 @@ RUN apk add --update -t build-deps curl libc-dev gcc libgcc jq \
 	&& go get -d \
 	&& go build -o /usr/local/bin/webhook
 
-FROM alpine:3.11
+FROM alpine:latest
 RUN apk add --no-cache openssl expect
 COPY --from=build /usr/local/bin/webhook /usr/local/bin/webhook
 WORKDIR /etc/webhook

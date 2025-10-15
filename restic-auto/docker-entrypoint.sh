@@ -37,7 +37,10 @@ else
 	else
 		echo -n "0 4 * * *" >> /tmp/crontab
 	fi
-		echo -n " restic-auto >> /var/log/cron.log" >> /tmp/crontab
+	if [[ "$HC_PING_KEY" ]] ; then
+		echo -n " runitor -slug ${HOSTNAME}-restic-backup --" >> /tmp/crontab
+	fi
+	echo -n " restic-auto >> /var/log/cron.log" >> /tmp/crontab
 	if [[ "$POST_BACKUP_COMMAND" ]] ; then
 		echo -n " && $POST_BACKUP_COMMAND" >> /tmp/crontab
 	fi
@@ -47,7 +50,14 @@ else
 	else
 		echo -n "0 1 * * 0" >> /tmp/crontab
 	fi
-	echo -n " restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --keep-yearly 2 --prune >> /var/log/cron.log && restic check >> /var/log/cron.log" >> /tmp/crontab
+	if [[ "$HC_PING_KEY" ]] ; then
+		echo -n " runitor -slug ${HOSTNAME}-restic-forget --" >> /tmp/crontab
+	fi
+	echo -n " restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --keep-yearly 2 --prune >> /var/log/cron.log &&" >> /tmp/crontab
+	if [[ "$HC_PING_KEY" ]] ; then
+		echo -n " runitor -slug ${HOSTNAME}-restic-check --" >> /tmp/crontab
+	fi
+	echo -n " restic check >> /var/log/cron.log" >> /tmp/crontab
 	if [[ "$POST_MAINTENANCE_COMMAND" ]] ; then
 		echo -n " && $POST_MAINTENANCE_COMMAND" >> /tmp/crontab
 	fi
