@@ -1,0 +1,115 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Log Alert configuration schema",
+  "type": "object",
+  "required": ["log-fetchers", "alert-managers", "log-alerts"],
+  "properties": {
+    "log-fetchers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "type", "config"],
+        "properties": {
+          "name": { "type": "string" },
+          "type": { "type": "string", "enum": ["loki"] },
+          "config": {
+            "type": "object",
+            "properties": {
+              "url": { "type": "string", "format": "uri" }
+            },
+            "required": ["url"],
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "alert-managers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "type", "config"],
+        "properties": {
+          "name": { "type": "string" },
+          "type": { "type": "string", "enum": ["gotify"] },
+          "config": {
+            "type": "object",
+            "properties": {
+              "url": { "type": "string", "format": "uri" },
+              "token": { "type": "string" },
+              "token-from-env": { "type": "string" }
+            },
+            "required": ["url"],
+            "anyOf": [
+              { "required": ["token"] },
+              { "required": ["token-from-env"] }
+            ],
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "log-alerts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "log-fetcher", "filters", "alert-manager"],
+        "properties": {
+          "name": { "type": "string" },
+          "check-interval": { "type": "number", "minimum": 0 },
+          "log-fetcher": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string" },
+              "filters": {
+                "type": "object",
+                "properties": {
+                  "labels": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" }
+                  },
+                  "text": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "filters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["type", "config"],
+              "properties": {
+                "type": { "type": "string", "enum": ["regexp"] },
+                "config": {
+                  "type": "object",
+                  "required": ["match"],
+                  "properties": {
+                    "match": { "type": "string" }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "alert-manager": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string" },
+              "title": { "type": "string" },
+              "message": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
