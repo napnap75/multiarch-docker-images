@@ -101,7 +101,7 @@ class GotifyAlertManager(AlertManager):
 
     def __init__(self, config: Dict[str, Any]):
         self.url = config["url"]
-        self.token = config.get("token") or config.get("token-from-env")
+        self.token = config.get("token")
 
     def send_alert(self, title: str, message: str) -> None:
         """Send an alert to Gotify."""
@@ -175,12 +175,11 @@ class LogAlertApp:
         try:
             with open(config_path, 'r') as config_file:
                 # read JSON first
-                config_raw = json.load(config_file)
-                # Update config to load env variable where required
-                config = self._update_config_from_env(config_raw)
+                config = json.load(config_file)
                 # Perform schema validation if jsonschema is available
                 self._validate_config_with_schema(config)
-                return config
+                # Update config to load env variable where required
+                return self._update_config_from_env(config)
         except FileNotFoundError:
             print(f"Error: Configuration file '{config_path}' not found.")
             sys.exit(1)
