@@ -364,9 +364,11 @@ func main() {
 // Fonction pour tester la connexion à WhatsApp et Immich
 func testConnections(wac *WhatsAppClient, immichClient *ImmichClient, param *Parameters) error {
 	fmt.Println("Testing connections...")
-	// Test WhatsApp
-	if err := wac.Client.Connect(); err != nil {
-		return fmt.Errorf("whatsApp connection failed: %v", err)
+	// Connecter WhatsApp si nécessaire
+	if !wac.Client.IsConnected() {
+		if err := wac.Client.Connect(); err != nil {
+			return err
+		}
 	}
 	defer wac.Client.Disconnect()
 	fmt.Println("WhatsApp connected.")
