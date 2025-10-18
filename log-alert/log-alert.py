@@ -103,6 +103,31 @@ class RegexpFilter(Filter):
         logger.debug(f"Regex did not match for pattern '{self.match}' in log: {log.get('log')}")
         return None
 
+# Geolocation Filter
+class GeolocationFilter(Filter):
+    """Concrete implementation for Geolocation filter."""
+
+    def __init__(self, config: Dict[str, Any]):
+        self.source_field = config["source-field"]
+
+    def filter(self, log: Dict[str, Any]) -> Dict[str, Any]:
+        ip_address = log.get("labels", {}).get(self.source_field)
+        if not ip_address:
+            logger.warning("No IP address found in log labels for geolocation")
+        else:
+            try:
+                response = requests.get(f"http://ip-api.com/json/{ip_address}").json()
+                if response["status"] == "success":
+                    logger.debug(f"Found info {response} for IP {ip_address}")
+                    del response["status"]
+                    del response["query"]
+                    log.setdefault("labels", {}).update(response)
+                else:
+                    logger.warning("No info found for IP {ip_address}")
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error fetching geolocation for IP {ip_address}: {e}")
+        return log
+
 # Gotify Alert Manager
 class GotifyAlertManager(AlertManager):
     """Concrete implementation for Gotify alert manager."""
@@ -129,7 +154,6 @@ class AlertRule:
     """Represents an alert rule with filters and alert template."""
 
     def __init__(self, log_fetchers: LogFetcher, alert_managers: AlertManager, config: Dict[str, Any]):
-        self.name = config["name"]
         self.log_fetcher = log_fetchers[config["log-fetcher"]["name"]]
         self.fetcher_filters = config["log-fetcher"].get("filters", {})
         self.check_interval = config.get("check-interval", 60)
@@ -137,6 +161,8 @@ class AlertRule:
         for filter in config.get("filters", []):
             if filter["type"] == "regexp":
                 self.filters.append(RegexpFilter(filter["config"]))
+            elif filter["type"] == "geolocation":
+                self.filters.append(GeolocationFilter(filter["config"]))
             else:
                 raise ValueError(f"Unsupported filter type: {filter['type']}")
         self.alert_manager = alert_managers[config["alert-manager"]["name"]]
@@ -146,7 +172,6 @@ class AlertRule:
         self.next_run = time.time()
 
     def run(self) -> None:
-        logger.debug(f"Processing rule: {self.name}")
         logs = self.log_fetcher.fetch_logs(self.fetcher_filters, self.last_run, self.next_run)
         for log_entry in logs:
             logger.debug(f"Checking log: {log_entry['log']}")
@@ -170,12 +195,14 @@ class LogAlertApp:
         self.config = self._load_config(config_path)
         logger.debug(f"Configuration loaded: {self.config}")
         self.log_fetchers = {}
-        for fetcher in self.config["log-fetchers"]:
-            self.log_fetchers[fetcher["name"]] = self._init_log_fetcher(fetcher)
+        for key, fetcher in self.config["log-fetchers"].items():
+            self.log_fetchers[key] = self._init_log_fetcher(fetcher)
         self.alert_managers = {}
-        for manager in self.config["alert-managers"]:
-            self.alert_managers[manager["name"]] = self._init_alert_manager(manager)
-        self.alert_rules = [AlertRule(self.log_fetchers, self.alert_managers, rule) for rule in self.config["log-alerts"]]
+        for key, manager in self.config["alert-managers"].items():
+            self.alert_managers[key] = self._init_alert_manager(manager)
+        self.alert_rules = {}
+        for key, rule in self.config["alerting-rules"].items():
+            self.alert_rules[key] = AlertRule(self.log_fetchers, self.alert_managers, rule)
 
     def _load_config(self, config_path: str) -> Dict[str, Any]:
         """Load the configuration from a JSON file and validate it with JSON Schema."""
@@ -243,8 +270,9 @@ class LogAlertApp:
     def run(self) -> None:
         """Fetch logs, check for matches, and send alerts."""
         while True:
-            for rule in self.alert_rules:
+            for name, rule in self.alert_rules.items():
                 if time.time() >= rule.next_run:
+                    logger.debug(f"Processing rule: {name}")
                     rule.run()
             time.sleep(5)
 

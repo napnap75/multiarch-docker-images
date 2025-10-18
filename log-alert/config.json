@@ -1,27 +1,24 @@
 {
-    "log-fetchers": [
-        {
-            "name": "loki-fileserver",
+    "log-fetchers": {
+        "loki-fileserver": {
             "type": "loki",
             "config": {
-                "url": "http://fileserver.home:3100"
+                "url-from-env": "{LOKI_URL}"
             }
         }
-    ],
-    "alert-managers":[
-        {
-            "name": "gotify-paris",
+    },
+    "alert-managers": {
+        "gotify-paris": {
             "type": "gotify",
             "config": {
-                "url": "https://paris.nappez.com/gotify/message",
+                "url-from-env": "{GOTIFY_URL}",
                 "token-from-env": "{GOTIFY_TOKEN}"
             }
         }
-    ],
-    "log-alerts": [
-        {
-            "name": "SSH outside connection",
-            "check-interval": 60,
+    },
+    "alerting-rules": {
+        "ssh-outside": {
+            "check-interval": 30,
             "log-fetcher": {
                 "name": "loki-fileserver",
                 "filters": {
@@ -37,16 +34,21 @@
                     "config": {
                         "match": "Accepted (?P<method>\\w+) for (?P<username>\\w+) from (?P<ip>[^\\s]+)"
                     }
+                },
+                {
+                    "type": "geolocation",
+                    "config": {
+                        "source-field": "ip"
+                    }
                 }
             ],
             "alert-manager": {
                 "name": "gotify-paris",
                 "title": "Outside SSH login",
-                "message": "New SSH login for {username} on {instance} from ip {ip} (method: {method})"
+                "message": "New SSH login for {username} on {instance} from ip {ip} (country: {country}, provider: {isp}, method: {method})"
             }
         },
-        {
-            "name": "SSH local connection",
+        "ssh-local": {
             "check-interval": 30,
             "log-fetcher": {
                 "name": "loki-fileserver",
@@ -71,5 +73,5 @@
                 "message": "New SSH login for {username} on {instance} from ip {ip} (method: {method})"
             }
         }
-    ]
+    }
 }

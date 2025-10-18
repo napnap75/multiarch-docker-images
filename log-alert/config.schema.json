@@ -2,80 +2,43 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Log Alert configuration schema",
   "type": "object",
-  "required": ["log-fetchers", "alert-managers", "log-alerts"],
+  "required": ["log-fetchers", "alert-managers", "alerting-rules"],
   "properties": {
     "log-fetchers": {
-      "type": "array",
-      "items": {
+      "type": "object",
+      "additionalProperties": {
         "type": "object",
-        "required": ["name", "type", "config"],
+        "required": ["type", "config"],
         "properties": {
-          "name": { "type": "string" },
           "type": { "type": "string", "enum": ["loki"] },
-          "config": {
-            "type": "object",
-            "properties": {
-              "url": { "type": "string", "format": "uri" }
-            },
-            "required": ["url"],
-            "additionalProperties": true
-          }
-        },
-        "additionalProperties": false
+          "config": { "type": "object" }
+        }
       }
     },
     "alert-managers": {
-      "type": "array",
-      "items": {
+      "type": "object",
+      "additionalProperties": {
         "type": "object",
-        "required": ["name", "type", "config"],
+        "required": ["type", "config"],
         "properties": {
-          "name": { "type": "string" },
           "type": { "type": "string", "enum": ["gotify"] },
-          "config": {
-            "type": "object",
-            "properties": {
-              "url": { "type": "string", "format": "uri" },
-              "token": { "type": "string" },
-              "token-from-env": { "type": "string" }
-            },
-            "required": ["url"],
-            "anyOf": [
-              { "required": ["token"] },
-              { "required": ["token-from-env"] }
-            ],
-            "additionalProperties": true
-          }
-        },
-        "additionalProperties": false
+          "config": { "type": "object" }
+        }
       }
     },
-    "log-alerts": {
-      "type": "array",
-      "items": {
+    "alerting-rules": {
+      "type": "object",
+      "additionalProperties": {
         "type": "object",
-        "required": ["name", "log-fetcher", "filters", "alert-manager"],
+        "required": ["check-interval", "log-fetcher", "filters", "alert-manager"],
         "properties": {
-          "name": { "type": "string" },
           "check-interval": { "type": "number", "minimum": 0 },
           "log-fetcher": {
             "type": "object",
             "required": ["name"],
             "properties": {
-              "name": { "type": "string" },
-              "filters": {
-                "type": "object",
-                "properties": {
-                  "labels": {
-                    "type": "object",
-                    "additionalProperties": { "type": "string" }
-                  },
-                  "text": { "type": "string" }
-                },
-                "additionalProperties": false
-              }
-            },
-            "additionalProperties": false
+              "name": { "type": "string" }
+            }
           },
           "filters": {
             "type": "array",
@@ -83,33 +46,22 @@
               "type": "object",
               "required": ["type", "config"],
               "properties": {
-                "type": { "type": "string", "enum": ["regexp"] },
+                "type": { "type": "string", "enum": ["regexp", "geolocation"] },
                 "config": {
-                  "type": "object",
-                  "required": ["match"],
-                  "properties": {
-                    "match": { "type": "string" }
-                  },
-                  "additionalProperties": false
+                  "type": "object"
                 }
-              },
-              "additionalProperties": false
+              }
             }
           },
           "alert-manager": {
             "type": "object",
             "required": ["name"],
             "properties": {
-              "name": { "type": "string" },
-              "title": { "type": "string" },
-              "message": { "type": "string" }
-            },
-            "additionalProperties": false
+              "name": { "type": "string" }
+            }
           }
-        },
-        "additionalProperties": false
+        }
       }
     }
-  },
-  "additionalProperties": false
+  }
 }
