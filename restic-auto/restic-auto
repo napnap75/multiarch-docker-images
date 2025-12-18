@@ -15,6 +15,19 @@ function backup_dir {
 	fi
 }
 
+function backup_local_dir {
+	if [ "$1" = "" ]; then
+		echo "[ERROR] Cannot backup the root directory. Have you correctly configured the volumes to backup for this container ?"
+		return -1
+	elif [ -d "$1" ]; then
+		restic backup $RESTIC_BACKUP_FLAGS $1
+		return $?
+	else
+		echo "[ERROR] Directory $1 not found."
+		return -1
+	fi
+}
+
 # Backup one file
 function backup_file {
 	cat $1 | restic backup $RESTIC_BACKUP_FLAGS --stdin --stdin-filename $2
@@ -64,6 +77,24 @@ for container_id in $(docker ps -aq) ; do
 		done
 	fi
 
+	# Backup the dirs (inside container) labelled with "napnap75.backup.local-dirs"
+	backup_dirs=$(echo $container_json | jq -r '.[].Config.Labels."napnap75.backup.local-dirs"')
+	if [ "$backup_dirs" != "null" ] ; then
+		if [[ "$(echo $container_json | jq -r '.[].Config.Image')" == "napnap75/restic-auto"* ]] ; then
+			for dir_name in $backup_dirs ; do
+				echo "[INFO] Backing up local dir" $dir_name "for container" $container_name
+				backup_local_dir $dir_name
+				if [ $? -ne 0 ]; then
+					((++count_failure))
+				else
+					((++count_success))
+				fi
+			done
+		else
+			echo "[ERROR] Could not use \"napnap75.backup.local-dirs\" on another container that the one running restic"
+		fi
+	fi
+
 	# Backup the volumes labelled with "napnap75.backup.volumes"
 	backup_volumes=$(echo $container_json | jq -r '.[].Config.Labels."napnap75.backup.volumes"')
 	if [ "$backup_volumes" != "null" ] ; then
@@ -84,7 +115,7 @@ for container_id in $(docker ps -aq) ; do
 	if [ "$backup_databases" != "null" ] ; then
 		for database_name in $backup_databases ; do
 			echo "[INFO] Backing up database" $database_name "for container" $container_name
-			docker exec $container_id bash -c "mysqldump --databases $database_name | gzip -c > /tmp/database_backup.sql.gz"
+			docker exec $container_id bash -c "/usr/bin/mariadb-dump --databases $database_name | gzip -c > /tmp/database_backup.sql.gz"
 			if [ $? -ne 0 ]; then
 				echo "[ERROR] Unable to backup database $database_name from container $container_name"
 				((++count_failure))
