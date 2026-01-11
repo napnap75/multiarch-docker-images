@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"io"
 	"net/http"
 	"os"
@@ -16,6 +18,8 @@ import (
 	"github.com/gomarkdown/markdown"
 	"github.com/gomarkdown/markdown/html"
 	"github.com/gomarkdown/markdown/parser"
+	"github.com/google/uuid"
+	"github.com/nfnt/resize"
 )
 
 type Parameters struct {
@@ -51,6 +55,7 @@ type Recipe struct {
 	Items       []Item `json:"items"`
 }
 
+// Converts a string to a slug suitable for referencing
 func Slugify(s string) string {
 	// Convert to lowercase
 	result := strings.ToLower(s)
@@ -62,6 +67,7 @@ func Slugify(s string) string {
 	return result
 }
 
+// Converts Markdown text to HTML
 func MarkdownToHTML(md string) string {
 	// Create markdown parser with extensions
 	extensions := parser.CommonExtensions | parser.AutoHeadingIDs | parser.NoEmptyLineBeforeBlock
@@ -76,6 +82,7 @@ func MarkdownToHTML(md string) string {
 	return string(markdown.Render(doc, renderer))
 }
 
+// Retrieves the household information from the KitchenOwl server
 func FetchHousehold(param Parameters) (*Household, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest(http.MethodGet, param.KitchenOwlURL+"/api/household/"+param.KitchenOwlHousehold, nil)
@@ -108,9 +115,10 @@ func FetchHousehold(param Parameters) (*Household, error) {
 	return &household, nil
 }
 
-func FetchImage(param Parameters, image string) (*string, error) {
+// Retrieves an image from the KitchenOwl server, resize it and saves it to a temporary file
+func FetchImage(param Parameters, imageName string) (*string, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, param.KitchenOwlURL+"/api/upload/"+image, nil)
+	req, err := http.NewRequest(http.MethodGet, param.KitchenOwlURL+"/api/upload/"+imageName, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -128,15 +136,21 @@ func FetchImage(param Parameters, image string) (*string, error) {
 	}
 
 	// Open a file for writing
-	filename := "/tmp/" + image
+	filename := "/tmp/" + imageName
 	file, err := os.Create(filename)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 
-	// Dump the response body to the file
-	_, err = io.Copy(file, res.Body)
+	// Decode the image
+	img, _, err := image.Decode(res.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	// Resize the image, encode it to JPEG and write to file
+	err = jpeg.Encode(file, resize.Resize(1000, 0, img, resize.Lanczos3), &jpeg.Options{Quality: 80})
 	if err != nil {
 		return nil, err
 	}
@@ -144,6 +158,7 @@ func FetchImage(param Parameters, image string) (*string, error) {
 	return &filename, nil
 }
 
+// Retrieves the recipes from the KitchenOwl server
 func FetchRecipes(param Parameters) ([]Recipe, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest(http.MethodGet, param.KitchenOwlURL+"/api/household/"+param.KitchenOwlHousehold+"/recipe", nil)
@@ -196,6 +211,9 @@ func CreateEbook(param Parameters, household Household, recipes []Recipe) (*epub
 
 	// Set description
 	book.SetDescription("Recipes from KitchenOwl server " + param.KitchenOwlURL)
+
+	book.SetLang("fr")
+	book.SetIdentifier("urn:uuid:" + uuid.NewMD5(uuid.NameSpaceDNS, []byte(param.KitchenOwlURL+"/api/household/"+param.KitchenOwlHousehold)).String())
 
 	// Add cover image
 	filename, err := FetchImage(param, household.Photo)
@@ -273,10 +291,6 @@ func CreateEbook(param Parameters, household Household, recipes []Recipe) (*epub
 					})
 				}
 				content += MarkdownToHTML(description)
-
-				if strings.HasPrefix(recipe.Name, "Kimchi") {
-					fmt.Println(content)
-				}
 
 				_, err := book.AddSubSection(section, content, recipe.Name, "", "")
 				if err != nil {
