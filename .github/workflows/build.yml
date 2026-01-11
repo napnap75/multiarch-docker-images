@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        repository: [log-alert, immich-souvenirs, dnsupdater, webhook, restic-auto, shairport-sync]
+        repository: [recipe4reader, log-alert, immich-souvenirs, dnsupdater, webhook, restic-auto, shairport-sync]
 
     steps:
       - name: Checkout
