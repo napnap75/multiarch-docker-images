@@ -201,7 +201,7 @@ func FetchRecipes(param Parameters) ([]Recipe, error) {
 func CreateEbook(param Parameters, household Household, recipes []Recipe) (*epub.Epub, error) {
 	book, err := epub.NewEpub("KitchenOwl Recipes")
 	if err != nil {
-		fmt.Printf("Error creating epub: %v\n", err)
+		fmt.Println("Error creating epub: ", err)
 	}
 
 	// Set author
@@ -218,15 +218,15 @@ func CreateEbook(param Parameters, household Household, recipes []Recipe) (*epub
 	// Add cover image
 	filename, err := FetchImage(param, household.Photo)
 	if err != nil {
-		fmt.Printf("Error fetching cover image: %v\n", err)
+		fmt.Println("Error fetching cover image: ", err)
 	} else {
 		coverImagePath, err := book.AddImage(*filename, "cover.png")
 		if err != nil {
-			fmt.Printf("Error setting cover: %v\n", err)
+			fmt.Println("Error setting cover: ", err)
 		} else {
 			err = book.SetCover(coverImagePath, "")
 			if err != nil {
-				fmt.Printf("Error setting cover: %v\n", err)
+				fmt.Println("Error setting cover: ", err)
 			}
 		}
 	}
@@ -241,7 +241,7 @@ func CreateEbook(param Parameters, household Household, recipes []Recipe) (*epub
 	content += "</ul>"
 	_, err = book.AddSection(content, "Info", "", "")
 	if err != nil {
-		fmt.Printf("Error creating section: %v\n", err)
+		fmt.Println("Error creating section: ", err)
 	}
 
 	// Process each chapter
@@ -249,7 +249,7 @@ func CreateEbook(param Parameters, household Household, recipes []Recipe) (*epub
 		// Add a section for each specified chapter
 		section, err := book.AddSection("<h1>"+chapter+"</h1>", chapter, "", "")
 		if err != nil {
-			fmt.Printf("Error creating section: %v\n", err)
+			fmt.Println("Error creating section: ", err)
 		}
 
 		// Add recipes that belong to the current chapter
@@ -294,7 +294,7 @@ func CreateEbook(param Parameters, household Household, recipes []Recipe) (*epub
 
 				_, err := book.AddSubSection(section, content, recipe.Name, "", "")
 				if err != nil {
-					fmt.Printf("Error adding recipe section: %v\n", err)
+					fmt.Println("Error adding recipe section: ", err)
 				}
 			}
 		}
@@ -312,7 +312,6 @@ func main() {
 		fmt.Println("Got interrupt signal. Exiting...")
 		os.Exit(0)
 	}()
-
 	// Load parameters from the environment variables
 	param := &Parameters{
 		KitchenOwlURL:       os.Getenv("KITCHENOWL-URL"),
@@ -327,12 +326,12 @@ func main() {
 	fmt.Printf("Fetching recipes...")
 	household, err := FetchHousehold(*param)
 	if err != nil {
-		fmt.Printf("Error fetching household: %v\n", err)
+		fmt.Println("Error fetching household: ", err)
 		return
 	}
 	recipes, err := FetchRecipes(*param)
 	if err != nil {
-		fmt.Printf("Error fetching recipes: %v\n", err)
+		fmt.Println("Error fetching recipes: ", err)
 		return
 	}
 	fmt.Printf(" %d recipes fetched\n", len(recipes))
@@ -351,10 +350,10 @@ func main() {
 	fmt.Printf("Creating ebook...")
 	book, err := CreateEbook(*param, *household, recipes)
 	if err != nil {
-		fmt.Printf("Error creating ebook: %v\n", err)
+		fmt.Println("Error creating ebook: ", err)
 		return
 	}
-	fmt.Println(" done")
+	fmt.Printf(" done\n")
 
 	// Write the EBook to file if specified
 	if strings.HasPrefix(param.RecipeOutput, "file:") {
@@ -362,7 +361,7 @@ func main() {
 
 		err := book.Write(filename)
 		if err != nil {
-			fmt.Printf("Error writing epub to file: %v\n", err)
+			fmt.Println("Error writing epub to file: ", err)
 		} else {
 			fmt.Printf("Ebook written to %s\n", filename)
 		}
