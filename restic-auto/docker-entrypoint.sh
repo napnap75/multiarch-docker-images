@@ -53,11 +53,11 @@ else
 	if [[ "$HC_PING_KEY" ]] ; then
 		echo -n " runitor -slug ${HOSTNAME}-restic-forget --" >> /tmp/crontab
 	fi
-	echo -n " restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --keep-yearly 2 --prune >> /var/log/cron.log &&" >> /tmp/crontab
+	echo -n " restic forget -q --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --keep-yearly 2 --prune >> /var/log/cron.log &&" >> /tmp/crontab
 	if [[ "$HC_PING_KEY" ]] ; then
 		echo -n " runitor -slug ${HOSTNAME}-restic-check --" >> /tmp/crontab
 	fi
-	echo -n " restic check >> /var/log/cron.log" >> /tmp/crontab
+	echo -n " restic check -q >> /var/log/cron.log" >> /tmp/crontab
 	if [[ "$POST_MAINTENANCE_COMMAND" ]] ; then
 		echo -n " && $POST_MAINTENANCE_COMMAND" >> /tmp/crontab
 	fi

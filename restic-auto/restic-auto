@@ -7,7 +7,7 @@ function backup_dir {
 		echo "[ERROR] Cannot backup the root directory. Have you correctly configured the volumes to backup for this container ?"
 		return -1
 	elif [ -d "/root_fs$1" ]; then
-		restic backup $RESTIC_BACKUP_FLAGS /root_fs$1
+		restic backup -q $RESTIC_BACKUP_FLAGS /root_fs$1
 		return $?
 	else
 		echo "[ERROR] Directory $1 not found. Have you mounted the root fs from your host with the following option : '-v /:/root_fs:ro' ?"
@@ -20,7 +20,7 @@ function backup_local_dir {
 		echo "[ERROR] Cannot backup the root directory. Have you correctly configured the volumes to backup for this container ?"
 		return -1
 	elif [ -d "$1" ]; then
-		restic backup $RESTIC_BACKUP_FLAGS $1
+		restic backup -q $RESTIC_BACKUP_FLAGS $1
 		return $?
 	else
 		echo "[ERROR] Directory $1 not found."
@@ -30,17 +30,19 @@ function backup_local_dir {
 
 # Backup one file
 function backup_file {
-	cat $1 | restic backup $RESTIC_BACKUP_FLAGS --stdin --stdin-filename $2
+	cat $1 | restic backup -q $RESTIC_BACKUP_FLAGS --stdin --stdin-filename $2
 	return $?
 }
 
 # Firt, check the repository is unlocked and try to unlock it
 if [ "$(restic --no-lock list locks -q)" != "" ]; then
-	echo "[INFO] Repository locked, trying to unlock"
+	echo -n "[INFO] Repository locked, trying to unlock ... "
 	restic unlock
 	if [ $? -ne 0 ]; then
 		echo "[ERROR] Could not unlock repository"
 		return -1
+	else
+		echo "done."
 	fi
 fi
 
@@ -67,11 +69,12 @@ for container_id in $(docker ps -aq) ; do
 	backup_dirs=$(echo $container_json | jq -r '.[].Config.Labels."napnap75.backup.dirs"')
 	if [ "$backup_dirs" != "null" ] ; then
 		for dir_name in $backup_dirs ; do
-			echo "[INFO] Backing up dir" $dir_name "for container" $container_name
+			echo -n "[INFO] Backing up dir" $dir_name "for container" $container_name " ... "
 			backup_dir $dir_name
 			if [ $? -ne 0 ]; then
 				((++count_failure))
 			else
+				echo "done."
 				((++count_success))
 			fi
 		done
@@ -82,11 +85,12 @@ for container_id in $(docker ps -aq) ; do
 	if [ "$backup_dirs" != "null" ] ; then
 		if [[ "$(echo $container_json | jq -r '.[].Config.Image')" == "napnap75/restic-auto"* ]] ; then
 			for dir_name in $backup_dirs ; do
-				echo "[INFO] Backing up local dir" $dir_name "for container" $container_name
+				echo -n "[INFO] Backing up local dir" $dir_name "for container" $container_name " ... "
 				backup_local_dir $dir_name
 				if [ $? -ne 0 ]; then
 					((++count_failure))
 				else
+					echo "done."
 					((++count_success))
 				fi
 			done
@@ -100,11 +104,12 @@ for container_id in $(docker ps -aq) ; do
 	if [ "$backup_volumes" != "null" ] ; then
 		for volume_name in $backup_volumes ; do
 			volume_mount=$(echo $container_json | jq -r ".[].Mounts[] | select(.Name==\"$volume_name\") | .Source")
-			echo "[INFO] Backing up volume" $volume_name "with mount" $volume_mount "for container" $container_name
+			echo -n "[INFO] Backing up volume" $volume_name "with mount" $volume_mount "for container" $container_name " ... "
 			backup_dir $volume_mount
 			if [ $? -ne 0 ]; then
 				((++count_failure))
 			else
+				echo "done."
 				((++count_success))
 			fi
 		done
@@ -114,7 +119,7 @@ for container_id in $(docker ps -aq) ; do
 	backup_databases=$(echo $container_json | jq -r '.[].Config.Labels."napnap75.backup.databases"')
 	if [ "$backup_databases" != "null" ] ; then
 		for database_name in $backup_databases ; do
-			echo "[INFO] Backing up database" $database_name "for container" $container_name
+			echo -n "[INFO] Backing up database" $database_name "for container" $container_name " ... "
 			docker exec $container_id bash -c "/usr/bin/mariadb-dump --databases $database_name | gzip -c > /tmp/database_backup.sql.gz"
 			if [ $? -ne 0 ]; then
 				echo "[ERROR] Unable to backup database $database_name from container $container_name"
@@ -125,6 +130,7 @@ for container_id in $(docker ps -aq) ; do
 				if [ $? -ne 0 ]; then
 					((++count_failure))
 				else
+					echo "done."
 					((++count_success))
 				fi
 			fi
