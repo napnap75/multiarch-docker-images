@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Backup one directory
+# Backup one directory (from the mounted filesystem)
 function backup_dir {
 	# Check if the dir to backup is mounted as a subdirectory of /root inside this container
 	if [ "$1" = "" ]; then
@@ -15,6 +15,7 @@ function backup_dir {
 	fi
 }
 
+# Backup one directory (from the local filesystem)
 function backup_local_dir {
 	if [ "$1" = "" ]; then
 		echo "[ERROR] Cannot backup the root directory. Have you correctly configured the volumes to backup for this container ?"
@@ -46,47 +47,32 @@ if [ "$(restic --no-lock list locks -q)" != "" ]; then
 	fi
 fi
 
-count_success=0
-count_failure=0
+if [ "$1" == "" ] || [ "$1" == "backup" ]; then
+	count_success=0
+	count_failure=0
 
-# List all the containers
-for container_id in $(docker ps -aq) ; do
-	container_json=$(docker inspect $container_id)
-	# Get the name and namespace (in case of a container run in a swarm stack)
-	container_name=$(echo $container_json | jq -r '.[].Name' | cut -d'/' -f2)
+	# List all the containers
+	for container_id in $(docker ps -aq) ; do
+		container_json=$(docker inspect $container_id)
+		# Get the name and namespace (in case of a container run in a swarm stack)
+		container_name=$(echo $container_json | jq -r '.[].Name' | cut -d'/' -f2)
 
-	# Ignore containers listed in env variable BACKUP_EXCLUDES
-	if [[ ${BACKUP_EXCLUDES} =~ (^|[[:space:]])${container_name}($|[[:space:]]) ]] ; then
-		continue
-	fi
+		# Ignore containers listed in env variable BACKUP_EXCLUDES
+		if [[ ${BACKUP_EXCLUDES} =~ (^|[[:space:]])${container_name}($|[[:space:]]) ]] ; then
+			continue
+		fi
 
-	# Ignore containers not listed in env variable BACKUP_INCLUDES, if it is set
-	if [[ ! -z ${BACKUP_INCLUDES} && ! ${BACKUP_INCLUDES} =~ (^|[[:space:]])${container_name}($|[[:space:]]) ]] ; then
-		continue
-	fi
+		# Ignore containers not listed in env variable BACKUP_INCLUDES, if it is set
+		if [[ ! -z ${BACKUP_INCLUDES} && ! ${BACKUP_INCLUDES} =~ (^|[[:space:]])${container_name}($|[[:space:]]) ]] ; then
+			continue
+		fi
 
-	# Backup the dirs labelled with "napnap75.backup.dirs"
-	backup_dirs=$(echo $container_json | jq -r '.[].Config.Labels."napnap75.backup.dirs"')
-	if [ "$backup_dirs" != "null" ] ; then
-		for dir_name in $backup_dirs ; do
-			echo -n "[INFO] Backing up dir" $dir_name "for container" $container_name " ... "
-			backup_dir $dir_name
-			if [ $? -ne 0 ]; then
-				((++count_failure))
-			else
-				echo "done."
-				((++count_success))
-			fi
-		done
-	fi
-
-	# Backup the dirs (inside container) labelled with "napnap75.backup.local-dirs"
-	backup_dirs=$(echo $container_json | jq -r '.[].Config.Labels."napnap75.backup.local-dirs"')
-	if [ "$backup_dirs" != "null" ] ; then
-		if [[ "$(echo $container_json | jq -r '.[].Config.Image')" == "napnap75/restic-auto"* ]] ; then
+		# Backup the dirs labelled with "napnap75.backup.dirs"
+		backup_dirs=$(echo $container_json | jq -r '.[].Config.Labels."napnap75.backup.dirs"')
+		if [ "$backup_dirs" != "null" ] ; then
 			for dir_name in $backup_dirs ; do
-				echo -n "[INFO] Backing up local dir" $dir_name "for container" $container_name " ... "
-				backup_local_dir $dir_name
+				echo -n "[INFO] Backing up dir" $dir_name "for container" $container_name " ... "
+				backup_dir $dir_name
 				if [ $? -ne 0 ]; then
 					((++count_failure))
 				else
@@ -94,62 +80,82 @@ for container_id in $(docker ps -aq) ; do
 					((++count_success))
 				fi
 			done
-		else
-			echo "[ERROR] Could not use \"napnap75.backup.local-dirs\" on another container that the one running restic"
 		fi
-	fi
 
-	# Backup the volumes labelled with "napnap75.backup.volumes"
-	backup_volumes=$(echo $container_json | jq -r '.[].Config.Labels."napnap75.backup.volumes"')
-	if [ "$backup_volumes" != "null" ] ; then
-		for volume_name in $backup_volumes ; do
-			volume_mount=$(echo $container_json | jq -r ".[].Mounts[] | select(.Name==\"$volume_name\") | .Source")
-			echo -n "[INFO] Backing up volume" $volume_name "with mount" $volume_mount "for container" $container_name " ... "
-			backup_dir $volume_mount
-			if [ $? -ne 0 ]; then
-				((++count_failure))
+		# Backup the dirs (inside container) labelled with "napnap75.backup.local-dirs"
+		backup_dirs=$(echo $container_json | jq -r '.[].Config.Labels."napnap75.backup.local-dirs"')
+		if [ "$backup_dirs" != "null" ] ; then
+			if [[ "$(echo $container_json | jq -r '.[].Config.Image')" == "napnap75/restic-auto"* ]] ; then
+				for dir_name in $backup_dirs ; do
+					echo -n "[INFO] Backing up local dir" $dir_name "for container" $container_name " ... "
+					backup_local_dir $dir_name
+					if [ $? -ne 0 ]; then
+						((++count_failure))
+					else
+						echo "done."
+						((++count_success))
+					fi
+				done
 			else
-				echo "done."
-				((++count_success))
+				echo "[ERROR] Could not use \"napnap75.backup.local-dirs\" on another container that the one running restic"
 			fi
-		done
-	fi
+		fi
 
-	# Backup the databases labelled with "napnap75.backup.databases"
-	backup_databases=$(echo $container_json | jq -r '.[].Config.Labels."napnap75.backup.databases"')
-	if [ "$backup_databases" != "null" ] ; then
-		for database_name in $backup_databases ; do
-			echo -n "[INFO] Backing up database" $database_name "for container" $container_name " ... "
-			docker exec $container_id bash -c "/usr/bin/mariadb-dump --databases $database_name | gzip -c > /tmp/database_backup.sql.gz"
-			if [ $? -ne 0 ]; then
-				echo "[ERROR] Unable to backup database $database_name from container $container_name"
-				((++count_failure))
-			else
-				container_overlay=$(echo $container_json | jq -r '.[].GraphDriver.Data.MergedDir')
-				backup_file /root_fs${container_overlay}/tmp/database_backup.sql.gz ${container_name}—${database_name}.sql.gz
+		# Backup the volumes labelled with "napnap75.backup.volumes"
+		backup_volumes=$(echo $container_json | jq -r '.[].Config.Labels."napnap75.backup.volumes"')
+		if [ "$backup_volumes" != "null" ] ; then
+			for volume_name in $backup_volumes ; do
+				volume_mount=$(echo $container_json | jq -r ".[].Mounts[] | select(.Name==\"$volume_name\") | .Source")
+				echo -n "[INFO] Backing up volume" $volume_name "with mount" $volume_mount "for container" $container_name " ... "
+				backup_dir $volume_mount
 				if [ $? -ne 0 ]; then
 					((++count_failure))
 				else
 					echo "done."
 					((++count_success))
 				fi
-			fi
-			docker exec $container_id bash -c "rm /tmp/database_backup.sql.gz"
-		done
+			done
+		fi
+
+		# Backup the databases labelled with "napnap75.backup.databases"
+		backup_databases=$(echo $container_json | jq -r '.[].Config.Labels."napnap75.backup.databases"')
+		if [ "$backup_databases" != "null" ] ; then
+			for database_name in $backup_databases ; do
+				echo -n "[INFO] Backing up database" $database_name "for container" $container_name " ... "
+				docker exec $container_id bash -c "/usr/bin/mariadb-dump --databases $database_name | gzip -c > /tmp/database_backup.sql.gz"
+				if [ $? -ne 0 ]; then
+					echo "[ERROR] Unable to backup database $database_name from container $container_name"
+					((++count_failure))
+				else
+					container_overlay=$(echo $container_json | jq -r '.[].GraphDriver.Data.MergedDir')
+					backup_file /root_fs${container_overlay}/tmp/database_backup.sql.gz ${container_name}—${database_name}.sql.gz
+					if [ $? -ne 0 ]; then
+						((++count_failure))
+					else
+						echo "done."
+						((++count_success))
+					fi
+				fi
+				docker exec $container_id bash -c "rm /tmp/database_backup.sql.gz"
+			done
+		fi
+	done
+
+	# Send a notification to Slack
+	if [[ "$SLACK_URL" != "" ]] ; then
+		curl -o /dev/null -s -m 10 --retry 5 -X POST --data-urlencode "payload={\"username\": \"rpi-docker-backup\", \"icon_emoji\": \":dvd:\", \"text\": \"Backup finished on host $HOSTNAME : $count_success succeeded, $count_failure failed\"}" $SLACK_URL
 	fi
-done
 
-# Send a notification to Slack
-if [[ "$SLACK_URL" != "" ]] ; then
-	curl -o /dev/null -s -m 10 --retry 5 -X POST --data-urlencode "payload={\"username\": \"rpi-docker-backup\", \"icon_emoji\": \":dvd:\", \"text\": \"Backup finished on host $HOSTNAME : $count_success succeeded, $count_failure failed\"}" $SLACK_URL
-fi
+	# Send a notification to Gotify
+	if [[ "$GOTIFY_URL" != "" ]] ; then
+		curl -o /dev/null -s -m 10 --retry 5 -X POST -H "accept: application/json" -H "Content-Type: application/json" -d "{\"priority\": 5, \"title\": \"Backup finished on host $HOSTNAME\", \"message\": \"Backup finished on host $HOSTNAME : $count_success succeeded, $count_failure failed\"}" $GOTIFY_URL
+	fi
 
-# Send a notification to Gotify
-if [[ "$GOTIFY_URL" != "" ]] ; then
-	curl -o /dev/null -s -m 10 --retry 5 -X POST -H "accept: application/json" -H "Content-Type: application/json" -d "{\"priority\": 5, \"title\": \"Backup finished on host $HOSTNAME\", \"message\": \"Backup finished on host $HOSTNAME : $count_success succeeded, $count_failure failed\"}" $GOTIFY_URL
-fi
+	# Return a non zero exit code if an error happened
+	if [ $count_failure -ne 0 ]; then
+		exit -1
+	fi
+elif [ "$1" == "maintenance" ] ; then
+	restic forget -q --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --keep-yearly 2 --prune && restic prune -q
 
-# Return a non zero exit code if an error happened
-if [ $count_failure -ne 0 ]; then
-	exit -1
 fi
