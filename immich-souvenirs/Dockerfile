@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:alpine AS builder
 
 WORKDIR $GOPATH/src/napnap75/immich-souvenirs/
 COPY immich-souvenirs.go .
