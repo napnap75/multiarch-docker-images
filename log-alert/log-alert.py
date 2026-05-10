@@ -181,9 +181,10 @@ class AlertRule:
                     break
             if log_entry is None:
                 continue
+            title = self.alert_title.format_map(log_entry.get("labels", {}))
             message = self.alert_message.format_map(log_entry.get("labels", {}))
-            logger.info(f"Sending message: {message}, with params: {log_entry}")
-            self.alert_manager.send_alert(self.alert_title, message)
+            logger.info(f"Sending message: {message}, title: {title}, with params: {log_entry}")
+            self.alert_manager.send_alert(title, message)
         self.last_run = self.next_run
         self.next_run = time.time() + self.check_interval
 
