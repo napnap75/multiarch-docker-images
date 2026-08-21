@@ -1,8 +1,17 @@
-FROM alpine:latest
+FROM debian:stable-slim
 
-ADD rsync-server.sh /usr/bin/rsync-server.sh
+RUN apt update && apt update && apt install rsync -y \
+ && touch /etc/rsyncd.secrets \
+ && chmod 600 /etc/rsyncd.secrets
 
-RUN apk add --no-cache bash rsync \
-	&& chmod +x /usr/bin/rsync-server.sh
+VOLUME ["/shares"]
 
-CMD /usr/bin/rsync-server.sh
+EXPOSE 873
+
+COPY rsyncd.conf /etc/rsyncd.conf
+COPY scripts/ /scripts/
+
+HEALTHCHECK CMD ["/scripts/docker-healthcheck.sh"]
+ENTRYPOINT ["/scripts/docker-entrypoint.sh"]
+
+CMD [ "rsync", "--no-detach", "--daemon", "--config", "/etc/rsyncd.conf" ]
