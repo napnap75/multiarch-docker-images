@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Set RESTIC_HOST to hostname if not present
+export RESTIC_HOST=${RESTIC_HOST:-$(hostname)}
+
 # Backup one directory (from the mounted filesystem)
 function backup_dir {
 	# Check if the dir to backup is mounted as a subdirectory of /root inside this container
@@ -143,12 +146,12 @@ if [ "$1" == "" ] || [ "$1" == "backup" ]; then
 
 	# Send a notification to Slack
 	if [[ "$SLACK_URL" != "" ]] ; then
-		curl -o /dev/null -s -m 10 --retry 5 -X POST --data-urlencode "payload={\"username\": \"rpi-docker-backup\", \"icon_emoji\": \":dvd:\", \"text\": \"Backup finished on host $HOSTNAME : $count_success succeeded, $count_failure failed\"}" $SLACK_URL
+		curl -o /dev/null -s -m 10 --retry 5 -X POST --data-urlencode "payload={\"username\": \"rpi-docker-backup\", \"icon_emoji\": \":dvd:\", \"text\": \"Backup finished on host $RESTIC_HOST : $count_success succeeded, $count_failure failed\"}" $SLACK_URL
 	fi
 
 	# Send a notification to Gotify
 	if [[ "$GOTIFY_URL" != "" ]] ; then
-		curl -o /dev/null -s -m 10 --retry 5 -X POST -H "accept: application/json" -H "Content-Type: application/json" -d "{\"priority\": 5, \"title\": \"Backup finished on host $HOSTNAME\", \"message\": \"Backup finished on host $HOSTNAME : $count_success succeeded, $count_failure failed\"}" $GOTIFY_URL
+		curl -o /dev/null -s -m 10 --retry 5 -X POST -H "accept: application/json" -H "Content-Type: application/json" -d "{\"priority\": 5, \"title\": \"Backup finished on host $RESTIC_HOST\", \"message\": \"Backup finished on host $RESTIC_HOST : $count_success succeeded, $count_failure failed\"}" $GOTIFY_URL
 	fi
 
 	# Return a non zero exit code if an error happened
