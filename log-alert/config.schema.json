@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Log Alert configuration schema",
   "type": "object",
-  "required": ["log-fetchers", "alert-managers", "alerting-rules"],
+  "required": ["log-fetchers", "alerters", "alerting-rules"],
   "properties": {
     "log-fetchers": {
       "type": "object",
@@ -10,18 +10,18 @@
         "type": "object",
         "required": ["type", "config"],
         "properties": {
-          "type": { "type": "string", "enum": ["loki"] },
+          "type": { "type": "string", "enum": ["file", "loki", "parseable"] },
           "config": { "type": "object" }
         }
       }
     },
-    "alert-managers": {
+    "alerters": {
       "type": "object",
       "additionalProperties": {
         "type": "object",
         "required": ["type", "config"],
         "properties": {
-          "type": { "type": "string", "enum": ["gotify"] },
+          "type": { "type": "string", "enum": ["log", "gotify"] },
           "config": { "type": "object" }
         }
       }
@@ -30,7 +30,7 @@
       "type": "object",
       "additionalProperties": {
         "type": "object",
-        "required": ["check-interval", "log-fetcher", "filters", "alert-manager"],
+        "required": ["check-interval", "log-fetcher", "filters", "alerter"],
         "properties": {
           "check-interval": { "type": "number", "minimum": 0 },
           "log-fetcher": {
@@ -53,7 +53,7 @@
               }
             }
           },
-          "alert-manager": {
+          "alerter": {
             "type": "object",
             "required": ["name"],
             "properties": {

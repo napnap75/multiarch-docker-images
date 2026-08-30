@@ -1,14 +1,17 @@
 {
     "log-fetchers": {
-        "loki-fileserver": {
-            "type": "loki",
+        "parseable": {
+            "type": "parseable",
             "config": {
-                "url-from-env": "{LOKI_URL}"
+                "url-from-env": "{PARSEABLE_URL}",
+                "dataset-from-env": "{PARSEABLE_DATASET}",
+                "user-from-env": "{PARSEABLE_USER}",
+                "password-from-env": "{PARSEABLE_PASSWORD}"
             }
         }
     },
-    "alert-managers": {
-        "gotify-paris": {
+    "alerters": {
+        "gotify": {
             "type": "gotify",
             "config": {
                 "url-from-env": "{GOTIFY_URL}",
@@ -20,10 +23,10 @@
         "ssh-outside": {
             "check-interval": 30,
             "log-fetcher": {
-                "name": "loki-fileserver",
+                "name": "parseable",
                 "filters": {
                     "labels": {
-                        "container": "openssh-server"
+                        "container_name": "/openssh-server"
                     },
                     "text": "Accepted"
                 }
@@ -42,19 +45,20 @@
                     }
                 }
             ],
-            "alert-manager": {
-                "name": "gotify-paris",
+            "alerter": {
+                "name": "gotify",
                 "title": "Outside SSH login",
-                "message": "New SSH login for {username} on {instance} from ip {ip} (country: {country}, provider: {isp}, method: {method})"
+                "message": "New SSH login for {username} on {hostname} from ip {ip} (country: {country}, provider: {isp}, method: {method})"
             }
         },
         "ssh-local": {
             "check-interval": 30,
             "log-fetcher": {
-                "name": "loki-fileserver",
+                "name": "parseable",
                 "filters": {
                     "labels": {
-                        "filename": "/var/log/host/auth.log"
+                        "filename": "/var/log/host/auth.log",
+                        "process": "sshd"
                     },
                     "text": "Accepted"
                 }
@@ -67,10 +71,10 @@
                     }
                 }
             ],
-            "alert-manager": {
-                "name": "gotify-paris",
+            "alerter": {
+                "name": "gotify",
                 "title": "Local SSH login",
-                "message": "New SSH login for {username} on {instance} from ip {ip} (method: {method})"
+                "message": "New SSH login for {username} on {hostname} from ip {ip} (method: {method})"
             }
         }
     }
