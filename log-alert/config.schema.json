@@ -46,7 +46,7 @@
               "type": "object",
               "required": ["type", "config"],
               "properties": {
-                "type": { "type": "string", "enum": ["regexp", "geolocation"] },
+                "type": { "type": "string", "enum": ["geolocation", "regexp", "timestamp"] },
                 "config": {
                   "type": "object"
                 }

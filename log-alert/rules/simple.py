@@ -5,7 +5,7 @@ from typing import Dict, Any, Optional
 
 from .base import AlertRule
 from fetchers import LogFetcher
-from filters import RegexpFilter, GeolocationFilter
+from filters import GeolocationFilter, RegexpFilter, TimestampFilter
 from alerters import Alerter
 
 logger = logging.getLogger("log-alert")
@@ -20,10 +20,12 @@ class SimpleAlertRule(AlertRule):
         self.check_interval = config.get("check-interval", 60)
         self.filters = []
         for filter in config.get("filters", []):
-            if filter["type"] == "regexp":
-                self.filters.append(RegexpFilter(filter["config"]))
-            elif filter["type"] == "geolocation":
+            if filter["type"] == "geolocation":
                 self.filters.append(GeolocationFilter(filter["config"]))
+            elif filter["type"] == "regexp":
+                self.filters.append(RegexpFilter(filter["config"]))
+            elif filter["type"] == "timestamp":
+                self.filters.append(TimestampFilter(filter["config"]))
             else:
                 raise ValueError(f"Unsupported filter type: {filter['type']}")
         self.alerter = alerters[config["alerter"]["name"]]

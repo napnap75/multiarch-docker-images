@@ -26,12 +26,19 @@
                 "name": "parseable",
                 "filters": {
                     "labels": {
-                        "container_name": "/openssh-server"
+                        "container_name": "openssh-server"
                     },
-                    "text": "Accepted"
+                    "text": "Accepted",
+                    "timestamp": "date"
                 }
             },
             "filters": [
+                {
+                    "type": "timestamp",
+                    "config": {
+                        "source-field": "date"
+                    }
+                },
                 {
                     "type": "regexp",
                     "config": {
@@ -47,7 +54,7 @@
             ],
             "alerter": {
                 "name": "gotify",
-                "title": "Outside SSH login",
+                "title": "SSH login from {country}",
                 "message": "New SSH login for {username} on {hostname} from ip {ip} (country: {country}, provider: {isp}, method: {method})"
             }
         },
@@ -64,6 +71,14 @@
                 }
             },
             "filters": [
+                {
+                    "type": "timestamp",
+                    "config": {
+                        "source-field": "timestamp",
+                        "timezone": "Europe/Paris",
+                        "timestamp-format": "%b %d %H:%M:%S"
+                    }
+                },
                 {
                     "type": "regexp",
                     "config": {

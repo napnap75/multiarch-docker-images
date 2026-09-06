@@ -41,6 +41,10 @@ class ParseableLogFetcher(LogFetcher):
             if labelNum > 0:
                 query += ' AND '
             query += f'log LIKE \'%{filters["text"]}%\''
+        if "timestamp" in filters:
+            if labelNum > 0:
+                query += ' AND '
+            query += f'{filters["timestamp"]} >= {start_time} AND {filters["timestamp"]} < {end_time}'
         payload = {
             "query": query,
             "startTime": datetime.datetime.fromtimestamp(start_time).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -57,9 +61,13 @@ class ParseableLogFetcher(LogFetcher):
                 if timestamp >= start_time and timestamp < end_time:
                     logs.append({
                         "timestamp": item.get("p_timestamp"),
+                        "fetcher-start-time": start_time,
+                        "fetcher-end-time": end_time,
                         "log": item.get("log"),
                         "labels": {k: v for k, v in item.items() if k not in ["p_timestamp", "log"]}
                     })
+                    logger.debug(f"Fetched log: {logs[-1]}")
+            logger.debug(f"Fetched {len(logs)} logs from Parseable between {start_time} and {end_time}")
             return logs
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching logs from Parseable: {e}")
