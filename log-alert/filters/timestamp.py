@@ -34,7 +34,7 @@ class TimestampFilter(Filter):
                         parsed_time = parsed_time.replace(year=datetime.datetime.now().year)
                     timestamp_value = int(parsed_time.replace(tzinfo=ZoneInfo(self.timezone)).timestamp())
                 else:
-                    timestamp_value = int(timestamp_string)
+                    timestamp_value = int(datetime.datetime.fromisoformat(timestamp_string).timestamp())
             except Exception as e:
                 logger.error(f"Error parsing timestamp {timestamp_value} with format {self.timestamp_format}: {e}")
 

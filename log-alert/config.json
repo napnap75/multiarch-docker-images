@@ -110,9 +110,7 @@
                 {
                     "type": "timestamp",
                     "config": {
-                        "source-field": "timestamp",
-                        "timezone": "Europe/Paris",
-                        "timestamp-format": "%Y-%m-%dT%H:%M:%S.%f"
+                        "source-field": "timestamp"
                     }
                 },
                 {
