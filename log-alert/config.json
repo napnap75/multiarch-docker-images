@@ -58,14 +58,15 @@
                 "message": "New SSH login for {username} on {hostname} from ip {ip} (country: {country}, provider: {isp}, method: {method})"
             }
         },
-        "ssh-local": {
+        "ssh-local-fileserver": {
             "check-interval": 30,
             "log-fetcher": {
                 "name": "parseable",
                 "filters": {
                     "labels": {
                         "filename": "/var/log/host/auth.log",
-                        "process": "sshd"
+                        "process": "sshd",
+                        "hostname": "fileserver"
                     },
                     "text": "Accepted"
                 }
@@ -77,6 +78,41 @@
                         "source-field": "timestamp",
                         "timezone": "Europe/Paris",
                         "timestamp-format": "%b %d %H:%M:%S"
+                    }
+                },
+                {
+                    "type": "regexp",
+                    "config": {
+                        "match": "Accepted (?P<method>\\w+) for (?P<username>\\w+) from (?P<ip>[^\\s]+)"
+                    }
+                }
+            ],
+            "alerter": {
+                "name": "gotify",
+                "title": "Local SSH login",
+                "message": "New SSH login for {username} on {hostname} from ip {ip} (method: {method})"
+            }
+        },
+        "ssh-local-webserver": {
+            "check-interval": 30,
+            "log-fetcher": {
+                "name": "parseable",
+                "filters": {
+                    "labels": {
+                        "filename": "/var/log/host/auth.log",
+                        "process": "sshd",
+                        "hostname": "webserver"
+                    },
+                    "text": "Accepted"
+                }
+            },
+            "filters": [
+                {
+                    "type": "timestamp",
+                    "config": {
+                        "source-field": "timestamp",
+                        "timezone": "Europe/Paris",
+                        "timestamp-format": "%Y-%m-%dT%H:%M:%S.%f"
                     }
                 },
                 {
