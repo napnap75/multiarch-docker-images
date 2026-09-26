@@ -1,6 +1,6 @@
 FROM debian:stable-slim
 
-RUN apt update && apt update && apt install rsync -y \
+RUN apt update && apt update && apt install rsync procps -y \
  && touch /etc/rsyncd.secrets \
  && chmod 600 /etc/rsyncd.secrets
 
