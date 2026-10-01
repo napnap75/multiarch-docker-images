@@ -14,7 +14,7 @@ Single user: the owner. Technically proficient, wants minimal manual work but ze
 
 ### 3.1 Object storage
 
-- Garage (https://garagehq.deuxfleurs.fr/), self-hosted, S3 API. One versioned bucket, e.g. `pdf-renamer`.
+- Garage ([https://garagehq.deuxfleurs.fr/](https://garagehq.deuxfleurs.fr/)), self-hosted, S3 API. One versioned bucket, e.g. `pdf-renamer`.
 - Key layout: `inbox/` (entry point), `pending/` (not-processed files moved out of inbox to avoid re-processing), and `files/` for the processes files (validated or not).
 - Sidecars: `{object-key}.meta.json` next to each PDF.
 - No encryption at rest in v1 (documents not sensitive); bucket served on the local network only.
@@ -22,7 +22,7 @@ Single user: the owner. Technically proficient, wants minimal manual work but ze
 
 ### 3.2 Metadata: sidecars as source of truth, SQLite as replica
 
-- Each PDF has a sidecar JSON object holding: sha256, original key, current key, status, template, document type, emission date, emitting company, all optional fields, confidence, and the full event history (classified, renamed, validated, undone, corrected).
+- Each PDF has a sidecar JSON object holding: sha256, original key, current key, status, template, document type, emission date, period, emitting company, all optional fields, confidence, and the full event history (classified, renamed, validated, undone, corrected).
 - Sidecar is updated atomically on every state change: write the new sidecar to a temp key, copy over the final sidecar key.
 - SQLite mirrors the sidecar content in queryable tables for the dashboard (lists, filters, statistics). It is a cache/replica, never authoritative. Any sidecar↔SQLite divergence is resolved in favor of the sidecar.
 - A rebuild command reconstructs the full SQLite database by scanning all sidecars; a consistency job detects PDFs without sidecars (orphaned) and sidecars without PDFs (missing object) and flags them in the dashboard.
@@ -35,11 +35,13 @@ Single user: the owner. Technically proficient, wants minimal manual work but ze
 
 ## 4. Document Lifecycle and Statuses
 
-| Status        | Meaning |
-|---            |---|
-| not processed | Classification confidence below threshold, or field validation failed. Object moved to the `pending/` prefix, waiting for review. |
-| processed     | Automatically classified, fields validated, renamed and moved. |
+
+| Status        | Meaning                                                                                                                                                                     |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| not processed | Classification confidence below threshold, or field validation failed. Object moved to the `pending/` prefix, waiting for review.                                           |
+| processed     | Automatically classified, fields validated, renamed and moved.                                                                                                              |
 | validated     | The user reviewed the result (confirmed or corrected template/fields). Eligible for model retraining. Terminal state for the review flow; the object was renamed and moved. |
+
 
 Transitions:
 
@@ -76,20 +78,28 @@ Transitions:
 
 #### 4.1 Common fields (mandatory for every document)
 
-Every document, regardless of template, carries at least these four common fields:
+Every document, regardless of template, carries at least these five common fields:
 
 - Common field 1 — Template: the selected template (i.e. the document family: invoice, purchase order, contract, bank statement, rent receipt, etc.).
 - Common field 2 — Emission date: the date the document was emitted, extracted from its content (not the object modification date).
 - Common field 3 — Emitting company: the company or organization that emitted the document, matched against the counterparty gazetteer.
 - Common field 4 — Document type: the fine-grained type of document within the family (e.g. debit advice vs monthly statement for bank statements; quotes vs order confirmations for purchase documents).
+- Common field 5 — Period: the period the document refers to, in human-readable form, derived from the emission date according to the template's period rules. The granularity and the offset relative to the emission date are declared per template:
+  - Granularity `day`: the emission date itself, e.g. "20 September 2026" (a simple invoice).
+  - Granularity `month`: e.g. "September 2026" (a monthly rent receipt).
+  - Granularity `quarter`: e.g. "Q3 2026" (quarterly building-charge invoice).
+  - Granularity `year`: e.g. "2026" (yearly tax document).
+  - Offset `current`: the period containing the emission date (document sent after the start of the period; e.g. "Q3 2026" for 2026-09-20).
+  - Offset `next`: the period following the emission date's period (document sent in advance; e.g. "Q4 2026" for 2026-09-20).
+  - Offset is only meaningful for granularities coarser than a day; for `day` the period always equals the emission date.
 
 The object key pattern of each template is composed from these common fields, plus the template's optional fields.
 
 #### 4.2 Optional fields (template-specific)
 
-- FR4.1 Each template declares in YAML its optional fields beyond the common four: name, type, format, extraction rules, validation rules, and whether the field is rendered in the object key, the target prefix, or stored only. Examples: bank statements carry account owner and statement type; rent receipts carry the concerned premises; contracts carry the counterparty signatory.
-- FR4.2 Fill common and optional fields using per-template regexes, dateutil for dates, and a counterparty gazetteer with rapidfuzz matching for the emitting company (similarity threshold configurable; below threshold the company is "unrecognized").
-- FR4.3 Validate fields before renaming: emission date parses and is within a plausible range, emitting company recognized, document type among the template's allowed values, each optional field matches its declared format (empty optional fields are allowed). Any failure routes to not processed with the failing fields identified.
+- FR4.1 Each template declares in YAML its optional fields beyond the common five: name, type, format, extraction rules, validation rules, and whether the field is rendered in the object key, the target prefix, or stored only. Examples: bank statements carry account owner and statement type; rent receipts carry the concerned premises; contracts carry the counterparty signatory.
+- FR4.2 Fill common and optional fields using per-template regexes, dateutil for dates, and a counterparty gazetteer with rapidfuzz matching for the emitting company (similarity threshold configurable; below threshold the company is "unrecognized"). The period is computed from the emission date using the template's declared granularity and offset (current vs next period); it is recomputed whenever the emission date or template changes.
+- FR4.3 Validate fields before renaming: emission date parses and is within a plausible range, period is non-empty and consistent with the emission date and the template's granularity/offset, emitting company recognized, document type among the template's allowed values, each optional field matches its declared format (empty optional fields are allowed). Any failure routes to not processed with the failing fields identified.
 - FR4.4 Collisions in the target prefix are resolved with an incremental suffix; the final key is always the one logged.
 
 ### Epic 5 — Renaming, moving, logging
@@ -100,8 +110,8 @@ The object key pattern of each template is composed from these common fields, pl
 
 ### Epic 6 — Dashboard: file list
 
-- FR6.1 A single list shows every file the system has seen, with columns: emission date, current object name, status, template (document family), document type, emitting company, confidence. Served from SQLite.
-- FR6.2 Filter by status, template, document type, emitting company, and date range; sort by any column; free-text search on object name, any field and optionnally first-page content.
+- FR6.1 A single list shows every file the system has seen, with columns: emission date, period, current object name, status, template (document family), document type, emitting company, confidence. Served from SQLite.
+- FR6.2 Filter by status, template, document type, emitting company, period, and date range; sort by any column; free-text search on object name, any field and optionnally first-page content.
 - FR6.3 Status is visually distinguishable (badge): not processed, processed, validated.
 - FR6.4 The list shows counters: files per status, automation rate (processed / total), validation rate, plus a consistency indicator (orphaned objects, missing sidecars).
 
@@ -110,15 +120,15 @@ The object key pattern of each template is composed from these common fields, pl
 - FR7.1 Clicking a file in the list opens a detail page.
 - FR7.2 The detail page displays the PDF (embedded viewer), streamed from the bucket by the backend, alongside the extracted data.
 - FR7.3 The user can change the template (dropdown of configured templates, showing the classifier's top candidates and scores).
-- FR7.4 The detail page always shows the four common fields (template, emission date, emitting company, document type) plus the current template's optional fields; the user can correct each value inline; changing the template reloads the optional fields with the new template's schema and best-effort re-extraction, keeping the common field values.
+- FR7.4 The detail page always shows the five common fields (template, emission date, emitting company, document type, period) plus the current template's optional fields; the user can correct each value inline; changing the template reloads the optional fields with the new template's schema and best-effort re-extraction, keeping the common field values, and recomputes the period from the new template's granularity and offset. The period is editable and displayed as a free-text field with a suggested value derived from the emission date.
 - FR7.5 A preview shows the target object key and destination prefix resulting from the current values, updating live as fields change.
 - FR7.6 A validate action applies the rename/move (if not already done), sets the status to validated, and records the corrected values as training data.
 
 ### Epic 8 — Template management
 
 - FR8.1 Templates are defined in YAML configuration files.
-- FR8.2 Adding a template = YAML entry + example files; no code change.
-- FR8.3 The dashboard lists configured templates with their slot definitions, target prefix, and the count of corpus files per template.
+- FR8.2 Adding a template = YAML entry (including the period granularity and offset) + example files; no code change.
+- FR8.3 The dashboard lists configured templates with their slot definitions, period rules, target prefix, and the count of corpus files per template.
 
 ### Epic 9 — Retraining
 
@@ -146,11 +156,11 @@ The object key pattern of each template is composed from these common fields, pl
 
 Sidecar JSON (source of truth), one per PDF at `{key}.meta.json`:
 
-- schema_version, sha256, original_key, current_key, status, template_name, confidence, emission_date, emitting_company, document_type, optional_field1, optional_field2, extracted_text, created_at, updated_at, events[] (type: classified / renamed / validated / corrected, payload, timestamp).
+- schema_version, sha256, original_key, current_key, status, template_name, confidence, emission_date, period, emitting_company, document_type, optional_field1, optional_field2, extracted_text, created_at, updated_at, events[] (type: classified / renamed / validated / corrected, payload, timestamp).
 
 SQLite replica (rebuilt from sidecars):
 
-- files: id, sha256, original_key, current_key, status, template_id, confidence, emission_date, emitting_company, document_type, optional_field1, optional_field2, created_at, updated_at, extracted_text, created_at, updated_at.
+- files: id, sha256, original_key, current_key, status, template_id, confidence, emission_date, period, emitting_company, document_type, optional_field1, optional_field2, created_at, updated_at, extracted_text, created_at, updated_at.
 - consistency_flags: id, file_id, kind (orphaned_object, missing_sidecar, drift).
 
 ## 8. API Surface (indicative)
@@ -168,9 +178,10 @@ SQLite replica (rebuilt from sidecars):
 - AC1 A new PDF dropped in `inbox/` via Nextcloud with high-confidence classification and valid fields appears as processed within the poll interval, renamed and moved in the bucket.
 - AC2 A PDF below the confidence threshold appears as not processed, is moved to `pending/`; correcting and validating it on the detail page renames it and sets validated.
 - AC3 Opening a processed file and validating without changes sets validated without re-renaming.
-- AC4 The file list filters by status, template, document type, emitting company, and date; counters match the data.
-- AC5 Changing the template on the detail page keeps the common fields, reloads the optional fields per the new template schema, and shows the live target key preview.
-- AC5b Every file in every state carries the four common fields (template, emission date, emitting company, document type); a document whose fields cannot be recognized is routed to not processed rather than renamed.
+- AC4 The file list filters by status, template, document type, emitting company, period, and date; counters match the data.
+- AC5 Changing the template on the detail page keeps the common fields, reloads the optional fields per the new template schema, recomputes the period per the new template's granularity and offset, and shows the live target key preview.
+- AC5b Every file in every state carries the five common fields (template, emission date, emitting company, document type, period); a document whose fields cannot be recognized is routed to not processed rather than renamed.
+- AC5c Period computation per template rules: a document dated 2026-09-20 under a monthly template with offset current yields "September 2026"; under a quarterly template with offset next it yields "Q4 2026"; under a yearly template it yields "2026".
 - AC6 Retraining uses initial corpus + validated files, shows metrics, and activation swaps the model without service restart.
 - AC7 Adding a template via YAML (with example files) makes it available for classification and in the detail page dropdown, with no code change.
 - AC8 Killing the service mid-processing leaves no half-renamed object: the copy-then-delete order and the sidecar-first write guarantee a consistent state on restart, and the consistency job repairs SQLite.
@@ -190,3 +201,4 @@ SQLite replica (rebuilt from sidecars):
 - S3 client library: boto3 vs minio-py against Garage — covered by the Week 1 Garage compatibility spike (listing, copy-object, multipart, versioning behavior).
 - Exact confidence threshold and per-template overrides — calibrate on the initial corpus.
 - Poll interval tradeoff between responsiveness and Garage listing load.
+- Exact human-readable period formats (French month names, quarter notation) and their rendering in the object key — to be fixed in the template YAML spec.
