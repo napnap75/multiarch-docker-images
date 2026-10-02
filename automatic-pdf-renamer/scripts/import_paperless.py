@@ -6,6 +6,10 @@ into a Garage S3 bucket with their metadata as sidecars.
 
 This script runs once, offline, from the owner's machine or the server.
 It is NOT part of the renamer container and has no dashboard surface.
+
+Storage Backends:
+- S3: For production Garage S3 (default)
+- File: For local filesystem testing
 """
 
 import argparse
@@ -32,7 +36,7 @@ from app.sidecar import (
     sidecar_exists,
     write_atomic,
 )
-from app.storage import get_storage_backend
+from app.storage import get_storage_backend, StorageBackend
 
 # Configure logging
 logging.basicConfig(
@@ -152,7 +156,7 @@ class PaperlessClient:
             for doc in docs:
                 # Get full document details
                 full_doc = self.get_document(doc["id"])
-                
+
                 # Parse labels into a dict
                 labels = {}
                 for label in full_doc.get("labels", []):
@@ -198,6 +202,7 @@ class PDFProcessor:
         # Import extractor (optional dependency)
         try:
             from app.extractor import extract_first_page_text
+
             self._extract_text = extract_first_page_text
         except ImportError:
             logger.warning("PyMuPDF not available, text extraction will be skipped")
@@ -277,6 +282,7 @@ class SidecarBuilder:
         """
         try:
             from app.period import parse_period_from_filename
+
             return parse_period_from_filename(filename)
         except Exception:
             return None
@@ -312,9 +318,11 @@ class SidecarBuilder:
         if not period:
             # Fallback: use emission date's month-year
             from datetime import datetime
+
             try:
                 dt = datetime.fromisoformat(doc.created).date()
                 from app.period import format_month_year
+
                 period = format_month_year(dt.month, dt.year)
                 logger.warning(f"Using fallback period for doc {doc.id}: {period}")
             except Exception:
@@ -375,10 +383,12 @@ class Importer:
         self,
         paperless_url: str,
         paperless_token: str,
-        s3_endpoint: str,
-        s3_access_key: str,
-        s3_secret_key: str,
-        s3_bucket: str,
+        storage_backend: str = "s3",
+        s3_endpoint: str | None = None,
+        s3_access_key: str | None = None,
+        s3_secret_key: str | None = None,
+        s3_bucket: str | None = None,
+        file_base_dir: str | None = None,
         dry_run: bool = False,
         limit: int | None = None,
         template_mappings: dict[str, str] | None = None,
@@ -388,20 +398,24 @@ class Importer:
         Args:
             paperless_url: Paperless-ngx API URL.
             paperless_token: Paperless-ngx API token.
-            s3_endpoint: Garage S3 endpoint URL.
-            s3_access_key: S3 access key.
-            s3_secret_key: S3 secret key.
-            s3_bucket: S3 bucket name.
+            storage_backend: Storage backend type ('s3' or 'file').
+            s3_endpoint: Garage S3 endpoint URL (required for S3).
+            s3_access_key: S3 access key (required for S3).
+            s3_secret_key: S3 secret key (required for S3).
+            s3_bucket: S3 bucket name (required for S3).
+            file_base_dir: Base directory for file storage (required for file backend).
             dry_run: If True, only list what would be imported.
             limit: Maximum number of documents to import (for testing).
             template_mappings: Optional dict mapping storage_path to template.
         """
         self.paperless_url = paperless_url
         self.paperless_token = paperless_token
+        self.storage_backend_type = storage_backend
         self.s3_endpoint = s3_endpoint
         self.s3_access_key = s3_access_key
         self.s3_secret_key = s3_secret_key
         self.s3_bucket = s3_bucket
+        self.file_base_dir = file_base_dir
         self.dry_run = dry_run
         self.limit = limit
         self.template_mappings = template_mappings
@@ -411,17 +425,35 @@ class Importer:
         self.pdf_processor = PDFProcessor()
         self.sidecar_builder = SidecarBuilder(template_mappings)
 
-        # Initialize storage
-        self.storage = get_storage_backend(
-            "s3",
-            endpoint_url=s3_endpoint,
-            aws_access_key_id=s3_access_key,
-            aws_secret_access_key=s3_secret_key,
-            bucket_name=s3_bucket,
-        )
+        # Initialize storage - will be set up in _init_storage()
+        self.storage: StorageBackend | None = None
+        self._init_storage()
 
         # Stats
         self.stats = ImportStats()
+
+    def _init_storage(self) -> None:
+        """Initialize the storage backend based on configuration."""
+        if self.storage_backend_type == "s3":
+            if not all([self.s3_endpoint, self.s3_access_key, self.s3_secret_key, self.s3_bucket]):
+                raise ValueError(
+                    "S3 storage requires: s3_endpoint, s3_access_key, s3_secret_key, s3_bucket"
+                )
+            self.storage = get_storage_backend(
+                "s3",
+                endpoint_url=self.s3_endpoint,
+                aws_access_key_id=self.s3_access_key,
+                aws_secret_access_key=self.s3_secret_key,
+                bucket_name=self.s3_bucket,
+            )
+            logger.info(f"Using S3 storage backend: {self.s3_endpoint}/{self.s3_bucket}")
+        elif self.storage_backend_type == "file":
+            if not self.file_base_dir:
+                raise ValueError("File storage requires: file_base_dir")
+            self.storage = get_storage_backend("file", base_dir=self.file_base_dir)
+            logger.info(f"Using File storage backend: {self.file_base_dir}")
+        else:
+            raise ValueError(f"Unknown storage backend: {self.storage_backend_type}")
 
     def check_bucket_empty(self, prefix: str = "files/") -> bool:
         """Check if the bucket is empty under the given prefix.
@@ -432,6 +464,8 @@ class Importer:
         Returns:
             True if bucket is empty (no objects), False otherwise.
         """
+        if self.storage is None:
+            raise RuntimeError("Storage not initialized")
         objects = self.storage.list_objects(prefix)
         if objects:
             logger.error(f"Bucket is not empty under {prefix}: found {len(objects)} objects")
@@ -448,6 +482,9 @@ class Importer:
         Returns:
             True if import succeeded, False otherwise.
         """
+        if self.storage is None:
+            raise RuntimeError("Storage not initialized")
+
         logger.info(f"Processing document {doc.id}: {doc.filename}")
 
         try:
@@ -520,10 +557,14 @@ class Importer:
         Returns:
             True if import succeeded (no failures), False otherwise.
         """
-        logger.info("Starting Paperless-ngx import...")
+        if self.storage is None:
+            raise RuntimeError("Storage not initialized")
 
-        # Check bucket is empty
-        if not self.dry_run:
+        logger.info("Starting Paperless-ngx import...")
+        logger.info(f"Storage backend: {self.storage_backend_type}")
+
+        # Check bucket is empty (only for S3, skip for file backend in dry-run)
+        if not self.dry_run and self.storage_backend_type == "s3":
             if not self.check_bucket_empty("files/"):
                 logger.error("Refusing to run: bucket is not empty under files/")
                 return False
@@ -557,6 +598,7 @@ class Importer:
         print("\n" + "=" * 60)
         print("IMPORT SUMMARY")
         print("=" * 60)
+        print(f"Storage backend: {self.storage_backend_type}")
         print(f"Imported:   {self.stats.imported}")
         print(f"Skipped:    {self.stats.skipped}")
         print(f"Failed:     {self.stats.failed}")
@@ -575,21 +617,24 @@ class Importer:
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Import documents from Paperless-ngx to Garage S3 bucket",
+        description="Import documents from Paperless-ngx to storage backend",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Environment variables:
-  PAPERLESS_URL          Paperless-ngx API URL
-  PAPERLESS_TOKEN        Paperless-ngx API token
+Environment variables for S3 storage:
   S3_ENDPOINT_URL        Garage S3 endpoint URL
   S3_ACCESS_KEY_ID       S3 access key
-  S3_SECRET_ACCESS_KEY  S3 secret key
+  S3_SECRET_ACCESS_KEY   S3 secret key
   S3_BUCKET_NAME         S3 bucket name
 
-All environment variables are required unless provided as arguments.
+Environment variables for Paperless:
+  PAPERLESS_URL          Paperless-ngx API URL
+  PAPERLESS_TOKEN        Paperless-ngx API token
+
+For file storage, use --storage-backend file --file-base-dir /path/to/dir
         """,
     )
 
+    # Paperless configuration
     parser.add_argument(
         "--paperless-url",
         help="Paperless-ngx API URL",
@@ -600,6 +645,16 @@ All environment variables are required unless provided as arguments.
         help="Paperless-ngx API token",
         default=os.environ.get("PAPERLESS_TOKEN"),
     )
+
+    # Storage backend configuration
+    parser.add_argument(
+        "--storage-backend",
+        choices=["s3", "file"],
+        default="s3",
+        help="Storage backend type: 's3' for Garage S3, 'file' for local filesystem (default: s3)",
+    )
+
+    # S3 configuration
     parser.add_argument(
         "--s3-endpoint",
         help="Garage S3 endpoint URL",
@@ -620,6 +675,15 @@ All environment variables are required unless provided as arguments.
         help="S3 bucket name",
         default=os.environ.get("S3_BUCKET_NAME"),
     )
+
+    # File storage configuration
+    parser.add_argument(
+        "--file-base-dir",
+        help="Base directory for file storage backend",
+        default=os.environ.get("FILE_BASE_DIR", "./import_storage"),
+    )
+
+    # Import options
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -649,22 +713,30 @@ def validate_env(args) -> None:
     Raises:
         ValueError: If required values are missing.
     """
-    required = [
-        ("Paperless URL", args.paperless_url),
-        ("Paperless token", args.paperless_token),
-        ("S3 endpoint", args.s3_endpoint),
-        ("S3 access key", args.s3_access_key),
-        ("S3 secret key", args.s3_secret_key),
-        ("S3 bucket", args.s3_bucket),
-    ]
-
     missing = []
-    for name, value in required:
-        if not value:
-            missing.append(name)
+
+    # Paperless is always required
+    if not args.paperless_url:
+        missing.append("Paperless URL (--paperless-url or PAPERLESS_URL)")
+    if not args.paperless_token:
+        missing.append("Paperless token (--paperless-token or PAPERLESS_TOKEN)")
+
+    # Storage backend specific requirements
+    if args.storage_backend == "s3":
+        if not args.s3_endpoint:
+            missing.append("S3 endpoint (--s3-endpoint or S3_ENDPOINT_URL)")
+        if not args.s3_access_key:
+            missing.append("S3 access key (--s3-access-key or S3_ACCESS_KEY_ID)")
+        if not args.s3_secret_key:
+            missing.append("S3 secret key (--s3-secret-key or S3_SECRET_ACCESS_KEY)")
+        if not args.s3_bucket:
+            missing.append("S3 bucket (--s3-bucket or S3_BUCKET_NAME)")
+    elif args.storage_backend == "file":
+        if not args.file_base_dir:
+            missing.append("File base dir (--file-base-dir or FILE_BASE_DIR)")
 
     if missing:
-        raise ValueError(f"Missing required values: {', '.join(missing)}")
+        raise ValueError(f"Missing required values:\n  " + "\n  ".join(missing))
 
 
 def main():
@@ -686,10 +758,12 @@ def main():
         importer = Importer(
             paperless_url=args.paperless_url,
             paperless_token=args.paperless_token,
+            storage_backend=args.storage_backend,
             s3_endpoint=args.s3_endpoint,
             s3_access_key=args.s3_access_key,
             s3_secret_key=args.s3_secret_key,
             s3_bucket=args.s3_bucket,
+            file_base_dir=args.file_base_dir,
             dry_run=args.dry_run,
             limit=args.limit,
         )
@@ -711,6 +785,7 @@ def main():
     except Exception as e:
         logger.error(f"Import failed: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 
