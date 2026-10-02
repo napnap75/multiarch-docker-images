@@ -10,6 +10,10 @@ It is NOT part of the renamer container and has no dashboard surface.
 Storage Backends:
 - S3: For production Garage S3 (default)
 - File: For local filesystem testing
+
+Note: Paperless-ngx API returns IDs for correspondent, document_type, and tags.
+This script fetches the actual string values from the respective endpoints.
+The filename comes from 'archived_file_name', not 'filename'.
 """
 
 import argparse
@@ -73,7 +77,11 @@ class ImportStats:
 
 
 class PaperlessClient:
-    """Client for Paperless-ngx REST API."""
+    """Client for Paperless-ngx REST API.
+    
+    Note: Paperless returns IDs for correspondent, document_type, and tags.
+    This client fetches the actual string values from the respective endpoints.
+    """
 
     def __init__(self, base_url: str, token: str, timeout: int = 30):
         """Initialize the Paperless client.
@@ -91,6 +99,11 @@ class PaperlessClient:
             "Authorization": f"Token {self.token}",
             "Accept": "application/json",
         })
+        
+        # Cache for fetched entities to avoid duplicate requests
+        self._correspondent_cache: dict[int, str] = {}
+        self._document_type_cache: dict[int, str] = {}
+        self._tag_cache: dict[int, str] = {}
 
     def _get(self, endpoint: str, params: dict | None = None) -> dict[str, Any]:
         """Make a GET request to the Paperless API."""
@@ -138,8 +151,78 @@ class PaperlessClient:
         """
         return self._get(f"/api/documents/{doc_id}/")
 
+    def get_correspondent_name(self, correspondent_id: int) -> str:
+        """Get correspondent name from ID.
+        
+        Args:
+            correspondent_id: The Paperless correspondent ID.
+        
+        Returns:
+            Correspondent name string.
+        """
+        if not correspondent_id:
+            return ""
+        if correspondent_id in self._correspondent_cache:
+            return self._correspondent_cache[correspondent_id]
+        try:
+            correspondent = self._get(f"/api/correspondents/{correspondent_id}/")
+            name = correspondent.get("name", f"unknown_correspondent_{correspondent_id}")
+            self._correspondent_cache[correspondent_id] = name
+            return name
+        except Exception as e:
+            logger.warning(f"Failed to fetch correspondent {correspondent_id}: {e}")
+            return f"unknown_correspondent_{correspondent_id}"
+
+    def get_document_type_name(self, document_type_id: int) -> str:
+        """Get document type name from ID.
+        
+        Args:
+            document_type_id: The Paperless document type ID.
+        
+        Returns:
+            Document type name string.
+        """
+        if not document_type_id:
+            return ""
+        if document_type_id in self._document_type_cache:
+            return self._document_type_cache[document_type_id]
+        try:
+            doc_type = self._get(f"/api/document_types/{document_type_id}/")
+            name = doc_type.get("name", f"unknown_type_{document_type_id}")
+            self._document_type_cache[document_type_id] = name
+            return name
+        except Exception as e:
+            logger.warning(f"Failed to fetch document type {document_type_id}: {e}")
+            return f"unknown_type_{document_type_id}"
+
+    def get_tag_name(self, tag_id: int) -> str:
+        """Get tag name from ID.
+        
+        Args:
+            tag_id: The Paperless tag ID.
+        
+        Returns:
+            Tag name string.
+        """
+        if not tag_id:
+            return ""
+        if tag_id in self._tag_cache:
+            return self._tag_cache[tag_id]
+        try:
+            tag = self._get(f"/api/tags/{tag_id}/")
+            name = tag.get("name", f"unknown_tag_{tag_id}")
+            self._tag_cache[tag_id] = name
+            return name
+        except Exception as e:
+            logger.warning(f"Failed to fetch tag {tag_id}: {e}")
+            return f"unknown_tag_{tag_id}"
+
     def get_all_documents(self) -> list[PaperlessDocument]:
         """Get all documents from Paperless (handles pagination).
+
+        Note: Paperless returns IDs for correspondent, document_type, and tags.
+        This method fetches the actual string values from the respective endpoints.
+        The filename comes from 'archived_file_name', not 'filename'.
 
         Returns:
             List of PaperlessDocument objects.
@@ -157,18 +240,36 @@ class PaperlessClient:
                 # Get full document details
                 full_doc = self.get_document(doc["id"])
 
-                # Parse labels into a dict
+                # Extract fields from Paperless document
+                # The actual filename is in 'archived_file_name', not 'filename'
+                archived_file_name = full_doc.get("archived_file_name", "")
+                
+                # Get correspondent name from ID
+                correspondent_id = full_doc.get("correspondent")
+                correspondent_name = self.get_correspondent_name(correspondent_id) if correspondent_id else ""
+                
+                # Get document type name from ID
+                document_type_id = full_doc.get("document_type")
+                document_type_name = self.get_document_type_name(document_type_id) if document_type_id else ""
+                
+                # Get storage path
+                storage_path = full_doc.get("storage_path", "")
+                
+                # Get tags/labels - Paperless returns tag IDs, need to fetch names
+                tag_ids = full_doc.get("tags", [])
                 labels = {}
-                for label in full_doc.get("labels", []):
-                    labels[label["name"]] = label.get("value", True)
+                for tag_id in tag_ids:
+                    tag_name = self.get_tag_name(tag_id)
+                    if tag_name:
+                        labels[tag_name] = True
 
                 paperless_doc = PaperlessDocument(
                     id=full_doc["id"],
-                    filename=full_doc["filename"],
-                    storage_path=full_doc.get("storage_path", ""),
+                    filename=archived_file_name,
+                    storage_path=storage_path,
                     created=full_doc.get("created", ""),  # This is the document date
-                    correspondent_name=full_doc.get("correspondent", {}).get("name", ""),
-                    document_type_name=full_doc.get("document_type", {}).get("name", ""),
+                    correspondent_name=correspondent_name,
+                    document_type_name=document_type_name,
                     labels=labels,
                     download_url=f"{self.base_url}/api/documents/{full_doc['id']}/download/",
                 )
