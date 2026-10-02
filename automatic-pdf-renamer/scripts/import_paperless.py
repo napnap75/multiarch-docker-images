@@ -60,7 +60,7 @@ class PaperlessDocument:
     created: str  # Document date (emission date)
     correspondent_name: str
     document_type_name: str
-    labels: dict[str, Any]  # Label name -> value
+    labels: list[str]  # List of label names
     download_url: str
 
 
@@ -101,6 +101,7 @@ class PaperlessClient:
         })
         
         # Cache for fetched entities to avoid duplicate requests
+        self._storage_path_cache: dict[int, str] = {}
         self._correspondent_cache: dict[int, str] = {}
         self._document_type_cache: dict[int, str] = {}
         self._tag_cache: dict[int, str] = {}
@@ -150,6 +151,28 @@ class PaperlessClient:
             Document metadata dict.
         """
         return self._get(f"/api/documents/{doc_id}/")
+
+    def get_storage_path_name(self, storage_path_id: int) -> str:
+        """Get storage path name from ID.
+        
+        Args:
+            storage_path_id: The Paperless storage path ID.
+        
+        Returns:
+            Storage path name string.
+        """
+        if not storage_path_id:
+            return ""
+        if storage_path_id in self._storage_path_cache:
+            return self._storage_path_cache[storage_path_id]
+        try:
+            storage_path = self._get(f"/api/storage_paths/{storage_path_id}/")
+            name = storage_path.get("name", f"unknown_storage_path_{storage_path_id}")
+            self._storage_path_cache[storage_path_id] = name
+            return name
+        except Exception as e:
+            logger.warning(f"Failed to fetch storage path {storage_path_id}: {e}")
+            return f"unknown_storage_path_{storage_path_id}"
 
     def get_correspondent_name(self, correspondent_id: int) -> str:
         """Get correspondent name from ID.
@@ -217,12 +240,11 @@ class PaperlessClient:
             logger.warning(f"Failed to fetch tag {tag_id}: {e}")
             return f"unknown_tag_{tag_id}"
 
-    def get_all_documents(self) -> list[PaperlessDocument]:
+    def get_all_documents(self, limit: int = None) -> list[PaperlessDocument]:
         """Get all documents from Paperless (handles pagination).
 
         Note: Paperless returns IDs for correspondent, document_type, and tags.
         This method fetches the actual string values from the respective endpoints.
-        The filename comes from 'archived_file_name', not 'filename'.
 
         Returns:
             List of PaperlessDocument objects.
@@ -242,7 +264,7 @@ class PaperlessClient:
 
                 # Extract fields from Paperless document
                 # The actual filename is in 'archived_file_name', not 'filename'
-                archived_file_name = full_doc.get("archived_file_name", "")
+                archived_file_name = full_doc.get("archived_file_name", "") if full_doc.get("archived_file_name") else full_doc.get("title", "") + ".pdf"
                 
                 # Get correspondent name from ID
                 correspondent_id = full_doc.get("correspondent")
@@ -253,15 +275,16 @@ class PaperlessClient:
                 document_type_name = self.get_document_type_name(document_type_id) if document_type_id else ""
                 
                 # Get storage path
-                storage_path = full_doc.get("storage_path", "")
+                storage_path_id = full_doc.get("storage_path", "")
+                storage_path = self.get_storage_path_name(storage_path_id) if storage_path_id else ""
                 
                 # Get tags/labels - Paperless returns tag IDs, need to fetch names
                 tag_ids = full_doc.get("tags", [])
-                labels = {}
+                labels = []
                 for tag_id in tag_ids:
                     tag_name = self.get_tag_name(tag_id)
                     if tag_name:
-                        labels[tag_name] = True
+                        labels.append(tag_name)
 
                 paperless_doc = PaperlessDocument(
                     id=full_doc["id"],
@@ -273,7 +296,12 @@ class PaperlessClient:
                     labels=labels,
                     download_url=f"{self.base_url}/api/documents/{full_doc['id']}/download/",
                 )
+                logger.debug(f"Retrieved document: {paperless_doc}")
                 all_docs.append(paperless_doc)
+
+                if limit and len(all_docs) >= limit:
+                    logger.info(f"Reached limit of {limit} documents")
+                    return all_docs 
 
             # Check if there are more pages
             if len(docs) < page_size:
@@ -431,13 +459,8 @@ class SidecarBuilder:
 
         # Build optional fields from labels
         optional_fields = {}
-        for label_name, label_value in doc.labels.items():
-            # Skip labels that collide with common field names
-            common_fields = {"template", "emission_date", "emitting_company", "document_type", "period"}
-            if label_name.lower() in common_fields:
-                logger.warning(f"Label '{label_name}' collides with common field, skipping")
-                continue
-            optional_fields[label_name] = label_value
+        for label in doc.labels:
+            optional_fields["tag"] = label
 
         # Construct the original key
         if doc.storage_path:
@@ -621,7 +644,11 @@ class Importer:
                 logger.info(f"[DRY RUN] Would import: {pdf_key}")
                 logger.info(f"[DRY RUN]   SHA256: {sha256}")
                 logger.info(f"[DRY RUN]   Template: {sidecar.template_name}")
+                logger.info(f"[DRY RUN]   Emitting Company: {sidecar.emitting_company}")
+                logger.info(f"[DRY RUN]   Document Type: {sidecar.document_type}")
+                logger.info(f"[DRY RUN]   Emission Date: {sidecar.emission_date}")
                 logger.info(f"[DRY RUN]   Period: {sidecar.period}")
+                logger.info(f"[DRY RUN]   Optional Fields: {sidecar.optional_fields}")
                 self.stats.imported += 1
                 self.stats.per_template_counts[sidecar.template_name] = (
                     self.stats.per_template_counts.get(sidecar.template_name, 0) + 1
@@ -648,6 +675,7 @@ class Importer:
         except Exception as e:
             error_msg = f"Failed to import document {doc.id}: {e}"
             logger.error(error_msg)
+            logger.debug("Exception details:", exc_info=True)
             self.stats.failed += 1
             self.stats.errors.append(error_msg)
             return False
@@ -672,11 +700,7 @@ class Importer:
 
         # Get all documents from Paperless
         logger.info("Fetching documents from Paperless...")
-        docs = self.paperless_client.get_all_documents()
-
-        if self.limit:
-            docs = docs[: self.limit]
-            logger.info(f"Limiting to {len(docs)} documents")
+        docs = self.paperless_client.get_all_documents(self.limit)
 
         if not docs:
             logger.info("No documents found in Paperless")
