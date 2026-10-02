@@ -1,0 +1,17 @@
+# Requirements for Paperless-ngx import script (User Story 0)
+# These are the dependencies needed to run scripts/import_paperless.py
+
+# HTTP client for Paperless-ngx API
+requests>=2.28.0
+
+# S3 client for Garage
+boto3>=1.26.0
+
+# PDF text extraction (PyMuPDF)
+pymupdf>=1.22.0
+
+# Date parsing utilities
+python-dateutil>=2.8.0
+
+# YAML parsing for config (optional, for template loading)
+PyYAML>=6.0
