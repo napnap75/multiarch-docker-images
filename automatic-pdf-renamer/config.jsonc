@@ -87,46 +87,89 @@
   },
 
   "mappings": [
+    // DEFAULT RULE: Apply to ALL documents
     {
-      "company": "EDF",
-      "document_type": "facture",
-      "template": "edf_invoice",
-      "period_format": "monthly",
-      "additional_fields": ["contract_references", "customer_numbers"]
+      "match": {},
+      "set": {
+        "template": "default",
+        "period_format": "monthly"
+      }
     },
+
+    // All bank statements (releve) use bank_statement template and bank_accounts fields
     {
-      "company": "EDF",
-      "document_type": "avis",
-      "template": "edf_notice",
-      "period_format": "quarterly_q"
+      "match": {
+        "document_type": "releve"
+      },
+      "set": {
+        "template": "bank_statement",
+        "additional_fields": ["bank_accounts"]
+      }
     },
+
+    // All BNP Paribas documents use monthly period
     {
-      "company": "BNP Paribas",
-      "template": "bank_statement",
-      "period_format": "monthly",
-      "additional_fields": ["bank_accounts"]
+      "match": {
+        "company": "BNP Paribas"
+      },
+      "set": {
+        "period_format": "monthly"
+      }
     },
+
+    // All contracts use yearly period and contract template
     {
-      "document_type": "releve",
-      "template": "bank_statement",
-      "period_format": "monthly",
-      "additional_fields": ["bank_accounts"]
+      "match": {
+        "document_type": "contrat"
+      },
+      "set": {
+        "template": "contract",
+        "period_format": "yearly"
+      }
     },
+
+    // EDF invoices: specific template + fields + monthly period
     {
-      "company": "Veolia",
-      "document_type": "facture",
-      "template": "water_invoice",
-      "period_format": "monthly",
-      "additional_fields": ["properties"]
+      "match": {
+        "company": "EDF",
+        "document_type": "facture"
+      },
+      "set": {
+        "template": "edf_invoice",
+        "period_format": "monthly",
+        "additional_fields": ["contract_references", "customer_numbers"]
+      }
     },
+
+    // EDF notices: specific template + quarterly format
     {
-      "document_type": "contrat",
-      "template": "contract",
-      "period_format": "yearly"
+      "match": {
+        "company": "EDF",
+        "document_type": "avis"
+      },
+      "set": {
+        "template": "edf_notice",
+        "period_format": "quarterly_q"
+      }
+    },
+
+    // Veolia invoices: specific template + properties field
+    {
+      "match": {
+        "company": "Veolia",
+        "document_type": "facture"
+      },
+      "set": {
+        "template": "water_invoice",
+        "additional_fields": ["properties"]
+      }
     }
   ],
 
   "templates": {
+    "default": {
+      "key_pattern": "{emitting_company}/{period}/{document_type}/{emission_date}_{original_filename}"
+    },
     "edf_invoice": {
       "key_pattern": "{emitting_company}/{period}/{document_type}/{emission_date}_{original_filename}"
     },

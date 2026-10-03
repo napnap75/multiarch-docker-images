@@ -7,7 +7,10 @@ Supports the new mapping-based configuration structure where:
 - additional_fields: predefined value groups for ML extraction
 - date_extraction: ordered list of regex strings for finding emission date
 - period_formats: named configurations with granularity, format template, offset
-- mappings: ordered list where company OR document_type can be specified (wildcard matching)
+- mappings: ordered list of rules with match criteria and set actions
+  - match: can contain company, document_type, both, or neither (empty = matches all)
+  - set: can contain template, period_format, additional_fields
+  - Rules are processed in order, later matches override earlier ones
 - templates: template definitions with key patterns
 """
 
@@ -144,57 +147,102 @@ class PeriodFormatConfig:
 
 
 @dataclass
-class CompanyTypeMapping:
-    """Mapping of (company, document_type) to template, period_format, and additional_fields.
+class MappingMatch:
+    """Match criteria for a mapping rule.
     
-    Supports wildcard matching:
-    - If company is None: matches ANY company
-    - If document_type is None: matches ANY document_type
-    - First match in ordered list wins
+    Can contain company, document_type, both, or neither (empty = matches all).
     """
 
     company: str | None = None
     document_type: str | None = None
-    template: str = ""
-    period_format: str = ""
-    additional_fields: list[str] = field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CompanyTypeMapping":
-        """Create CompanyTypeMapping from dict."""
+    def from_dict(cls, data: dict[str, Any] | None) -> "MappingMatch":
+        """Create MappingMatch from dict."""
+        if data is None:
+            return cls()
         return cls(
             company=data.get("company"),
             document_type=data.get("document_type"),
-            template=data.get("template", ""),
-            period_format=data.get("period_format", ""),
+        )
+
+    def matches(self, company: str, document_type: str) -> bool:
+        """Check if this match criteria matches the given company and document type.
+        
+        Empty match (both None) matches everything.
+        company=None in match means match any company.
+        document_type=None in match means match any document type.
+        """
+        company_match = self.company is None or self.company == company
+        doc_type_match = self.document_type is None or self.document_type == document_type
+        return company_match and doc_type_match
+
+
+@dataclass
+class MappingSet:
+    """Fields to set for a mapping rule.
+    
+    Can contain template, period_format, and/or additional_fields.
+    """
+
+    template: str | None = None
+    period_format: str | None = None
+    additional_fields: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "MappingSet":
+        """Create MappingSet from dict."""
+        if data is None:
+            return cls()
+        return cls(
+            template=data.get("template"),
+            period_format=data.get("period_format"),
             additional_fields=data.get("additional_fields", []),
         )
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {}
-        if self.company is not None:
-            result["company"] = self.company
-        if self.document_type is not None:
-            result["document_type"] = self.document_type
-        if self.template:
+        if self.template is not None:
             result["template"] = self.template
-        if self.period_format:
+        if self.period_format is not None:
             result["period_format"] = self.period_format
         if self.additional_fields:
             result["additional_fields"] = self.additional_fields
         return result
 
+
+@dataclass
+class MappingRule:
+    """A mapping rule with match criteria and set actions.
+    
+    Rules are processed in order. For each document, all matching rules
+    are applied in order, with later matches overriding earlier ones.
+    """
+
+    match: MappingMatch = field(default_factory=MappingMatch)
+    set: MappingSet = field(default_factory=MappingSet)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MappingRule":
+        """Create MappingRule from dict."""
+        return cls(
+            match=MappingMatch.from_dict(data.get("match", {})),
+            set=MappingSet.from_dict(data.get("set", {})),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        match_dict = self.match.to_dict() if hasattr(self.match, 'to_dict') else {}
+        if match_dict:
+            result["match"] = match_dict
+        set_dict = self.set.to_dict()
+        if set_dict:
+            result["set"] = set_dict
+        return result
+
     def matches(self, company: str, document_type: str) -> bool:
-        """Check if this mapping matches the given company and document type.
-        
-        Wildcard logic:
-        - company is None OR company matches
-        - document_type is None OR document_type matches
-        Both conditions must be true.
-        """
-        company_match = self.company is None or self.company == company
-        doc_type_match = self.document_type is None or self.document_type == document_type
-        return company_match and doc_type_match
+        """Check if this rule matches the given company and document type."""
+        return self.match.matches(company, document_type)
 
 
 @dataclass
@@ -263,7 +311,7 @@ class TemplateRegistry:
     - additional_fields: predefined value groups for ML extraction
     - date_extraction: ordered list of regex strings
     - period_formats: dict of named period format configurations
-    - mappings: ordered list of wildcard-enabled mappings
+    - mappings: ordered list of MappingRule objects (match + set)
     - templates: template definitions with key patterns
     """
 
@@ -273,7 +321,7 @@ class TemplateRegistry:
         self._document_types: list[str] = []
         self._additional_fields: dict[str, list[str]] = {}
         self._period_formats: dict[str, PeriodFormatConfig] = {}
-        self._mappings: list[CompanyTypeMapping] = []
+        self._mappings: list[MappingRule] = []
         self._date_extraction_patterns: list[str] = []
         self._date_extraction_compiled: list[re.Pattern] = []
         self._config_version: str = "1.0"
@@ -386,12 +434,12 @@ class TemplateRegistry:
         self._date_extraction_compiled = [re.compile(p) for p in self._date_extraction_patterns]
         logger.info(f"Loaded {len(self._date_extraction_patterns)} date extraction patterns")
         
-        # Load mappings (with wildcard support)
+        # Load mappings (new format: list of {match, set} objects)
         mappings_data = data.get("mappings", [])
         self._mappings = [
-            CompanyTypeMapping.from_dict(m) for m in mappings_data
+            MappingRule.from_dict(m) for m in mappings_data
         ]
-        logger.info(f"Loaded {len(self._mappings)} company-type mappings")
+        logger.info(f"Loaded {len(self._mappings)} mapping rules")
         
         # Load templates
         templates_data = data.get("templates", {})
@@ -462,23 +510,41 @@ class TemplateRegistry:
         """
         return self._date_extraction_compiled
 
-    def get_mapping(self, company: str, document_type: str) -> CompanyTypeMapping | None:
-        """Get the first matching mapping for a specific (company, document_type) tuple.
+    def get_mapping_rules(self) -> list[MappingRule]:
+        """Get all mapping rules.
 
-        Uses wildcard matching: mappings can match on company-only or document_type-only.
-        First match in the ordered list wins.
+        Returns:
+            List of MappingRule objects.
+        """
+        return self._mappings
 
+    def resolve_mapping(self, company: str, document_type: str) -> dict[str, Any]:
+        """Resolve the mapping for a specific (company, document_type) tuple.
+        
+        Processes all rules in order. For each matching rule, applies the set fields.
+        Later matches override earlier ones.
+        
         Args:
             company: The company name.
             document_type: The document type.
-
+        
         Returns:
-            CompanyTypeMapping if found, None otherwise.
+            Dict with resolved fields: template, period_format, additional_fields.
+            If no mapping found, returns empty dict.
         """
-        for mapping in self._mappings:
-            if mapping.matches(company, document_type):
-                return mapping
-        return None
+        result: dict[str, Any] = {}
+        
+        for rule in self._mappings:
+            if rule.matches(company, document_type):
+                # Apply set fields, overriding previous values
+                if rule.set.template is not None:
+                    result["template"] = rule.set.template
+                if rule.set.period_format is not None:
+                    result["period_format"] = rule.set.period_format
+                if rule.set.additional_fields:
+                    result["additional_fields"] = rule.set.additional_fields.copy()
+        
+        return result
 
     def get_template(self, name: str) -> TemplateConfig | None:
         """Get a template by name.
@@ -498,14 +564,6 @@ class TemplateRegistry:
             List of template names.
         """
         return list(self._templates.keys())
-
-    def list_all_mappings(self) -> list[CompanyTypeMapping]:
-        """List all company-type mappings.
-
-        Returns:
-            List of CompanyTypeMapping objects.
-        """
-        return self._mappings
 
     def is_valid_company(self, company: str) -> bool:
         """Check if a company is in the predefined list.
@@ -548,21 +606,6 @@ class TemplateRegistry:
         """
         return self._additional_fields.get(group_name, [])
 
-    def get_additional_fields_for_mapping(self, company: str, document_type: str) -> list[str]:
-        """Get the list of additional field group names for a specific (company, document_type) mapping.
-
-        Args:
-            company: The company name.
-            document_type: The document type.
-
-        Returns:
-            List of additional field group names, or empty list if no mapping found.
-        """
-        mapping = self.get_mapping(company, document_type)
-        if mapping:
-            return mapping.additional_fields
-        return []
-
     def get_period_format_config(self, format_name: str) -> PeriodFormatConfig | None:
         """Get the period format configuration by name.
 
@@ -573,36 +616,6 @@ class TemplateRegistry:
             PeriodFormatConfig if found, None otherwise.
         """
         return self._period_formats.get(format_name)
-
-    def get_period_format_for_mapping(self, company: str, document_type: str) -> str | None:
-        """Get the period format name for a specific (company, document_type) mapping.
-
-        Args:
-            company: The company name.
-            document_type: The document type.
-
-        Returns:
-            Period format name if mapping found, None otherwise.
-        """
-        mapping = self.get_mapping(company, document_type)
-        if mapping:
-            return mapping.period_format
-        return None
-
-    def get_template_for_mapping(self, company: str, document_type: str) -> str | None:
-        """Get the template name for a specific (company, document_type) mapping.
-
-        Args:
-            company: The company name.
-            document_type: The document type.
-
-        Returns:
-            Template name if mapping found, None otherwise.
-        """
-        mapping = self.get_mapping(company, document_type)
-        if mapping:
-            return mapping.template
-        return None
 
     def get_key_pattern(self, template_name: str) -> str | None:
         """Get the key pattern for a template.

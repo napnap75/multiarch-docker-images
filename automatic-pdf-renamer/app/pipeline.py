@@ -6,8 +6,9 @@ Implements the document processing workflow:
 3. Find company and document_type using ML, validated against predefined lists in config
    - Unknown values must route to review
 4. Look up the (company, document_type) tuple in mappings to get template, period_format, and additional_fields
-   - Mappings support wildcard: company OR document_type can be None (matches any)
-   - First match in ordered list wins
+   - Mappings use match/set structure: match criteria (company, document_type, both, or neither)
+   - Rules are processed in order, later matches override earlier ones
+   - Empty match {} matches all documents (default rule)
 5. Apply period_format (with granularity, format template, and offset) to calculate the human-readable period string
 6. Apply template key_pattern to generate the final filename
 """
@@ -20,14 +21,11 @@ from typing import Any
 
 from .config import (
     TemplateRegistry,
-    CompanyTypeMapping,
+    MappingRule,
     PeriodFormatConfig,
 )
 from .extractor import extract_first_page_text, is_text_empty, TextExtractionError
 from .period import (
-    PeriodGranularity,
-    PeriodOffset,
-    PeriodRule,
     format_period_from_emission_date,
 )
 from .sidecar import Sidecar, SidecarStatus, build_sidecar
@@ -147,24 +145,35 @@ class DocumentProcessor:
                 result.status = SidecarStatus.NOT_PROCESSED.value
                 return result
 
-            # Step 4: Look up (company, document_type) in mappings
-            # Uses wildcard matching: company OR document_type can be None (matches any)
-            # First match in ordered list wins
-            mapping = self.registry.get_mapping(company, doc_type)
-            if mapping is None:
+            # Step 4: Resolve mapping using match/set rules
+            # Rules are processed in order, later matches override earlier ones
+            resolved = self.registry.resolve_mapping(company, doc_type)
+            
+            if not resolved:
                 result.errors.append(
                     f"No mapping found for company='{company}', "
                     f"document_type='{doc_type}'. Routing to review."
                 )
                 result.status = SidecarStatus.NOT_PROCESSED.value
                 return result
-
-            result.template_name = mapping.template
+            
+            # Extract resolved fields
+            template_name = resolved.get("template")
+            period_format_name = resolved.get("period_format")
+            additional_field_groups = resolved.get("additional_fields", [])
+            
+            if not template_name:
+                result.errors.append(
+                    f"No template resolved for company='{company}', "
+                    f"document_type='{doc_type}'. Routing to review."
+                )
+                result.status = SidecarStatus.NOT_PROCESSED.value
+                return result
+            
+            result.template_name = template_name
 
             # Step 4b: Extract additional fields from additional_fields lists
             optional_fields = {}
-            additional_field_groups = self.registry.get_additional_fields_for_mapping(company, doc_type)
-            
             for group_name in additional_field_groups:
                 field_value, field_error = self._extract_field_value(
                     extracted_text, group_name
@@ -177,11 +186,10 @@ class DocumentProcessor:
                     optional_fields[group_name] = field_value
 
             # Step 5: Calculate period using period_format configuration
-            period_format_name = mapping.period_format
             if not period_format_name:
                 result.errors.append(
-                    f"No period_format specified for mapping "
-                    f"(company='{company}', document_type='{doc_type}')"
+                    f"No period_format resolved for company='{company}', "
+                    f"document_type='{doc_type}'. Routing to review."
                 )
                 result.status = SidecarStatus.NOT_PROCESSED.value
                 return result
@@ -206,7 +214,7 @@ class DocumentProcessor:
                 return result
 
             # Step 6: Generate the final key using template's key_pattern
-            key_pattern = self.registry.get_key_pattern(mapping.template)
+            key_pattern = self.registry.get_key_pattern(template_name)
             if key_pattern:
                 try:
                     final_key = self._format_key_pattern(
@@ -215,7 +223,7 @@ class DocumentProcessor:
                         document_type=doc_type,
                         emission_date=emission_date,
                         period=period,
-                        template_name=mapping.template,
+                        template_name=template_name,
                         emitting_company=company,
                         original_filename=original_key.split("/")[-1],
                         **optional_fields,
@@ -226,7 +234,7 @@ class DocumentProcessor:
                     return result
             else:
                 # Fallback: use a simple pattern
-                final_key = f"{mapping.template}/{period}/{company}/{doc_type}/{emission_date}_{original_key.split('/')[-1]}"
+                final_key = f"{template_name}/{period}/{company}/{doc_type}/{emission_date}_{original_key.split('/')[-1]}"
 
             # Step 7: Build the sidecar
             confidence = 1.0  # Will be set by ML classifier
@@ -235,7 +243,7 @@ class DocumentProcessor:
                 original_key=original_key,
                 current_key=final_key,
                 status=SidecarStatus.PROCESSED,
-                template_name=mapping.template,
+                template_name=template_name,
                 emission_date=emission_date,
                 period=period,
                 emitting_company=company,
@@ -249,7 +257,7 @@ class DocumentProcessor:
             sidecar.add_event(
                 "classified",
                 {
-                    "template": mapping.template,
+                    "template": template_name,
                     "company": company,
                     "document_type": doc_type,
                     "emission_date": emission_date,
