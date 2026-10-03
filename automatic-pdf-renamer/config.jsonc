@@ -1,6 +1,5 @@
 {
   "version": "1.0",
-
   "companies": [
     "EDF",
     "Engie",
@@ -18,18 +17,17 @@
     "Veolia",
     "Suez"
   ],
-
   "document_types": [
     "facture",
     "releve",
     "contrat",
     "avis"
   ],
-
   "additional_fields": {
     "bank_accounts": [
       "FR76 1234 5678 9012 3456 7890 123",
-      "FR76 2345 6789 0123 4567 8901 234"
+      "FR76 2345 6789 0123 4567 8901 234",
+      "AMBIGUOUS_VALUE"
     ],
     "properties": [
       "123 Rue de Paris, 75001 Paris",
@@ -37,14 +35,14 @@
     ],
     "contract_references": [
       "CONT-2024-001",
-      "CONT-2024-002"
+      "CONT-2024-002",
+      "AMBIGUOUS_VALUE"
     ],
     "customer_numbers": [
       "CUST-12345678",
       "CUST-87654321"
     ]
   },
-
   "date_extraction": [
     "([0-9]{1,2})[/-]([0-9]{1,2})[/-]([0-9]{4})",
     "([0-9]{4})[-/]([0-9]{1,2})[-/]([0-9]{1,2})",
@@ -52,7 +50,6 @@
     "(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre) ([0-9]{4})",
     "([0-9]{4})"
   ],
-
   "period_formats": {
     "monthly": {
       "granularity": "month",
@@ -85,9 +82,7 @@
       "offset": "current"
     }
   },
-
   "mappings": [
-    // DEFAULT RULE: Apply to ALL documents
     {
       "match": {},
       "set": {
@@ -95,19 +90,17 @@
         "period_format": "monthly"
       }
     },
-
-    // All bank statements (releve) use bank_statement template and bank_accounts fields
     {
       "match": {
         "document_type": "releve"
       },
       "set": {
         "template": "bank_statement",
-        "additional_fields": ["bank_accounts"]
+        "additional_fields": [
+          "bank_accounts"
+        ]
       }
     },
-
-    // All BNP Paribas documents use monthly period
     {
       "match": {
         "company": "BNP Paribas"
@@ -116,8 +109,6 @@
         "period_format": "monthly"
       }
     },
-
-    // All contracts use yearly period and contract template
     {
       "match": {
         "document_type": "contrat"
@@ -127,8 +118,6 @@
         "period_format": "yearly"
       }
     },
-
-    // EDF invoices: specific template + fields + monthly period
     {
       "match": {
         "company": "EDF",
@@ -137,11 +126,12 @@
       "set": {
         "template": "edf_invoice",
         "period_format": "monthly",
-        "additional_fields": ["contract_references", "customer_numbers"]
+        "additional_fields": [
+          "contract_references",
+          "customer_numbers"
+        ]
       }
     },
-
-    // EDF notices: specific template + quarterly format
     {
       "match": {
         "company": "EDF",
@@ -152,8 +142,6 @@
         "period_format": "quarterly_q"
       }
     },
-
-    // Veolia invoices: specific template + properties field
     {
       "match": {
         "company": "Veolia",
@@ -161,11 +149,12 @@
       },
       "set": {
         "template": "water_invoice",
-        "additional_fields": ["properties"]
+        "additional_fields": [
+          "properties"
+        ]
       }
     }
   ],
-
   "templates": {
     "default": {
       "key_pattern": "{emitting_company}/{period}/{document_type}/{emission_date}_{original_filename}"
