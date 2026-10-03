@@ -2,6 +2,12 @@
 
 Provides period parsing from filenames and computation from emission dates
 per template rules (PRD section 4.1, FR4.2, FR4.3).
+
+Supports custom period format templates with placeholders:
+- {year}, {year_next}, {year_previous}
+- {month}, {month_name}, {month_abbr}
+- {day}
+- {quarter}, {semester}, {week}
 """
 
 import re
@@ -17,8 +23,10 @@ class PeriodGranularity(Enum):
     """Granularity of period computation (PRD section 4.1)."""
 
     DAY = "day"
+    WEEK = "week"
     MONTH = "month"
     QUARTER = "quarter"
+    SEMESTER = "semester"
     YEAR = "year"
 
 
@@ -26,7 +34,8 @@ class PeriodOffset(Enum):
     """Offset for period computation (PRD section 4.1)."""
 
     CURRENT = "current"
-    NEXT = "next"
+    PREVIOUS = "previous"
+    FOLLOWING = "following"
 
 
 @dataclass
@@ -48,17 +57,17 @@ class PeriodRule:
 # French month names mapping
 _FRENCH_MONTHS = {
     "janvier": 1,
-    "février": 2,
+    "f\u00e9vrier": 2,
     "mars": 3,
     "avril": 4,
     "mai": 5,
     "juin": 6,
     "juillet": 7,
-    "août": 8,
+    "ao\u00fbt": 8,
     "septembre": 9,
     "octobre": 10,
     "novembre": 11,
-    "décembre": 12,
+    "d\u00e9cembre": 12,
     # English fallbacks
     "january": 1,
     "february": 2,
@@ -76,8 +85,8 @@ _FRENCH_MONTHS = {
 
 # Month name to full French name for output
 _FRENCH_MONTH_NAMES = {
-    1: "janvier", 2: "février", 3: "mars", 4: "avril", 5: "mai", 6: "juin",
-    7: "juillet", 8: "août", 9: "septembre", 10: "octobre", 11: "novembre", 12: "décembre",
+    1: "janvier", 2: "f\u00e9vrier", 3: "mars", 4: "avril", 5: "mai", 6: "juin",
+    7: "juillet", 8: "ao\u00fbt", 9: "septembre", 10: "octobre", 11: "novembre", 12: "d\u00e9cembre",
 }
 
 # Month abbreviation mapping
@@ -97,7 +106,7 @@ _YEAR_PATTERN = re.compile(r"\b(\d{4})\b")
 
 # Month-year patterns (various formats)
 _MONTH_YEAR_PATTERNS = [
-    # "août 2025", "August 2025" - French/English month name + year
+    # "ao\u00fbt 2025", "August 2025" - French/English month name + year
     re.compile(
         rf"\b([{''.join(_FRENCH_MONTHS.keys())}]+)\s+(\d{{4}})\b",
         re.IGNORECASE,
@@ -138,7 +147,7 @@ def parse_period_from_filename(filename: str) -> str | None:
 
     Tries to extract period from the filename, looking at various positions.
     Supports formats:
-    - Month-year: "août 2025", "August 2025", "Aug 2025", "2025-08"
+    - Month-year: "ao\u00fbt 2025", "August 2025", "Aug 2025", "2025-08"
     - Quarter: "Q3 2025", "T3 2025", "3 2025", "Q3-2025"
     - Year: "2025"
     - Date: "2025-08-31", "31/08/2025"
@@ -147,7 +156,7 @@ def parse_period_from_filename(filename: str) -> str | None:
         filename: The filename to parse (without path).
 
     Returns:
-        Parsed period string (e.g., "août 2025", "Q3 2025", "2025"), or None.
+        Parsed period string (e.g., "ao\u00fbt 2025", "Q3 2025", "2025"), or None.
     """
     # Get the filename without path
     basename = filename.split("/")[-1].split("\\")[-1]
@@ -227,6 +236,67 @@ def parse_period_from_filename(filename: str) -> str | None:
     return None
 
 
+def _parse_date_string(date_str: str) -> date:
+    """Parse a date string into a date object.
+    
+    Supports various formats: YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY, etc.
+    
+    Args:
+        date_str: The date string to parse.
+        
+    Returns:
+        date object.
+        
+    Raises:
+        ValueError: If the date string cannot be parsed.
+    """
+    if isinstance(date_str, date):
+        return date_str
+    
+    # Try ISO format first
+    try:
+        return datetime.fromisoformat(date_str).date()
+    except ValueError:
+        pass
+    
+    # Try other common formats
+    formats = [
+        "%Y-%m-%d",
+        "%d/%m/%Y",
+        "%m/%d/%Y",
+        "%d-%m-%Y",
+        "%Y/%m/%d",
+        "%Y-%m",
+        "%m-%Y",
+        "%Y",
+    ]
+    
+    for fmt in formats:
+        try:
+            return datetime.strptime(date_str, fmt).date()
+        except ValueError:
+            continue
+    
+    # Try to parse month name + year (e.g., "August 2025", "ao\u00fbt 2025")
+    month_year_match = re.match(
+        rf"^([{''.join(_FRENCH_MONTHS.keys())}]+)\s+(\d{{4}})$",
+        date_str.strip(),
+        re.IGNORECASE
+    )
+    if month_year_match:
+        month_name = month_year_match.group(1)
+        year = int(month_year_match.group(2))
+        month = _parse_french_month(month_name)
+        if month:
+            return date(year, month, 1)
+    
+    # Try year only
+    if re.match(r"^\d{4}$", date_str):
+        return date(int(date_str), 1, 1)
+    
+    raise ValueError(f"Cannot parse date string: {date_str}")
+
+
 def compute_period_from_date(
     emission_date: str | date,
     rule: PeriodRule,
@@ -240,22 +310,7 @@ def compute_period_from_date(
     Returns:
         Human-readable period string.
     """
-    if isinstance(emission_date, str):
-        # Parse ISO date
-        try:
-            dt = datetime.fromisoformat(emission_date).date()
-        except ValueError:
-            # Try other formats
-            for fmt in ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y"]:
-                try:
-                    dt = datetime.strptime(emission_date, fmt).date()
-                    break
-                except ValueError:
-                    continue
-            else:
-                raise ValueError(f"Cannot parse emission_date: {emission_date}")
-    else:
-        dt = emission_date
+    dt = _parse_date_string(emission_date)
 
     if rule.granularity == PeriodGranularity.DAY:
         return f"{dt.day} {_FRENCH_MONTH_NAMES[dt.month]} {dt.year}"
@@ -263,7 +318,10 @@ def compute_period_from_date(
     elif rule.granularity == PeriodGranularity.MONTH:
         if rule.offset == PeriodOffset.CURRENT:
             return format_month_year(dt.month, dt.year)
-        else:  # NEXT
+        elif rule.offset == PeriodOffset.PREVIOUS:
+            prev_month = dt + relativedelta(months=-1)
+            return format_month_year(prev_month.month, prev_month.year)
+        else:  # FOLLOWING
             next_month = dt + relativedelta(months=1)
             return format_month_year(next_month.month, next_month.year)
 
@@ -271,7 +329,14 @@ def compute_period_from_date(
         quarter = (dt.month - 1) // 3 + 1
         if rule.offset == PeriodOffset.CURRENT:
             return format_quarter(quarter, dt.year)
-        else:  # NEXT
+        elif rule.offset == PeriodOffset.PREVIOUS:
+            prev_quarter = quarter - 1
+            prev_year = dt.year
+            if prev_quarter < 1:
+                prev_quarter = 4
+                prev_year -= 1
+            return format_quarter(prev_quarter, prev_year)
+        else:  # FOLLOWING
             next_quarter = quarter + 1
             next_year = dt.year
             if next_quarter > 4:
@@ -279,14 +344,200 @@ def compute_period_from_date(
                 next_year += 1
             return format_quarter(next_quarter, next_year)
 
+    elif rule.granularity == PeriodGranularity.SEMESTER:
+        semester = (dt.month - 1) // 6 + 1
+        if rule.offset == PeriodOffset.CURRENT:
+            return f"S{semester} {dt.year}"
+        elif rule.offset == PeriodOffset.PREVIOUS:
+            prev_semester = semester - 1
+            prev_year = dt.year
+            if prev_semester < 1:
+                prev_semester = 2
+                prev_year -= 1
+            return f"S{prev_semester} {prev_year}"
+        else:  # FOLLOWING
+            next_semester = semester + 1
+            next_year = dt.year
+            if next_semester > 2:
+                next_semester = 1
+                next_year += 1
+            return f"S{next_semester} {next_year}"
+
+    elif rule.granularity == PeriodGranularity.WEEK:
+        # ISO week number
+        iso_year, iso_week, _ = dt.isocalendar()
+        if rule.offset == PeriodOffset.CURRENT:
+            return f"Week {iso_week} {iso_year}"
+        elif rule.offset == PeriodOffset.PREVIOUS:
+            prev_date = dt - relativedelta(weeks=1)
+            prev_year, prev_week, _ = prev_date.isocalendar()
+            return f"Week {prev_week} {prev_year}"
+        else:  # FOLLOWING
+            next_date = dt + relativedelta(weeks=1)
+            next_year, next_week, _ = next_date.isocalendar()
+            return f"Week {next_week} {next_year}"
+
     elif rule.granularity == PeriodGranularity.YEAR:
         if rule.offset == PeriodOffset.CURRENT:
             return str(dt.year)
-        else:  # NEXT
+        elif rule.offset == PeriodOffset.PREVIOUS:
+            return str(dt.year - 1)
+        else:  # FOLLOWING
             return str(dt.year + 1)
 
     else:
         raise ValueError(f"Unknown granularity: {rule.granularity}")
+
+
+def format_period_from_emission_date(
+    emission_date: str | date,
+    period_format: dict[str, Any],
+) -> str:
+    """Format period from emission date using custom period format configuration.
+    
+    The period_format dict contains:
+    - granularity: day, week, month, quarter, semester, year
+    - format: Custom template string with placeholders
+    - offset: current, previous, following
+    
+    Supported placeholders in format template:
+    - {year}: Current year
+    - {year_next}: Next year
+    - {year_previous}: Previous year
+    - {month}: Month number (1-12)
+    - {month_name}: Full month name (French)
+    - {month_abbr}: 3-letter month abbreviation
+    - {day}: Day of month (1-31)
+    - {quarter}: Quarter number (1-4)
+    - {semester}: Semester number (1-2)
+    - {week}: ISO week number (1-53)
+    
+    Args:
+        emission_date: The document emission date (string or date object).
+        period_format: Dict with granularity, format, and offset keys.
+        
+    Returns:
+        Formatted period string with placeholders replaced.
+        
+    Raises:
+        ValueError: If granularity is unknown or format template is invalid.
+    """
+    dt = _parse_date_string(emission_date)
+    
+    granularity = period_format.get("granularity", "month")
+    format_template = period_format.get("format", "")
+    offset = period_format.get("offset", "current")
+    
+    # Determine the base date based on offset
+    if offset == "previous":
+        # Date is at the end of the period, so we need the previous period
+        if granularity == "day":
+            base_date = dt - relativedelta(days=1)
+        elif granularity == "week":
+            base_date = dt - relativedelta(weeks=1)
+        elif granularity == "month":
+            base_date = dt - relativedelta(months=1)
+        elif granularity == "quarter":
+            quarter = (dt.month - 1) // 3 + 1
+            if quarter == 1:
+                base_date = date(dt.year - 1, 12, 1)
+            else:
+                base_date = date(dt.year, (quarter - 1) * 3, 1)
+        elif granularity == "semester":
+            semester = (dt.month - 1) // 6 + 1
+            if semester == 1:
+                base_date = date(dt.year - 1, 12, 1)
+            else:
+                base_date = date(dt.year, 6, 1)
+        elif granularity == "year":
+            base_date = date(dt.year - 1, 1, 1)
+        else:
+            base_date = dt
+    elif offset == "following":
+        # Date is at the beginning of the period, so we use the current date
+        base_date = dt
+    else:  # current
+        # Date is in the middle of the period, use the date as-is
+        base_date = dt
+    
+    # Calculate period values based on granularity
+    period_values: dict[str, Any] = {}
+    
+    if granularity == "day":
+        period_values["year"] = base_date.year
+        period_values["month"] = base_date.month
+        period_values["month_name"] = _FRENCH_MONTH_NAMES[base_date.month]
+        period_values["month_abbr"] = _MONTH_ABBR[base_date.month]
+        period_values["day"] = base_date.day
+        period_values["quarter"] = (base_date.month - 1) // 3 + 1
+        period_values["semester"] = (base_date.month - 1) // 6 + 1
+        _, period_values["week"], _ = base_date.isocalendar()
+    
+    elif granularity == "week":
+        _, period_values["week"], _ = base_date.isocalendar()
+        period_values["year"] = base_date.year
+        period_values["month"] = base_date.month
+        period_values["month_name"] = _FRENCH_MONTH_NAMES[base_date.month]
+        period_values["month_abbr"] = _MONTH_ABBR[base_date.month]
+        period_values["day"] = base_date.day
+        period_values["quarter"] = (base_date.month - 1) // 3 + 1
+        period_values["semester"] = (base_date.month - 1) // 6 + 1
+    
+    elif granularity == "month":
+        period_values["year"] = base_date.year
+        period_values["month"] = base_date.month
+        period_values["month_name"] = _FRENCH_MONTH_NAMES[base_date.month]
+        period_values["month_abbr"] = _MONTH_ABBR[base_date.month]
+        period_values["day"] = 1  # Default to first day of month
+        period_values["quarter"] = (base_date.month - 1) // 3 + 1
+        period_values["semester"] = (base_date.month - 1) // 6 + 1
+        _, period_values["week"], _ = base_date.isocalendar()
+    
+    elif granularity == "quarter":
+        quarter = (base_date.month - 1) // 3 + 1
+        period_values["quarter"] = quarter
+        period_values["year"] = base_date.year
+        period_values["month"] = (quarter - 1) * 3 + 1  # First month of quarter
+        period_values["month_name"] = _FRENCH_MONTH_NAMES[period_values["month"]]
+        period_values["month_abbr"] = _MONTH_ABBR[period_values["month"]]
+        period_values["day"] = 1
+        period_values["semester"] = (quarter - 1) // 2 + 1
+        _, period_values["week"], _ = base_date.isocalendar()
+    
+    elif granularity == "semester":
+        semester = (base_date.month - 1) // 6 + 1
+        period_values["semester"] = semester
+        period_values["year"] = base_date.year
+        period_values["month"] = (semester - 1) * 6 + 1  # First month of semester
+        period_values["month_name"] = _FRENCH_MONTH_NAMES[period_values["month"]]
+        period_values["month_abbr"] = _MONTH_ABBR[period_values["month"]]
+        period_values["day"] = 1
+        period_values["quarter"] = (period_values["month"] - 1) // 3 + 1
+        _, period_values["week"], _ = base_date.isocalendar()
+    
+    elif granularity == "year":
+        period_values["year"] = base_date.year
+        period_values["month"] = 1
+        period_values["month_name"] = "janvier"
+        period_values["month_abbr"] = "Jan"
+        period_values["day"] = 1
+        period_values["quarter"] = 1
+        period_values["semester"] = 1
+        _, period_values["week"], _ = base_date.isocalendar()
+    
+    else:
+        raise ValueError(f"Unknown granularity: {granularity}")
+    
+    # Add year_next and year_previous
+    period_values["year_next"] = period_values["year"] + 1
+    period_values["year_previous"] = period_values["year"] - 1
+    
+    # Format the template
+    try:
+        return format_template.format(**period_values)
+    except KeyError as e:
+        missing = str(e).strip("'")
+        raise ValueError(f"Unknown placeholder '{missing}' in format template: {format_template}")
 
 
 def format_month_year(month: int, year: int, use_french: bool = True) -> str:
@@ -300,7 +551,7 @@ def format_month_year(month: int, year: int, use_french: bool = True) -> str:
         use_french: If True, use French month names; otherwise use English.
 
     Returns:
-        Formatted string (e.g., "août 2025" or "August 2025").
+        Formatted string (e.g., "ao\u00fbt 2025" or "August 2025").
     """
     if month < 1 or month > 12:
         raise ValueError(f"Invalid month: {month}")
@@ -361,20 +612,7 @@ def get_period(
 
     # If we have emission_date but no rule, use month-year as fallback
     if emission_date:
-        if isinstance(emission_date, str):
-            try:
-                dt = datetime.fromisoformat(emission_date).date()
-            except ValueError:
-                for fmt in ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y"]:
-                    try:
-                        dt = datetime.strptime(emission_date, fmt).date()
-                        break
-                    except ValueError:
-                        continue
-                else:
-                    raise ValueError(f"Cannot parse emission_date: {emission_date}")
-        else:
-            dt = emission_date
+        dt = _parse_date_string(emission_date)
         return (format_month_year(dt.month, dt.year), False)
 
     raise ValueError("Cannot determine period: no filename, emission_date, or rule provided")
@@ -396,20 +634,7 @@ def validate_period_consistency(
         Tuple of (is_consistent, error_message).
         If consistent, error_message is None.
     """
-    if isinstance(emission_date, str):
-        try:
-            dt = datetime.fromisoformat(emission_date).date()
-        except ValueError:
-            for fmt in ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y"]:
-                try:
-                    dt = datetime.strptime(emission_date, fmt).date()
-                    break
-                except ValueError:
-                    continue
-            else:
-                return (False, f"Cannot parse emission_date: {emission_date}")
-    else:
-        dt = emission_date
+    dt = _parse_date_string(emission_date)
 
     # Compute expected period from rule
     expected_period = compute_period_from_date(dt, rule)

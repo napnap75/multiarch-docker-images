@@ -1,11 +1,6 @@
 {
   "version": "1.0",
 
-  // ============================================================================
-  // COMPANIES
-  // Predefined list of valid companies.
-  // If ML extracts a company NOT in this list, document is routed to review.
-  // ============================================================================
   "companies": [
     "EDF",
     "Engie",
@@ -24,11 +19,6 @@
     "Suez"
   ],
 
-  // ============================================================================
-  // DOCUMENT TYPES
-  // Predefined list of valid document types.
-  // If ML extracts a document_type NOT in this list, document is routed to review.
-  // ============================================================================
   "document_types": [
     "facture",
     "releve",
@@ -36,89 +26,34 @@
     "avis"
   ],
 
-  // ============================================================================
-  // ADDITIONAL FIELDS
-  // Predefined lists of possible values for additional fields.
-  // ML will extract values from these lists for each field type.
-  // ============================================================================
   "additional_fields": {
     "bank_accounts": [
       "FR76 1234 5678 9012 3456 7890 123",
-      "FR76 2345 6789 0123 4567 8901 234",
-      "FR76 3456 7890 1234 5678 9012 345",
-      "FR76 4567 8901 2345 6789 0123 456"
+      "FR76 2345 6789 0123 4567 8901 234"
     ],
-
     "properties": [
       "123 Rue de Paris, 75001 Paris",
-      "456 Avenue des Champs, 75002 Paris",
-      "789 Boulevard de la Republique, 69001 Lyon",
-      "321 Rue de la Gare, 13001 Marseille"
+      "456 Avenue des Champs, 75002 Paris"
     ],
-
     "contract_references": [
       "CONT-2024-001",
-      "CONT-2024-002",
-      "CONT-2024-003",
-      "REF-2024-ABC"
+      "CONT-2024-002"
     ],
-
     "customer_numbers": [
       "CUST-12345678",
-      "CUST-87654321",
-      "CLIENT-001",
-      "CLIENT-002"
+      "CUST-87654321"
     ]
   },
 
-  // ============================================================================
-  // DATE EXTRACTION
-  // Regex patterns for extracting emission date from text.
-  // Applied in order, first match wins.
-  // ============================================================================
   "date_extraction": [
-    {
-      "pattern": "([0-9]{1,2})[/-]([0-9]{1,2})[/-]([0-9]{4})",
-      "description": "DD/MM/YYYY or DD-MM-YYYY"
-    },
-    {
-      "pattern": "([0-9]{4})[-/]([0-9]{1,2})[-/]([0-9]{1,2})",
-      "description": "YYYY-MM-DD (ISO format)"
-    },
-    {
-      "pattern": "([0-9]{1,2}) (janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre) ([0-9]{4})",
-      "description": "DD MonthName YYYY (French)"
-    },
-    {
-      "pattern": "(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre) ([0-9]{4})",
-      "description": "MonthName YYYY"
-    },
-    {
-      "pattern": "([0-9]{4})",
-      "description": "Year only (YYYY)"
-    }
+    "([0-9]{1,2})[/-]([0-9]{1,2})[/-]([0-9]{4})",
+    "([0-9]{4})[-/]([0-9]{1,2})[-/]([0-9]{1,2})",
+    "([0-9]{1,2}) (janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre) ([0-9]{4})",
+    "(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre) ([0-9]{4})",
+    "([0-9]{4})"
   ],
 
-  // ============================================================================
-  // PERIOD FORMATS
-  // Customizable period formats identified by name.
-  // Each format defines:
-  //   - granularity: day, week, month, quarter, semester, year
-  //   - format: template string with placeholders
-  //   - offset: "current" (date in middle of period), "previous" (arrives after), "following" (arrives before)
-  //
-  // Available placeholders in format templates:
-  //   - {year}: 4-digit year (e.g., 2024)
-  //   - {month}: month number (01-12)
-  //   - {month_name}: full month name in French (e.g., "janvier")
-  //   - {month_abbr}: abbreviated month (e.g., "Jan")
-  //   - {day}: day of month (01-31)
-  //   - {quarter}: quarter number (1-4)
-  //   - {semester}: semester number (1-2)
-  //   - {week}: week number (01-53)
-  // ============================================================================
   "period_formats": {
-    // Standard formats
     "monthly": {
       "granularity": "month",
       "format": "{month_name} {year}",
@@ -148,56 +83,9 @@
       "granularity": "year",
       "format": "{year}",
       "offset": "current"
-    },
-    "daily": {
-      "granularity": "day",
-      "format": "{day} {month_name} {year}",
-      "offset": "current"
-    },
-    "weekly": {
-      "granularity": "week",
-      "format": "Semaine {week} {year}",
-      "offset": "current"
-    },
-
-    // Custom formats with different offsets
-    "monthly_previous": {
-      "granularity": "month",
-      "format": "{month_name} {year}",
-      "offset": "previous"
-    },
-    "quarterly_following": {
-      "granularity": "quarter",
-      "format": "Q{quarter} {year}",
-      "offset": "following"
-    },
-    "semester_french": {
-      "granularity": "semester",
-      "format": "Semestre {semester} {year}",
-      "offset": "current"
-    },
-
-    // Custom format examples
-    "fiscal_year": {
-      "granularity": "year",
-      "format": "Exercice {year}/{year_next}",
-      "offset": "current"
-    },
-    "school_quarter": {
-      "granularity": "quarter",
-      "format": "Trimestre {quarter} - {year}",
-      "offset": "current"
     }
   },
 
-  // ============================================================================
-  // MAPPINGS
-  // (company, document_type) -> template + period_format + additional_fields
-  // The company-type tuple defines:
-  //   - template: which template to use
-  //   - period_format: which period format to use (from period_formats)
-  //   - additional_fields: which field groups to extract for this document
-  // ============================================================================
   "mappings": [
     {
       "company": "EDF",
@@ -210,141 +98,19 @@
       "company": "EDF",
       "document_type": "avis",
       "template": "edf_notice",
-      "period_format": "quarterly_q",
-      "additional_fields": ["contract_references"]
-    },
-    {
-      "company": "Engie",
-      "document_type": "facture",
-      "template": "engie_invoice",
-      "period_format": "monthly",
-      "additional_fields": ["contract_references", "customer_numbers"]
+      "period_format": "quarterly_q"
     },
     {
       "company": "BNP Paribas",
+      "template": "bank_statement",
+      "period_format": "monthly",
+      "additional_fields": ["bank_accounts"]
+    },
+    {
       "document_type": "releve",
       "template": "bank_statement",
       "period_format": "monthly",
       "additional_fields": ["bank_accounts"]
-    },
-    {
-      "company": "BNP Paribas",
-      "document_type": "releve_compte",
-      "template": "bank_statement",
-      "period_format": "monthly",
-      "additional_fields": ["bank_accounts"]
-    },
-    {
-      "company": "BNP Paribas",
-      "document_type": "extrait_compte",
-      "template": "bank_statement",
-      "period_format": "monthly_numeric",
-      "additional_fields": ["bank_accounts"]
-    },
-    {
-      "company": "Societe Generale",
-      "document_type": "releve",
-      "template": "bank_statement",
-      "period_format": "monthly",
-      "additional_fields": ["bank_accounts"]
-    },
-    {
-      "company": "Societe Generale",
-      "document_type": "releve_compte",
-      "template": "bank_statement",
-      "period_format": "monthly",
-      "additional_fields": ["bank_accounts"]
-    },
-    {
-      "company": "Credit Agricole",
-      "document_type": "releve",
-      "template": "bank_statement",
-      "period_format": "monthly",
-      "additional_fields": ["bank_accounts"]
-    },
-    {
-      "company": "La Banque Postale",
-      "document_type": "releve",
-      "template": "bank_statement",
-      "period_format": "monthly",
-      "additional_fields": ["bank_accounts"]
-    },
-    {
-      "company": "Orange",
-      "document_type": "facture",
-      "template": "telecom_invoice",
-      "period_format": "monthly",
-      "additional_fields": ["contract_references", "customer_numbers"]
-    },
-    {
-      "company": "Orange",
-      "document_type": "facture_telephone",
-      "template": "telecom_invoice",
-      "period_format": "monthly",
-      "additional_fields": ["contract_references"]
-    },
-    {
-      "company": "Orange",
-      "document_type": "facture_internet",
-      "template": "telecom_invoice",
-      "period_format": "monthly",
-      "additional_fields": ["contract_references"]
-    },
-    {
-      "company": "SFR",
-      "document_type": "facture",
-      "template": "telecom_invoice",
-      "period_format": "monthly",
-      "additional_fields": ["contract_references"]
-    },
-    {
-      "company": "Free",
-      "document_type": "facture",
-      "template": "telecom_invoice",
-      "period_format": "monthly",
-      "additional_fields": ["contract_references"]
-    },
-    {
-      "company": "Free",
-      "document_type": "facture_telephone",
-      "template": "telecom_invoice",
-      "period_format": "monthly",
-      "additional_fields": ["contract_references"]
-    },
-    {
-      "company": "Free",
-      "document_type": "facture_internet",
-      "template": "telecom_invoice",
-      "period_format": "monthly",
-      "additional_fields": ["contract_references"]
-    },
-    {
-      "company": "Bouygues Telecom",
-      "document_type": "facture",
-      "template": "telecom_invoice",
-      "period_format": "monthly",
-      "additional_fields": ["contract_references"]
-    },
-    {
-      "company": "TotalEnergies",
-      "document_type": "facture",
-      "template": "energy_invoice",
-      "period_format": "monthly",
-      "additional_fields": ["contract_references", "customer_numbers"]
-    },
-    {
-      "company": "ENEDIS",
-      "document_type": "facture",
-      "template": "enedis_invoice",
-      "period_format": "monthly",
-      "additional_fields": ["properties", "contract_references"]
-    },
-    {
-      "company": "GRDF",
-      "document_type": "facture",
-      "template": "grdf_invoice",
-      "period_format": "monthly",
-      "additional_fields": ["properties", "contract_references"]
     },
     {
       "company": "Veolia",
@@ -354,54 +120,27 @@
       "additional_fields": ["properties"]
     },
     {
-      "company": "Veolia",
-      "document_type": "facture_eau",
-      "template": "water_invoice",
-      "period_format": "semester_french",
-      "additional_fields": ["properties"]
-    },
-    {
-      "company": "Suez",
-      "document_type": "facture",
-      "template": "water_invoice",
-      "period_format": "quarterly_following",
-      "additional_fields": ["properties"]
+      "document_type": "contrat",
+      "template": "contract",
+      "period_format": "yearly"
     }
   ],
 
-  // ============================================================================
-  // TEMPLATES
-  // Templates define the key pattern for the final filename.
-  // Can use: {emitting_company}, {period}, {document_type}, {emission_date}, {original_filename}
-  // Plus any additional field names (e.g., {bank_accounts}, {properties}, etc.)
-  // ============================================================================
   "templates": {
     "edf_invoice": {
       "key_pattern": "{emitting_company}/{period}/{document_type}/{emission_date}_{original_filename}"
     },
-    "engie_invoice": {
+    "edf_notice": {
       "key_pattern": "{emitting_company}/{period}/{document_type}/{emission_date}_{original_filename}"
     },
     "bank_statement": {
       "key_pattern": "Banques/{emitting_company}/{period}/{document_type}/{emission_date}_{original_filename}"
     },
-    "telecom_invoice": {
-      "key_pattern": "Telecoms/{emitting_company}/{period}/{document_type}/{emission_date}_{original_filename}"
-    },
-    "energy_invoice": {
-      "key_pattern": "Energie/{emitting_company}/{period}/{document_type}/{emission_date}_{original_filename}"
+    "contract": {
+      "key_pattern": "Contrats/{emitting_company}/{period}/{document_type}/{emission_date}_{original_filename}"
     },
     "water_invoice": {
       "key_pattern": "Eau/{emitting_company}/{period}/{document_type}/{emission_date}_{original_filename}"
-    },
-    "enedis_invoice": {
-      "key_pattern": "Energie/ENEDIS/{period}/{document_type}/{emission_date}_{original_filename}"
-    },
-    "grdf_invoice": {
-      "key_pattern": "Energie/GRDF/{period}/{document_type}/{emission_date}_{original_filename}"
-    },
-    "edf_notice": {
-      "key_pattern": "{emitting_company}/{period}/{document_type}/{emission_date}_{original_filename}"
     }
   }
 }
