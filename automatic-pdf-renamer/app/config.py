@@ -1,15 +1,28 @@
 """Configuration module for Automatic PDF Renamer.
 
-Provides environment variable parsing and template YAML loading.
+Provides environment variable parsing and JSONC configuration loading.
+Supports the new mapping-based configuration structure where:
+- companies: predefined list of valid companies
+- document_types: predefined list of valid document types
+- additional_fields: predefined value groups for ML extraction
+- date_extraction: ordered list of regex strings for finding emission date
+- period_formats: named configurations with granularity, format template, offset
+- mappings: ordered list of rules with match criteria and set actions
+  - match: can contain company, document_type, both, or neither (empty = matches all)
+  - set: can contain template, period_format, additional_fields
+  - Rules are processed in order, later matches override earlier ones
+- templates: template definitions with key patterns
 """
 
+from __future__ import annotations
+
+import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +122,149 @@ class ClassifierConfig:
 
 
 @dataclass
+class PeriodFormatConfig:
+    """Period format configuration."""
+
+    granularity: str
+    format: str
+    offset: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "PeriodFormatConfig":
+        """Create PeriodFormatConfig from dict."""
+        return cls(
+            granularity=data.get("granularity", "month"),
+            format=data.get("format", ""),
+            offset=data.get("offset", "current"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "granularity": self.granularity,
+            "format": self.format,
+            "offset": self.offset,
+        }
+
+
+@dataclass
+class MappingMatch:
+    """Match criteria for a mapping rule.
+    
+    Can contain company, document_type, both, or neither (empty = matches all).
+    """
+
+    company: str | None = None
+    document_type: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "MappingMatch":
+        """Create MappingMatch from dict."""
+        if data is None:
+            return cls()
+        return cls(
+            company=data.get("company"),
+            document_type=data.get("document_type"),
+        )
+
+    def matches(self, company: str, document_type: str) -> bool:
+        """Check if this match criteria matches the given company and document type.
+        
+        Empty match (both None) matches everything.
+        company=None in match means match any company.
+        document_type=None in match means match any document type.
+        """
+        company_match = self.company is None or (isinstance(self.company, list) and company in self.company) or self.company == company
+        doc_type_match = self.document_type is None or (isinstance(self.document_type, list) and document_type in self.document_type) or self.document_type == document_type
+        return company_match and doc_type_match
+
+
+@dataclass
+class MappingSet:
+    """Fields to set for a mapping rule.
+    
+    Can contain template, period_format, and/or additional_fields.
+    """
+
+    template: str | None = None
+    period_format: str | None = None
+    additional_fields: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "MappingSet":
+        """Create MappingSet from dict."""
+        if data is None:
+            return cls()
+        return cls(
+            template=data.get("template"),
+            period_format=data.get("period_format"),
+            additional_fields=data.get("additional_fields", []),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        if self.template is not None:
+            result["template"] = self.template
+        if self.period_format is not None:
+            result["period_format"] = self.period_format
+        if self.additional_fields:
+            result["additional_fields"] = self.additional_fields
+        return result
+
+
+@dataclass
+class MappingRule:
+    """A mapping rule with match criteria and set actions.
+    
+    Rules are processed in order. For each document, all matching rules
+    are applied in order, with later matches overriding earlier ones.
+    """
+
+    match: MappingMatch = field(default_factory=MappingMatch)
+    set: MappingSet = field(default_factory=MappingSet)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MappingRule":
+        """Create MappingRule from dict."""
+        return cls(
+            match=MappingMatch.from_dict(data.get("match", {})),
+            set=MappingSet.from_dict(data.get("set", {})),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        match_dict = self.match.to_dict() if hasattr(self.match, 'to_dict') else {}
+        if match_dict:
+            result["match"] = match_dict
+        set_dict = self.set.to_dict()
+        if set_dict:
+            result["set"] = set_dict
+        return result
+
+    def matches(self, company: str, document_type: str) -> bool:
+        """Check if this rule matches the given company and document type."""
+        return self.match.matches(company, document_type)
+
+
+@dataclass
+class TemplateConfig:
+    """Template configuration with key pattern."""
+
+    name: str
+    key_pattern: str = ""
+
+    @classmethod
+    def from_dict(cls, name: str, data: dict[str, Any]) -> "TemplateConfig":
+        """Create TemplateConfig from dict."""
+        return cls(
+            name=name,
+            key_pattern=data.get("key_pattern", ""),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"key_pattern": self.key_pattern}
+
+
+@dataclass
 class AppConfig:
     """Main application configuration."""
 
@@ -146,71 +302,251 @@ class AppConfig:
             self.paperless.validate()
 
 
-@dataclass
-class TemplateConfig:
-    """Template configuration from YAML."""
-
-    name: str
-    document_family: str
-    document_types: list[str]
-    period: dict[str, Any]
-    optional_fields: dict[str, Any] = field(default_factory=dict)
-    key_pattern: str = ""
-    target_prefix: str = ""
-
-    @classmethod
-    def from_dict(cls, name: str, data: dict[str, Any]) -> "TemplateConfig":
-        """Create a TemplateConfig from a YAML dict."""
-        return cls(
-            name=name,
-            document_family=data.get("document_family", name),
-            document_types=data.get("document_types", []),
-            period=data.get("period", {}),
-            optional_fields=data.get("optional_fields", {}),
-            key_pattern=data.get("key_pattern", ""),
-            target_prefix=data.get("target_prefix", ""),
-        )
-
-
 class TemplateRegistry:
-    """Registry for template configurations."""
+    """Registry for template configurations.
+    
+    Supports the new mapping-based configuration with:
+    - companies: list of valid company names
+    - document_types: list of valid document type names
+    - additional_fields: predefined value groups for ML extraction
+    - date_extraction: ordered list of regex strings
+    - period_formats: dict of named period format configurations
+    - mappings: ordered list of MappingRule objects (match + set)
+    - templates: template definitions with key patterns
+    """
 
     def __init__(self):
         self._templates: dict[str, TemplateConfig] = {}
+        self._companies: list[str] = []
+        self._document_types: list[str] = []
+        self._additional_fields: dict[str, list[str]] = {}
+        self._period_formats: dict[str, PeriodFormatConfig] = {}
+        self._mappings: list[MappingRule] = []
+        self._date_extraction_patterns: list[str] = []
+        self._date_extraction_compiled: list[re.Pattern] = []
+        self._config_version: str = "1.0"
+        self._is_new_format: bool = False
 
     def load_from_file(self, filepath: str) -> None:
-        """Load templates from a YAML file.
+        """Load configuration from a JSONC or YAML file.
+
+        Supports both new mapping-based format (JSONC) and legacy template format (YAML).
 
         Args:
-            filepath: Path to the YAML file.
+            filepath: Path to the configuration file.
         """
-        with open(filepath, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-
-        if not data or not isinstance(data, dict):
-            logger.warning(f"No templates found in {filepath}")
+        path = Path(filepath)
+        
+        if not path.exists():
+            logger.warning(f"Configuration file {filepath} does not exist")
             return
 
-        for name, config in data.items():
-            template = TemplateConfig.from_dict(name, config)
-            self._templates[name] = template
-            logger.info(f"Loaded template: {name}")
+        # Check if this is a JSONC file
+        if path.suffix.lower() in (".jsonc", ".json"):
+            self._load_jsonc_format(path)
+            self._is_new_format = True
+        else:
+            # Try to load as YAML (legacy)
+            try:
+                import yaml
+                with open(path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f)
+                if data and isinstance(data, dict) and "mappings" in data:
+                    self._load_new_format(data)
+                    self._is_new_format = True
+                else:
+                    self._load_legacy_format(data)
+                    self._is_new_format = False
+            except ImportError:
+                logger.error("PyYAML is not installed. Cannot load YAML configuration.")
+                raise
+
+    def _load_jsonc_format(self, path: Path) -> None:
+        """Load configuration from a JSONC file.
+        
+        Strips // line comments and /* */ block comments, then parses as JSON.
+        """
+        logger.info(f"Loading JSONC configuration from {path}")
+        
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+        
+        # Strip comments from JSONC
+        json_content = self._strip_jsonc_comments(content)
+        
+        # Parse JSON
+        try:
+            data = json.loads(json_content)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSONC file {path}: {e}")
+            raise
+        
+        self._load_new_format(data)
+
+    def _strip_jsonc_comments(self, content: str) -> str:
+        """Strip // line comments and /* */ block comments from JSONC content.
+        
+        Args:
+            content: The JSONC content with comments.
+            
+        Returns:
+            Clean JSON string without comments.
+        """
+        # Remove /* */ block comments first
+        content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+        # Remove // line comments
+        content = re.sub(r'//.*$', '', content, flags=re.MULTILINE)
+        # Remove leading/trailing whitespace from the result
+        return content.strip()
+
+    def _load_new_format(self, data: dict[str, Any]) -> None:
+        """Load the new mapping-based configuration format."""
+        logger.info(f"Loading new mapping-based configuration (version: {data.get('version', 'unknown')})")
+        
+        # Load version
+        self._config_version = data.get("version", "1.0")
+        
+        # Load companies
+        self._companies = data.get("companies", [])
+        logger.info(f"Loaded {len(self._companies)} companies")
+        
+        # Load document_types
+        self._document_types = data.get("document_types", [])
+        logger.info(f"Loaded {len(self._document_types)} document types")
+        
+        # Load additional_fields
+        additional_fields_data = data.get("additional_fields", {})
+        self._additional_fields = {}
+        for group_name, values in additional_fields_data.items():
+            self._additional_fields[group_name] = list(values) if isinstance(values, list) else []
+        logger.info(f"Loaded {len(self._additional_fields)} additional field groups")
+        
+        # Load period_formats
+        period_formats_data = data.get("period_formats", {})
+        self._period_formats = {}
+        for name, config in period_formats_data.items():
+            self._period_formats[name] = PeriodFormatConfig.from_dict(config)
+            logger.info(f"Loaded period format: {name}")
+        
+        # Load date extraction patterns (simplified: list of regex strings)
+        date_patterns_data = data.get("date_extraction", [])
+        self._date_extraction_patterns = list(date_patterns_data) if isinstance(date_patterns_data, list) else []
+        self._date_extraction_compiled = [re.compile(p) for p in self._date_extraction_patterns]
+        logger.info(f"Loaded {len(self._date_extraction_patterns)} date extraction patterns")
+        
+        # Load mappings (new format: list of {match, set} objects)
+        mappings_data = data.get("mappings", [])
+        self._mappings = [
+            MappingRule.from_dict(m) for m in mappings_data
+        ]
+        logger.info(f"Loaded {len(self._mappings)} mapping rules: {self._mappings}")
+        
+        # Load templates
+        templates_data = data.get("templates", {})
+        for name, config in templates_data.items():
+            if isinstance(config, dict):
+                template = TemplateConfig.from_dict(name, config)
+                self._templates[name] = template
+                logger.info(f"Loaded template: {name}")
+
+    def _load_legacy_format(self, data: dict[str, Any]) -> None:
+        """Load the legacy template-based configuration format."""
+        logger.info("Loading legacy template-based configuration")
+        
+        if data and isinstance(data, dict):
+            for name, config in data.items():
+                if isinstance(config, dict):
+                    template = TemplateConfig.from_dict(name, config)
+                    self._templates[name] = template
+                    logger.info(f"Loaded legacy template: {name}")
 
     def load_from_directory(self, dirpath: str) -> None:
-        """Load templates from all YAML files in a directory.
+        """Load templates from all JSONC or YAML files in a directory.
 
         Args:
-            dirpath: Path to the directory containing YAML files.
+            dirpath: Path to the directory containing configuration files.
         """
         path = Path(dirpath)
         if not path.exists():
-            logger.warning(f"Template directory {dirpath} does not exist")
+            logger.warning(f"Configuration directory {dirpath} does not exist")
             return
 
-        for yaml_file in path.glob("*.yaml") + path.glob("*.yml"):
-            self.load_from_file(str(yaml_file))
+        for config_file in path.glob("*.jsonc") + path.glob("*.json") + path.glob("*.yaml") + path.glob("*.yml"):
+            self.load_from_file(str(config_file))
 
-    def get(self, name: str) -> TemplateConfig | None:
+    def is_new_format(self) -> bool:
+        """Check if the loaded configuration uses the new mapping-based format."""
+        return self._is_new_format
+
+    def get_companies(self) -> list[str]:
+        """Get the list of valid companies.
+
+        Returns:
+            List of company names.
+        """
+        return self._companies
+
+    def get_document_types(self) -> list[str]:
+        """Get the list of valid document types.
+
+        Returns:
+            List of document type names.
+        """
+        return self._document_types
+
+    def get_date_extraction_patterns(self) -> list[str]:
+        """Get the list of date extraction regex pattern strings.
+
+        Returns:
+            List of regex pattern strings.
+        """
+        return self._date_extraction_patterns
+
+    def get_date_extraction_compiled(self) -> list[re.Pattern]:
+        """Get the list of compiled date extraction regex patterns.
+
+        Returns:
+            List of compiled regex Pattern objects.
+        """
+        return self._date_extraction_compiled
+
+    def get_mapping_rules(self) -> list[MappingRule]:
+        """Get all mapping rules.
+
+        Returns:
+            List of MappingRule objects.
+        """
+        return self._mappings
+
+    def resolve_mapping(self, company: str, document_type: str) -> dict[str, Any]:
+        """Resolve the mapping for a specific (company, document_type) tuple.
+        
+        Processes all rules in order. For each matching rule, applies the set fields.
+        Later matches override earlier ones.
+        
+        Args:
+            company: The company name.
+            document_type: The document type.
+        
+        Returns:
+            Dict with resolved fields: template, period_format, additional_fields.
+            If no mapping found, returns empty dict.
+        """
+        result: dict[str, Any] = {}
+        
+        for rule in self._mappings:
+            if rule.matches(company, document_type):
+                # Apply set fields, overriding previous values
+                if rule.set.template is not None:
+                    result["template"] = rule.set.template
+                if rule.set.period_format is not None:
+                    result["period_format"] = rule.set.period_format
+                if rule.set.additional_fields:
+                    result["additional_fields"] = rule.set.additional_fields.copy()
+        
+        return result
+
+    def get_template(self, name: str) -> TemplateConfig | None:
         """Get a template by name.
 
         Args:
@@ -221,7 +557,7 @@ class TemplateRegistry:
         """
         return self._templates.get(name)
 
-    def list_all(self) -> list[str]:
+    def list_all_templates(self) -> list[str]:
         """List all template names.
 
         Returns:
@@ -229,25 +565,71 @@ class TemplateRegistry:
         """
         return list(self._templates.keys())
 
-    def get_period_rule(self, template_name: str) -> "PeriodRule" | None:
-        """Get the period rule for a template.
+    def is_valid_company(self, company: str) -> bool:
+        """Check if a company is in the predefined list.
+
+        Args:
+            company: The company name to check.
+
+        Returns:
+            True if valid, False otherwise.
+        """
+        return company in self._companies
+
+    def is_valid_document_type(self, document_type: str) -> bool:
+        """Check if a document type is in the predefined list.
+
+        Args:
+            document_type: The document type to check.
+
+        Returns:
+            True if valid, False otherwise.
+        """
+        return document_type in self._document_types
+
+    def get_additional_fields(self) -> dict[str, list[str]]:
+        """Get the dictionary of additional field groups with their possible values.
+
+        Returns:
+            Dict mapping field group names to list of possible values.
+        """
+        return self._additional_fields
+
+    def get_additional_field_values(self, group_name: str) -> list[str]:
+        """Get the list of possible values for a specific additional field group.
+
+        Args:
+            group_name: The name of the additional field group.
+
+        Returns:
+            List of possible values, or empty list if group not found.
+        """
+        return self._additional_fields.get(group_name, [])
+
+    def get_period_format_config(self, format_name: str) -> PeriodFormatConfig | None:
+        """Get the period format configuration by name.
+
+        Args:
+            format_name: The name of the period format.
+
+        Returns:
+            PeriodFormatConfig if found, None otherwise.
+        """
+        return self._period_formats.get(format_name)
+
+    def get_key_pattern(self, template_name: str) -> str | None:
+        """Get the key pattern for a template.
 
         Args:
             template_name: The template name.
 
         Returns:
-            PeriodRule, or None if not configured.
+            Key pattern string, or None if not found.
         """
-        from .period import PeriodRule, PeriodGranularity, PeriodOffset
-
-        template = self.get(template_name)
-        if not template or not template.period:
-            return None
-
-        return PeriodRule(
-            granularity=PeriodGranularity(template.period.get("granularity", "month")),
-            offset=PeriodOffset(template.period.get("offset", "current")),
-        )
+        template = self.get_template(template_name)
+        if template:
+            return template.key_pattern
+        return None
 
 
 def load_config() -> AppConfig:
@@ -263,7 +645,8 @@ def load_templates(template_path: str | None = None) -> TemplateRegistry:
     """Load template configurations.
 
     Args:
-        template_path: Path to YAML file or directory. If None, uses TEMPLATE_PATH env var.
+        template_path: Path to JSONC file or directory. If None, uses TEMPLATE_PATH env var
+        or defaults to ./config.jsonc at the root.
 
     Returns:
         TemplateRegistry with loaded templates.
@@ -271,7 +654,7 @@ def load_templates(template_path: str | None = None) -> TemplateRegistry:
     registry = TemplateRegistry()
 
     if template_path is None:
-        template_path = os.environ.get("TEMPLATE_PATH", "./templates.yaml")
+        template_path = os.environ.get("TEMPLATE_PATH", "./config.jsonc")
 
     if not template_path:
         logger.warning("No template path configured")

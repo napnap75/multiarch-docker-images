@@ -1,28 +1,34 @@
 #!/usr/bin/env python3
-"""Paperless-ngx Initial Import Script.
+"""Paperless-ngx Import Script for Automatic PDF Renamer.
 
-User Story 0: Standalone script to import existing paperless-ngx documents
-into a Garage S3 bucket with their metadata as sidecars.
+User Story: Import documents from Paperless-ngx into a Garage S3 bucket
+with config-driven processing and auto-updating configuration.
 
-This script runs once, offline, from the owner's machine or the server.
-It is NOT part of the renamer container and has no dashboard surface.
+Workflow:
+1. Fetch all documents from Paperless-ngx
+2. Auto-update config.jsonc with missing companies, document types, and additional field values
+3. Resolve mapping for each document (template, period_format, additional_fields)
+4. Match Paperless tags to additional field categories (strict validation)
+5. Calculate period from created_date
+6. Write to files/ if all valid, or pending/{paperless_id} if validation fails
+7. Write sidecar with full metadata (including errors for pending)
+
+Note: This script runs from the owner's machine or server, NOT in the renamer container.
+It processes all documents fresh on each run (clears files/ and pending/ first).
 
 Storage Backends:
 - S3: For production Garage S3 (default)
 - File: For local filesystem testing
-
-Note: Paperless-ngx API returns IDs for correspondent, document_type, and tags.
-This script fetches the actual string values from the respective endpoints.
-The filename comes from 'archived_file_name', not 'filename'.
 """
 
 import argparse
 import hashlib
+import json
 import logging
 import os
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -35,12 +41,18 @@ from app.sidecar import (
     SidecarStatus,
     build_sidecar,
     get_sidecar_key,
-    matching_sha256,
-    read_sidecar,
-    sidecar_exists,
     write_atomic,
+    serialize,
 )
 from app.storage import get_storage_backend, StorageBackend
+from app.config import (
+    TemplateRegistry,
+    PeriodFormatConfig,
+    MappingRule,
+    MappingMatch,
+    MappingSet,
+)
+from app.period import format_period_from_emission_date
 
 # Configure logging
 logging.basicConfig(
@@ -56,11 +68,10 @@ class PaperlessDocument:
 
     id: int
     filename: str
-    storage_path: str
-    created: str  # Document date (emission date)
+    created_date: str  # Document creation date (used as emission_date)
     correspondent_name: str
     document_type_name: str
-    labels: list[str]  # List of label names
+    tags: list[str]  # List of tag values (strings, no types)
     download_url: str
 
 
@@ -69,19 +80,25 @@ class ImportStats:
     """Statistics for the import run."""
 
     imported: int = 0
+    pending: int = 0
     skipped: int = 0
     failed: int = 0
-    period_fallbacks: int = 0
+    config_updated: bool = False
     per_template_counts: dict[str, int] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
 
 
+@dataclass
+class ResolvedMapping:
+    """Resolved mapping for a document."""
+
+    template: str | None = None
+    period_format: str | None = None
+    additional_fields: list[str] = field(default_factory=list)
+
+
 class PaperlessClient:
-    """Client for Paperless-ngx REST API.
-    
-    Note: Paperless returns IDs for correspondent, document_type, and tags.
-    This client fetches the actual string values from the respective endpoints.
-    """
+    """Client for Paperless-ngx REST API."""
 
     def __init__(self, base_url: str, token: str, timeout: int = 30):
         """Initialize the Paperless client.
@@ -100,8 +117,7 @@ class PaperlessClient:
             "Accept": "application/json",
         })
         
-        # Cache for fetched entities to avoid duplicate requests
-        self._storage_path_cache: dict[int, str] = {}
+        # Cache for fetched entities
         self._correspondent_cache: dict[int, str] = {}
         self._document_type_cache: dict[int, str] = {}
         self._tag_cache: dict[int, str] = {}
@@ -129,60 +145,16 @@ class PaperlessClient:
             raise
 
     def list_documents(self, page: int = 1, page_size: int = 100) -> list[dict[str, Any]]:
-        """List all documents from Paperless (paginated).
-
-        Args:
-            page: Page number.
-            page_size: Number of results per page.
-
-        Returns:
-            List of document dicts.
-        """
+        """List all documents from Paperless (paginated)."""
         data = self._get("/api/documents/", params={"page": page, "page_size": page_size})
         return data.get("results", [])
 
     def get_document(self, doc_id: int) -> dict[str, Any]:
-        """Get a single document's metadata.
-
-        Args:
-            doc_id: The document ID.
-
-        Returns:
-            Document metadata dict.
-        """
+        """Get a single document's metadata."""
         return self._get(f"/api/documents/{doc_id}/")
 
-    def get_storage_path_name(self, storage_path_id: int) -> str:
-        """Get storage path name from ID.
-        
-        Args:
-            storage_path_id: The Paperless storage path ID.
-        
-        Returns:
-            Storage path name string.
-        """
-        if not storage_path_id:
-            return ""
-        if storage_path_id in self._storage_path_cache:
-            return self._storage_path_cache[storage_path_id]
-        try:
-            storage_path = self._get(f"/api/storage_paths/{storage_path_id}/")
-            name = storage_path.get("name", f"unknown_storage_path_{storage_path_id}")
-            self._storage_path_cache[storage_path_id] = name
-            return name
-        except Exception as e:
-            logger.warning(f"Failed to fetch storage path {storage_path_id}: {e}")
-            return f"unknown_storage_path_{storage_path_id}"
-
     def get_correspondent_name(self, correspondent_id: int) -> str:
-        """Get correspondent name from ID.
-        
-        Args:
-            correspondent_id: The Paperless correspondent ID.
-        
-        Returns:
-            Correspondent name string.
-        """
+        """Get correspondent name from ID."""
         if not correspondent_id:
             return ""
         if correspondent_id in self._correspondent_cache:
@@ -197,14 +169,7 @@ class PaperlessClient:
             return f"unknown_correspondent_{correspondent_id}"
 
     def get_document_type_name(self, document_type_id: int) -> str:
-        """Get document type name from ID.
-        
-        Args:
-            document_type_id: The Paperless document type ID.
-        
-        Returns:
-            Document type name string.
-        """
+        """Get document type name from ID."""
         if not document_type_id:
             return ""
         if document_type_id in self._document_type_cache:
@@ -219,14 +184,7 @@ class PaperlessClient:
             return f"unknown_type_{document_type_id}"
 
     def get_tag_name(self, tag_id: int) -> str:
-        """Get tag name from ID.
-        
-        Args:
-            tag_id: The Paperless tag ID.
-        
-        Returns:
-            Tag name string.
-        """
+        """Get tag name from ID."""
         if not tag_id:
             return ""
         if tag_id in self._tag_cache:
@@ -240,15 +198,8 @@ class PaperlessClient:
             logger.warning(f"Failed to fetch tag {tag_id}: {e}")
             return f"unknown_tag_{tag_id}"
 
-    def get_all_documents(self, limit: int = None) -> list[PaperlessDocument]:
-        """Get all documents from Paperless (handles pagination).
-
-        Note: Paperless returns IDs for correspondent, document_type, and tags.
-        This method fetches the actual string values from the respective endpoints.
-
-        Returns:
-            List of PaperlessDocument objects.
-        """
+    def get_all_documents(self, limit: int | None = None) -> list[PaperlessDocument]:
+        """Get all documents from Paperless (handles pagination)."""
         all_docs: list[PaperlessDocument] = []
         page = 1
         page_size = 100
@@ -259,41 +210,34 @@ class PaperlessClient:
                 break
 
             for doc in docs:
-                # Get full document details
                 full_doc = self.get_document(doc["id"])
 
-                # Extract fields from Paperless document
-                # The actual filename is in 'archived_file_name', not 'filename'
-                archived_file_name = full_doc.get("archived_file_name", "") if full_doc.get("archived_file_name") else full_doc.get("title", "") + ".pdf"
+                # Extract fields
+                archived_file_name = full_doc.get("archived_file_name", "")
+                if not archived_file_name:
+                    archived_file_name = full_doc.get("title", "") + ".pdf"
                 
-                # Get correspondent name from ID
                 correspondent_id = full_doc.get("correspondent")
                 correspondent_name = self.get_correspondent_name(correspondent_id) if correspondent_id else ""
                 
-                # Get document type name from ID
                 document_type_id = full_doc.get("document_type")
                 document_type_name = self.get_document_type_name(document_type_id) if document_type_id else ""
                 
-                # Get storage path
-                storage_path_id = full_doc.get("storage_path", "")
-                storage_path = self.get_storage_path_name(storage_path_id) if storage_path_id else ""
-                
-                # Get tags/labels - Paperless returns tag IDs, need to fetch names
+                # Get tags
                 tag_ids = full_doc.get("tags", [])
-                labels = []
+                tags = []
                 for tag_id in tag_ids:
                     tag_name = self.get_tag_name(tag_id)
                     if tag_name:
-                        labels.append(tag_name)
+                        tags.append(tag_name)
 
                 paperless_doc = PaperlessDocument(
                     id=full_doc["id"],
                     filename=archived_file_name,
-                    storage_path=storage_path,
-                    created=full_doc.get("created", ""),  # This is the document date
+                    created_date=full_doc.get("created", ""),
                     correspondent_name=correspondent_name,
                     document_type_name=document_type_name,
-                    labels=labels,
+                    tags=tags,
                     download_url=f"{self.base_url}/api/documents/{full_doc['id']}/download/",
                 )
                 logger.debug(f"Retrieved document: {paperless_doc}")
@@ -301,9 +245,8 @@ class PaperlessClient:
 
                 if limit and len(all_docs) >= limit:
                     logger.info(f"Reached limit of {limit} documents")
-                    return all_docs 
+                    return all_docs
 
-            # Check if there are more pages
             if len(docs) < page_size:
                 break
             page += 1
@@ -312,192 +255,414 @@ class PaperlessClient:
         return all_docs
 
     def download_document(self, doc_id: int) -> bytes:
-        """Download a document's PDF.
-
-        Args:
-            doc_id: The document ID.
-
-        Returns:
-            PDF content as bytes.
-        """
+        """Download a document's PDF."""
         return self._get_raw(f"/api/documents/{doc_id}/download/")
 
 
 class PDFProcessor:
     """Processes PDF content for import."""
 
-    def __init__(self):
-        """Initialize the PDF processor."""
-        # Import extractor (optional dependency)
-        try:
-            from app.extractor import extract_first_page_text
-
-            self._extract_text = extract_first_page_text
-        except ImportError:
-            logger.warning("PyMuPDF not available, text extraction will be skipped")
-            self._extract_text = None
-
     def compute_sha256(self, pdf_bytes: bytes) -> str:
-        """Compute SHA256 hash of PDF content.
-
-        Args:
-            pdf_bytes: The PDF content.
-
-        Returns:
-            Hex-encoded SHA256 hash.
-        """
+        """Compute SHA256 hash of PDF content."""
         return hashlib.sha256(pdf_bytes).hexdigest()
 
-    def extract_text(self, pdf_bytes: bytes) -> str:
-        """Extract first page text from PDF.
 
+class ConfigUpdater:
+    """Handles auto-updating the configuration from Paperless data."""
+
+    def __init__(self, config_path: str):
+        """Initialize the config updater."""
+        self.config_path = config_path
+        self.registry = TemplateRegistry()
+        self.registry.load_from_file(config_path)
+        self._changes: dict[str, Any] = {}
+        # Track added items in memory for immediate use
+        self._added_companies: set[str] = set()
+        self._added_document_types: set[str] = set()
+        self._added_additional_fields: dict[str, set[str]] = {}
+
+    def add_company(self, company: str) -> bool:
+        """Add a company to config if not present."""
+        if company and company not in self.registry.get_companies() and company not in self._added_companies:
+            self._changes.setdefault("companies_added", []).append(company)
+            self._added_companies.add(company)
+            return True
+        return False
+
+    def add_document_type(self, doc_type: str) -> bool:
+        """Add a document type to config if not present."""
+        if doc_type and doc_type not in self.registry.get_document_types() and doc_type not in self._added_document_types:
+            self._changes.setdefault("document_types_added", []).append(doc_type)
+            self._added_document_types.add(doc_type)
+            return True
+        return False
+
+    def add_additional_field_value(self, category: str, value: str) -> bool:
+        """Add a value to an additional field category, creating category if needed."""
+        if category and value:
+            # Check if already in registry
+            if category in self.registry.get_additional_fields():
+                if value not in self.registry.get_additional_field_values(category):
+                    self._changes.setdefault("additional_fields_added", {}).setdefault(category, []).append(value)
+                    self._added_additional_fields.setdefault(category, set()).add(value)
+                    return True
+            # Check if already added in memory
+            elif category in self._added_additional_fields:
+                if value not in self._added_additional_fields[category]:
+                    self._changes.setdefault("additional_fields_added", {}).setdefault(category, []).append(value)
+                    self._added_additional_fields.setdefault(category, set()).add(value)
+                    return True
+            # New category and value
+            else:
+                self._changes.setdefault("additional_fields_added", {}).setdefault(category, []).append(value)
+                self._added_additional_fields.setdefault(category, set()).add(value)
+                return True
+        return False
+
+    def has_changes(self) -> bool:
+        """Check if there are any pending changes."""
+        return bool(self._changes)
+
+    def _strip_jsonc_comments(self, content: str) -> str:
+        """Strip // line comments and /* */ block comments from JSONC content."""
+        import re
+        # Remove /* */ block comments first
+        content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+        # Remove // line comments
+        content = re.sub(r'//.*$', '', content, flags=re.MULTILINE)
+        # Remove leading/trailing whitespace from the result
+        return content.strip()
+
+    def save_config(self) -> None:
+        """Save the updated configuration to disk."""
+        if not self.has_changes():
+            logger.info("No config changes to save")
+            return
+
+        logger.info("Saving updated configuration...")
+        
+        # Get current config data
+        import json
+        with open(self.config_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        
+        # Strip JSONC comments before parsing
+        json_content = self._strip_jsonc_comments(content)
+        config_data = json.loads(json_content)
+        
+        # Apply changes
+        if "companies_added" in self._changes:
+            existing = set(config_data.get("companies", []))
+            for company in self._changes["companies_added"]:
+                if company not in existing:
+                    config_data.setdefault("companies", []).append(company)
+                    existing.add(company)
+                    logger.info(f"  Added company: {company}")
+        
+        if "document_types_added" in self._changes:
+            existing = set(config_data.get("document_types", []))
+            for doc_type in self._changes["document_types_added"]:
+                if doc_type not in existing:
+                    config_data.setdefault("document_types", []).append(doc_type)
+                    existing.add(doc_type)
+                    logger.info(f"  Added document_type: {doc_type}")
+        
+        if "additional_fields_added" in self._changes:
+            for category, values in self._changes["additional_fields_added"].items():
+                config_data.setdefault("additional_fields", {}).setdefault(category, [])
+                existing = set(config_data["additional_fields"][category])
+                for value in values:
+                    if value not in existing:
+                        config_data["additional_fields"][category].append(value)
+                        existing.add(value)
+                        logger.info(f"  Added additional_field value: {category}={value}")
+        
+        # Write back to file
+        with open(self.config_path, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        
+        logger.info("Configuration saved successfully")
+        
+        # Reload registry with updated config
+        self.registry = TemplateRegistry()
+        self.registry.load_from_file(self.config_path)
+        self._changes = {}
+
+
+class DocumentProcessor:
+    """Processes a single document through the import workflow."""
+
+    def __init__(self, registry: TemplateRegistry, storage: StorageBackend):
+        """Initialize the document processor."""
+        self.registry = registry
+        self.storage = storage
+        self.pdf_processor = PDFProcessor()
+
+    def resolve_mapping(self, company: str, document_type: str) -> ResolvedMapping:
+        """Resolve the mapping for a document."""
+        result = ResolvedMapping()
+        
+        # Get all mapping rules
+        for rule in self.registry.get_mapping_rules():
+            if rule.matches(company, document_type):
+                if rule.set.template is not None:
+                    result.template = rule.set.template
+                if rule.set.period_format is not None:
+                    result.period_format = rule.set.period_format
+                if rule.set.additional_fields:
+                    result.additional_fields = rule.set.additional_fields.copy()
+        
+        return result
+
+    def match_tags_to_fields(
+        self, 
+        tags: list[str], 
+        expected_categories: list[str]
+    ) -> tuple[dict[str, str], list[str]]:
+        """Match Paperless tags to additional field categories.
+        
+        Strict validation: each tag must match exactly one category.
+        If any tag doesn't match or matches multiple categories, return errors.
+        
         Args:
-            pdf_bytes: The PDF content.
-
+            tags: List of tag values from Paperless
+            expected_categories: List of additional field categories from mapping
+        
         Returns:
-            Extracted text, or empty string if extraction fails.
+            Tuple of (assigned_fields, errors)
         """
-        if self._extract_text is None:
-            logger.warning("Text extraction not available")
-            return ""
+        assigned_fields: dict[str, str] = {}
+        errors: list[str] = []
 
-        try:
-            return self._extract_text(pdf_bytes)
-        except Exception as e:
-            logger.warning(f"Text extraction failed: {e}")
-            return ""
+        if not expected_categories:
+            # No additional fields expected - all tags are just metadata
+            if tags:
+                assigned_fields["tags"] = ", ".join(tags)
+            return assigned_fields, errors
+        
+        if len(expected_categories) == 1:
+            # Single category - all tags belong to it
+            category = expected_categories[0]
+            # Values are already in config (added by ConfigUpdater)
+            for tag in tags:
+                assigned_fields[category] = tag
+            return assigned_fields, errors
+        
+        # Multiple categories - need strict matching
+        for tag in tags:
+            matching_categories = []
+            for category in expected_categories:
+                values = self.registry.get_additional_field_values(category)
+                if tag in values:
+                    matching_categories.append(category)
+            
+            if len(matching_categories) == 0:
+                errors.append(f"Tag '{tag}' does not match any expected category")
+            elif len(matching_categories) > 1:
+                errors.append(f"Tag '{tag}' matches multiple categories: {matching_categories}")
+            else:
+                assigned_fields[matching_categories[0]] = tag
+        
+        return assigned_fields, errors
 
-
-class SidecarBuilder:
-    """Builds sidecar metadata from Paperless documents."""
-
-    def __init__(self, template_mappings: dict[str, str] | None = None):
-        """Initialize the sidecar builder.
-
-        Args:
-            template_mappings: Optional dict mapping Paperless storage_path
-                              prefixes to template names.
-        """
-        self.template_mappings = template_mappings or {}
-
-    def get_template_name(self, storage_path: str) -> str:
-        """Get template name from storage path.
-
-        Uses the first path segment as the document family (template).
-
-        Args:
-            storage_path: The Paperless storage path.
-
-        Returns:
-            Template name (first segment of storage path).
-        """
-        if not storage_path:
-            return "unknown"
-
-        # Get first path segment
-        parts = storage_path.strip("/").split("/")
-        if parts:
-            return parts[0]
-        return "unknown"
-
-    def parse_period_from_filename(self, filename: str) -> str | None:
-        """Parse period from filename.
-
-        Args:
-            filename: The document filename.
-
-        Returns:
-            Period string, or None if cannot be parsed.
-        """
-        try:
-            from app.period import parse_period_from_filename
-
-            return parse_period_from_filename(filename)
-        except Exception:
-            return None
-
-    def build_sidecar(
+    def process_document(
         self,
         doc: PaperlessDocument,
-        pdf_bytes: bytes,
-        sha256: str,
-        extracted_text: str,
-        template_name: str | None = None,
-    ) -> Sidecar:
-        """Build a sidecar from a Paperless document.
-
+        config_updater: ConfigUpdater,
+    ) -> tuple[str, Sidecar | None, list[str]]:
+        """Process a single document.
+        
         Args:
-            doc: The Paperless document.
-            pdf_bytes: The PDF content.
-            sha256: The SHA256 hash of the PDF.
-            extracted_text: The extracted first-page text.
-            template_name: Optional template name override.
-
+            doc: The Paperless document
+            config_updater: For auto-updating config
+        
         Returns:
-            A Sidecar object with all metadata.
+            Tuple of (target_key, sidecar, errors)
+            - target_key: Either files/{final_key} or pending/{paperless_id}
+            - sidecar: Sidecar metadata (or None if failed)
+            - errors: List of error messages
         """
-        # Determine template
-        if template_name:
-            final_template = template_name
-        else:
-            final_template = self.get_template_name(doc.storage_path)
+        errors: list[str] = []
+        
+        # Step 1: Auto-update config with company and document type
+        company = doc.correspondent_name
+        doc_type = doc.document_type_name
+        
+        # Add to config (this tracks changes in memory)
+        config_updater.add_company(company)
+        config_updater.add_document_type(doc_type)
+        
+        # Reload registry from config_updater to get the updated state
+        self.registry = config_updater.registry
+        
+        # Validate - check both registry and in-memory additions
+        is_valid_company = (company in self.registry.get_companies() or 
+                           company in config_updater._added_companies)
+        is_valid_doc_type = (doc_type in self.registry.get_document_types() or 
+                            doc_type in config_updater._added_document_types)
+        
+        if not is_valid_company:
+            errors.append(f"Company '{company}' could not be added to config")
+        if not is_valid_doc_type:
+            errors.append(f"Document type '{doc_type}' could not be added to config")
+        
+        if errors:
+            return self._route_to_pending(doc, errors)
+        
+        # Step 2: Resolve mapping
+        resolved = self.resolve_mapping(company, doc_type)
+        
+        if not resolved.template:
+            errors.append(f"No template resolved for company='{company}', document_type='{doc_type}'")
+        
+        if not resolved.period_format:
+            errors.append(f"No period_format resolved for company='{company}', document_type='{doc_type}'")
+        
+        if errors:
+            return self._route_to_pending(doc, errors)
+        
+        # Step 3: Auto-update additional fields config
+        for category in resolved.additional_fields:
+            for tag in doc.tags:
+                config_updater.add_additional_field_value(category, tag)
+        
+        # Reload registry after potential changes
+        self.registry = config_updater.registry
+        
+        # Step 4: Match tags to additional field categories
+        # First, ensure all expected categories exist and have values added
+        for category in resolved.additional_fields:
+            for tag in doc.tags:
+                config_updater.add_additional_field_value(category, tag)
+        
+        # Reload registry after potential changes
+        self.registry = config_updater.registry
+        
+        # Now match tags to categories
+        assigned_fields, tag_errors = self.match_tags_to_fields(
+            doc.tags, 
+            resolved.additional_fields
+        )
+        errors.extend(tag_errors)
+        
+        if resolved.additional_fields and not assigned_fields:
+            errors.append("No tags matched expected additional fields")
+        
+        if errors:
+            return self._route_to_pending(doc, errors)
+        
+        # Step 5: Calculate period
+        try:
+            period_format_config = self.registry.get_period_format_config(resolved.period_format)
+            if not period_format_config:
+                errors.append(f"Period format '{resolved.period_format}' not found")
+                return self._route_to_pending(doc, errors)
+            
+            period = format_period_from_emission_date(
+                doc.created_date,
+                period_format_config.to_dict()
+            )
 
-        # Parse period from filename
-        period = self.parse_period_from_filename(doc.filename)
-        if not period:
-            # Fallback: use emission date's month-year
-            from datetime import datetime
-
-            try:
-                dt = datetime.fromisoformat(doc.created).date()
-                from app.period import format_month_year
-
-                period = format_month_year(dt.month, dt.year)
-                logger.warning(f"Using fallback period for doc {doc.id}: {period}")
-            except Exception:
-                period = doc.created  # Last resort
-
-        # Build optional fields from labels
-        optional_fields = {}
-        for label in doc.labels:
-            optional_fields["tag"] = label
-
-        # Construct the original key
-        if doc.storage_path:
-            original_key = f"{doc.storage_path}/{doc.filename}"
-        else:
-            original_key = doc.filename
-
-        # Current key is the same as original for import (no renames)
-        current_key = f"files/{final_template}/{doc.filename}"
-
-        # Build the sidecar
+            logger.debug(f"Calculated period '{period}' for document {doc.id} using format '{resolved.period_format}'")
+        except Exception as e:
+            errors.append(f"Failed to calculate period: {e}")
+            logger.exception(f"Error calculating period for document {doc.id}")
+            return self._route_to_pending(doc, errors)
+        
+        # Step 6: Generate final key
+        template_name = resolved.template
+        key_pattern = self.registry.get_key_pattern(template_name)
+        
+        if not key_pattern:
+            errors.append(f"No key_pattern found for template '{template_name}'")
+            return self._route_to_pending(doc, errors)
+        
+        try:
+            final_key = key_pattern.format(
+                emitting_company=company,
+                document_type=doc_type,
+                emission_date=doc.created_date,
+                period=period,
+                original_filename=doc.filename,
+                **assigned_fields
+            )
+        except Exception as e:
+            errors.append(f"Failed to format key pattern: {e}")
+            return self._route_to_pending(doc, errors)
+        
+        # Step 7: Build sidecar for files/
+        pdf_key = f"files/{final_key}"
+        sha256 = ""  # Will be computed when writing
+        
         sidecar = build_sidecar(
             sha256=sha256,
-            original_key=original_key,
-            current_key=current_key,
-            status=SidecarStatus.VALIDATED,
-            template_name=final_template,
-            emission_date=doc.created,
+            original_key=doc.filename,
+            current_key=pdf_key,
+            status=SidecarStatus.PROCESSED,
+            template_name=template_name,
+            emission_date=doc.created_date,
             period=period,
-            emitting_company=doc.correspondent_name,
-            document_type=doc.document_type_name,
+            emitting_company=company,
+            document_type=doc_type,
             confidence=1.0,
-            optional_fields=optional_fields,
-            extracted_text=extracted_text,
+            optional_fields=assigned_fields,
+            extracted_text="",
         )
-
-        # Add imported event
+        
+        # Add import event
         sidecar.add_event(
             "imported",
             {
                 "source": "paperless-ngx",
                 "document_id": doc.id,
-                "document_url": doc.download_url,
+                "paperless_filename": doc.filename,
             },
         )
+        
+        return pdf_key, sidecar, []
 
-        return sidecar
+    def _route_to_pending(
+        self, 
+        doc: PaperlessDocument, 
+        errors: list[str]
+    ) -> tuple[str, Sidecar | None, list[str]]:
+        """Route document to pending/ with error sidecar."""
+        pdf_key = f"pending/{doc.id}"
+        
+        # Build sidecar with errors in optional_fields
+        # We use optional_fields to store errors for pending documents
+        optional_fields = {"tags": doc.tags} if doc.tags else {}
+        optional_fields["_import_errors"] = errors
+        
+        # Build sidecar
+        sidecar = build_sidecar(
+            sha256="",
+            original_key=doc.filename,
+            current_key=pdf_key,
+            status=SidecarStatus.NOT_PROCESSED,
+            template_name="",
+            emission_date=doc.created_date,
+            period="",
+            emitting_company=doc.correspondent_name,
+            document_type=doc.document_type_name,
+            confidence=0.0,
+            optional_fields=optional_fields,
+            extracted_text="",
+        )
+        
+        # Add import event with errors
+        sidecar.add_event(
+            "imported",
+            {
+                "source": "paperless-ngx",
+                "document_id": doc.id,
+                "paperless_filename": doc.filename,
+                "errors": errors,
+            },
+        )
+        
+        return pdf_key, sidecar, errors
 
 
 class Importer:
@@ -507,6 +672,7 @@ class Importer:
         self,
         paperless_url: str,
         paperless_token: str,
+        config_path: str,
         storage_backend: str = "s3",
         s3_endpoint: str | None = None,
         s3_access_key: str | None = None,
@@ -515,25 +681,11 @@ class Importer:
         file_base_dir: str | None = None,
         dry_run: bool = False,
         limit: int | None = None,
-        template_mappings: dict[str, str] | None = None,
     ):
-        """Initialize the importer.
-
-        Args:
-            paperless_url: Paperless-ngx API URL.
-            paperless_token: Paperless-ngx API token.
-            storage_backend: Storage backend type ('s3' or 'file').
-            s3_endpoint: Garage S3 endpoint URL (required for S3).
-            s3_access_key: S3 access key (required for S3).
-            s3_secret_key: S3 secret key (required for S3).
-            s3_bucket: S3 bucket name (required for S3).
-            file_base_dir: Base directory for file storage (required for file backend).
-            dry_run: If True, only list what would be imported.
-            limit: Maximum number of documents to import (for testing).
-            template_mappings: Optional dict mapping storage_path to template.
-        """
+        """Initialize the importer."""
         self.paperless_url = paperless_url
         self.paperless_token = paperless_token
+        self.config_path = config_path
         self.storage_backend_type = storage_backend
         self.s3_endpoint = s3_endpoint
         self.s3_access_key = s3_access_key
@@ -542,22 +694,26 @@ class Importer:
         self.file_base_dir = file_base_dir
         self.dry_run = dry_run
         self.limit = limit
-        self.template_mappings = template_mappings
 
         # Initialize clients
         self.paperless_client = PaperlessClient(paperless_url, paperless_token)
-        self.pdf_processor = PDFProcessor()
-        self.sidecar_builder = SidecarBuilder(template_mappings)
-
-        # Initialize storage - will be set up in _init_storage()
         self.storage: StorageBackend | None = None
         self._init_storage()
+
+        # Initialize config updater
+        self.config_updater = ConfigUpdater(config_path)
+
+        # Document processor
+        self.doc_processor = DocumentProcessor(
+            self.config_updater.registry, 
+            self.storage
+        )
 
         # Stats
         self.stats = ImportStats()
 
     def _init_storage(self) -> None:
-        """Initialize the storage backend based on configuration."""
+        """Initialize the storage backend."""
         if self.storage_backend_type == "s3":
             if not all([self.s3_endpoint, self.s3_access_key, self.s3_secret_key, self.s3_bucket]):
                 raise ValueError(
@@ -579,23 +735,26 @@ class Importer:
         else:
             raise ValueError(f"Unknown storage backend: {self.storage_backend_type}")
 
-    def check_bucket_empty(self, prefix: str = "files/") -> bool:
-        """Check if the bucket is empty under the given prefix.
-
-        Args:
-            prefix: The prefix to check.
-
-        Returns:
-            True if bucket is empty (no objects), False otherwise.
-        """
+    def clear_directories(self) -> None:
+        """Clear files/ and pending/ directories at start of run."""
         if self.storage is None:
             raise RuntimeError("Storage not initialized")
-        objects = self.storage.list_objects(prefix)
-        if objects:
-            logger.error(f"Bucket is not empty under {prefix}: found {len(objects)} objects")
-            logger.error(f"First few objects: {objects[:5]}")
-            return False
-        return True
+        
+        logger.info("Clearing files/ and pending/ directories...")
+        
+        # List and delete all objects under files/
+        files_objects = self.storage.list_objects("files/")
+        for obj_key in files_objects:
+            self.storage.delete_object(obj_key)
+            logger.debug(f"Deleted {obj_key}")
+        
+        # List and delete all objects under pending/
+        pending_objects = self.storage.list_objects("pending/")
+        for obj_key in pending_objects:
+            self.storage.delete_object(obj_key)
+            logger.debug(f"Deleted {obj_key}")
+        
+        logger.info(f"Cleared {len(files_objects)} files/ and {len(pending_objects)} pending/ objects")
 
     def import_document(self, doc: PaperlessDocument) -> bool:
         """Import a single document.
@@ -614,62 +773,46 @@ class Importer:
         try:
             # Download PDF
             pdf_bytes = self.paperless_client.download_document(doc.id)
-            sha256 = self.pdf_processor.compute_sha256(pdf_bytes)
+            sha256 = self.doc_processor.pdf_processor.compute_sha256(pdf_bytes)
 
-            # Extract text
-            extracted_text = self.pdf_processor.extract_text(pdf_bytes)
-
-            # Build sidecar
-            sidecar = self.sidecar_builder.build_sidecar(
-                doc, pdf_bytes, sha256, extracted_text
+            # Process document
+            target_key, sidecar, errors = self.doc_processor.process_document(
+                doc, self.config_updater
             )
-
-            # Determine keys
-            pdf_key = sidecar.current_key
-            sidecar_key = get_sidecar_key(pdf_key)
-
-            # Check for resumability
-            if sidecar_exists(self.storage, pdf_key) and matching_sha256(
-                self.storage, pdf_key, sha256
-            ):
-                logger.info(f"Skipping document {doc.id}: already imported with matching SHA256")
-                self.stats.skipped += 1
-                self.stats.per_template_counts[sidecar.template_name] = (
-                    self.stats.per_template_counts.get(sidecar.template_name, 0) + 1
-                )
-                return True
 
             # Dry run: just log what would happen
             if self.dry_run:
-                logger.info(f"[DRY RUN] Would import: {pdf_key}")
-                logger.info(f"[DRY RUN]   SHA256: {sha256}")
-                logger.info(f"[DRY RUN]   Template: {sidecar.template_name}")
-                logger.info(f"[DRY RUN]   Emitting Company: {sidecar.emitting_company}")
-                logger.info(f"[DRY RUN]   Document Type: {sidecar.document_type}")
-                logger.info(f"[DRY RUN]   Emission Date: {sidecar.emission_date}")
-                logger.info(f"[DRY RUN]   Period: {sidecar.period}")
-                logger.info(f"[DRY RUN]   Optional Fields: {sidecar.optional_fields}")
+                if errors:
+                    logger.info(f"[DRY RUN] Would route to pending: {target_key}")
+                    logger.info(f"[DRY RUN]   Errors: {errors}")
+                else:
+                    logger.info(f"[DRY RUN] Would import: {target_key}")
+                self.stats.imported += 1
+                return True
+
+            # Write PDF
+            self.storage.put_object(target_key, pdf_bytes)
+            logger.debug(f"Uploaded PDF to {target_key}")
+
+            # Update sidecar with actual SHA256
+            sidecar.sha256 = sha256
+
+            # Write sidecar
+            sidecar_key = get_sidecar_key(target_key)
+            sidecar_json = serialize(sidecar)
+            self.storage.put_object(sidecar_key, sidecar_json.encode("utf-8"))
+            logger.debug(f"Wrote sidecar to {sidecar_key}")
+
+            # Update stats
+            if errors:
+                self.stats.pending += 1
+            else:
                 self.stats.imported += 1
                 self.stats.per_template_counts[sidecar.template_name] = (
                     self.stats.per_template_counts.get(sidecar.template_name, 0) + 1
                 )
-                return True
 
-            # Upload PDF
-            self.storage.put_object(pdf_key, pdf_bytes)
-            logger.debug(f"Uploaded PDF to {pdf_key}")
-
-            # Write sidecar atomically
-            write_atomic(self.storage, sidecar, sidecar_key)
-            logger.debug(f"Wrote sidecar to {sidecar_key}")
-
-            # Update stats
-            self.stats.imported += 1
-            self.stats.per_template_counts[sidecar.template_name] = (
-                self.stats.per_template_counts.get(sidecar.template_name, 0) + 1
-            )
-
-            logger.info(f"Successfully imported document {doc.id}")
+            logger.info(f"Successfully {'imported' if not errors else 'routed to pending'} document {doc.id}")
             return True
 
         except Exception as e:
@@ -691,12 +834,10 @@ class Importer:
 
         logger.info("Starting Paperless-ngx import...")
         logger.info(f"Storage backend: {self.storage_backend_type}")
+        logger.info(f"Config path: {self.config_path}")
 
-        # Check bucket is empty (only for S3, skip for file backend in dry-run)
-        if not self.dry_run and self.storage_backend_type == "s3":
-            if not self.check_bucket_empty("files/"):
-                logger.error("Refusing to run: bucket is not empty under files/")
-                return False
+        # Clear directories at start
+        self.clear_directories()
 
         # Get all documents from Paperless
         logger.info("Fetching documents from Paperless...")
@@ -704,6 +845,9 @@ class Importer:
 
         if not docs:
             logger.info("No documents found in Paperless")
+            # Save config if changes were made
+            if self.config_updater.has_changes():
+                self.config_updater.save_config()
             return True
 
         logger.info(f"Found {len(docs)} documents to import")
@@ -711,6 +855,11 @@ class Importer:
         # Import each document
         for doc in docs:
             self.import_document(doc)
+
+        # Save config at end if changes were made
+        if self.config_updater.has_changes():
+            self.config_updater.save_config()
+            self.stats.config_updated = True
 
         # Print summary
         self.print_summary()
@@ -724,10 +873,12 @@ class Importer:
         print("IMPORT SUMMARY")
         print("=" * 60)
         print(f"Storage backend: {self.storage_backend_type}")
-        print(f"Imported:   {self.stats.imported}")
-        print(f"Skipped:    {self.stats.skipped}")
-        print(f"Failed:     {self.stats.failed}")
-        print(f"Period fallbacks: {self.stats.period_fallbacks}")
+        print(f"Config path: {self.config_path}")
+        print(f"Config updated: {'Yes' if self.stats.config_updated else 'No'}")
+        print(f"Imported to files/:   {self.stats.imported}")
+        print(f"Routed to pending/:   {self.stats.pending}")
+        print(f"Skipped:              {self.stats.skipped}")
+        print(f"Failed:               {self.stats.failed}")
         print("\nPer-template counts:")
         for template, count in sorted(self.stats.per_template_counts.items()):
             print(f"  {template}: {count}")
@@ -742,7 +893,7 @@ class Importer:
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Import documents from Paperless-ngx to storage backend",
+        description="Import documents from Paperless-ngx with config-driven processing",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Environment variables for S3 storage:
@@ -769,6 +920,13 @@ For file storage, use --storage-backend file --file-base-dir /path/to/dir
         "--paperless-token",
         help="Paperless-ngx API token",
         default=os.environ.get("PAPERLESS_TOKEN"),
+    )
+
+    # Config file
+    parser.add_argument(
+        "--config-path",
+        help="Path to config.jsonc file",
+        default="./config.jsonc",
     )
 
     # Storage backend configuration
@@ -830,14 +988,7 @@ For file storage, use --storage-backend file --file-base-dir /path/to/dir
 
 
 def validate_env(args) -> None:
-    """Validate that required environment variables or arguments are set.
-
-    Args:
-        args: Parsed command line arguments.
-
-    Raises:
-        ValueError: If required values are missing.
-    """
+    """Validate that required environment variables or arguments are set."""
     missing = []
 
     # Paperless is always required
@@ -883,6 +1034,7 @@ def main():
         importer = Importer(
             paperless_url=args.paperless_url,
             paperless_token=args.paperless_token,
+            config_path=args.config_path,
             storage_backend=args.storage_backend,
             s3_endpoint=args.s3_endpoint,
             s3_access_key=args.s3_access_key,
@@ -910,9 +1062,17 @@ def main():
     except Exception as e:
         logger.error(f"Import failed: {e}")
         import traceback
-
         traceback.print_exc()
         sys.exit(1)
+
+
+# Add PDFProcessor class for completeness
+class PDFProcessor:
+    """Processes PDF content for import."""
+
+    def compute_sha256(self, pdf_bytes: bytes) -> str:
+        """Compute SHA256 hash of PDF content."""
+        return hashlib.sha256(pdf_bytes).hexdigest()
 
 
 if __name__ == "__main__":
