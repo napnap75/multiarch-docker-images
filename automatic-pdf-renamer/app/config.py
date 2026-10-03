@@ -1,10 +1,19 @@
 """Configuration module for Automatic PDF Renamer.
 
 Provides environment variable parsing and template YAML loading.
+Supports the new mapping-based configuration structure where:
+- companies: predefined list of valid companies
+- document_types: predefined list of valid document types
+- mappings: (company, document_type) -> template + period rule
+- templates: template definitions with key patterns
+- date_extraction: regex patterns for finding emission date in text
 """
+
+from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -109,6 +118,102 @@ class ClassifierConfig:
 
 
 @dataclass
+class PeriodRule:
+    """Period rule for mapping-based configuration."""
+
+    granularity: str = "month"
+    offset: str = "current"
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "PeriodRule":
+        """Create PeriodRule from dict."""
+        if data is None:
+            return cls()
+        return cls(
+            granularity=data.get("granularity", "month"),
+            offset=data.get("offset", "current"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"granularity": self.granularity, "offset": self.offset}
+
+
+@dataclass
+class DateExtractionPattern:
+    """Date extraction regex pattern for finding emission date in text."""
+
+    pattern: str
+    description: str = ""
+    compiled: Any = field(default=None, repr=False)
+
+    def __post_init__(self):
+        self.compiled = re.compile(self.pattern)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DateExtractionPattern":
+        """Create DateExtractionPattern from dict."""
+        return cls(
+            pattern=data["pattern"],
+            description=data.get("description", ""),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"pattern": self.pattern, "description": self.description}
+
+
+@dataclass
+class CompanyTypeMapping:
+    """Mapping of (company, document_type) to template and period rule."""
+
+    company: str
+    document_type: str
+    template: str
+    period: PeriodRule = field(default_factory=PeriodRule)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CompanyTypeMapping":
+        """Create CompanyTypeMapping from dict."""
+        return cls(
+            company=data["company"],
+            document_type=data["document_type"],
+            template=data["template"],
+            period=PeriodRule.from_dict(data.get("period")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "company": self.company,
+            "document_type": self.document_type,
+            "template": self.template,
+            "period": self.period.to_dict(),
+        }
+
+    def matches(self, company: str, document_type: str) -> bool:
+        """Check if this mapping matches the given company and document type."""
+        return self.company == company and self.document_type == document_type
+
+
+@dataclass
+class TemplateConfig:
+    """Template configuration with key pattern."""
+
+    name: str
+    key_pattern: str = ""
+    # document_family removed as per user request
+
+    @classmethod
+    def from_dict(cls, name: str, data: dict[str, Any]) -> "TemplateConfig":
+        """Create TemplateConfig from dict."""
+        return cls(
+            name=name,
+            key_pattern=data.get("key_pattern", ""),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"key_pattern": self.key_pattern}
+
+
+@dataclass
 class AppConfig:
     """Main application configuration."""
 
@@ -147,20 +252,20 @@ class AppConfig:
 
 
 @dataclass
-class TemplateConfig:
-    """Template configuration from YAML."""
+class LegacyTemplateConfig:
+    """Legacy template configuration from YAML (for backward compatibility)."""
 
     name: str
-    document_family: str
-    document_types: list[str]
-    period: dict[str, Any]
+    document_family: str = ""
+    document_types: list[str] = field(default_factory=list)
+    period: dict[str, Any] = field(default_factory=dict)
     optional_fields: dict[str, Any] = field(default_factory=dict)
     key_pattern: str = ""
     target_prefix: str = ""
 
     @classmethod
-    def from_dict(cls, name: str, data: dict[str, Any]) -> "TemplateConfig":
-        """Create a TemplateConfig from a YAML dict."""
+    def from_dict(cls, name: str, data: dict[str, Any]) -> "LegacyTemplateConfig":
+        """Create a LegacyTemplateConfig from a YAML dict."""
         return cls(
             name=name,
             document_family=data.get("document_family", name),
@@ -173,13 +278,31 @@ class TemplateConfig:
 
 
 class TemplateRegistry:
-    """Registry for template configurations."""
+    """Registry for template configurations.
+    
+    Supports both the new mapping-based configuration and legacy template config.
+    The new structure includes:
+    - companies: list of valid company names
+    - document_types: list of valid document type names
+    - mappings: list of (company, document_type) -> template + period mappings
+    - templates: template definitions with key patterns
+    - date_extraction: list of regex patterns for finding emission date
+    """
 
     def __init__(self):
         self._templates: dict[str, TemplateConfig] = {}
+        self._legacy_templates: dict[str, LegacyTemplateConfig] = {}
+        self._companies: list[str] = []
+        self._document_types: list[str] = []
+        self._mappings: list[CompanyTypeMapping] = []
+        self._date_extraction_patterns: list[DateExtractionPattern] = []
+        self._config_version: str = "1.0"
+        self._is_new_format: bool = False
 
     def load_from_file(self, filepath: str) -> None:
-        """Load templates from a YAML file.
+        """Load configuration from a YAML file.
+
+        Supports both new mapping-based format and legacy template format.
 
         Args:
             filepath: Path to the YAML file.
@@ -188,13 +311,62 @@ class TemplateRegistry:
             data = yaml.safe_load(f)
 
         if not data or not isinstance(data, dict):
-            logger.warning(f"No templates found in {filepath}")
+            logger.warning(f"No configuration found in {filepath}")
             return
 
-        for name, config in data.items():
+        # Check if this is the new format (has mappings key)
+        if "mappings" in data:
+            self._load_new_format(data)
+            self._is_new_format = True
+        else:
+            # Legacy format - load as templates
+            self._load_legacy_format(data)
+            self._is_new_format = False
+
+    def _load_new_format(self, data: dict[str, Any]) -> None:
+        """Load the new mapping-based configuration format."""
+        logger.info(f"Loading new mapping-based configuration (version: {data.get('version', 'unknown')})")
+        
+        # Load version
+        self._config_version = data.get("version", "1.0")
+        
+        # Load companies
+        self._companies = data.get("companies", [])
+        logger.info(f"Loaded {len(self._companies)} companies")
+        
+        # Load document_types
+        self._document_types = data.get("document_types", [])
+        logger.info(f"Loaded {len(self._document_types)} document types")
+        
+        # Load date extraction patterns
+        date_patterns_data = data.get("date_extraction", [])
+        self._date_extraction_patterns = [
+            DateExtractionPattern.from_dict(p) for p in date_patterns_data
+        ]
+        logger.info(f"Loaded {len(self._date_extraction_patterns)} date extraction patterns")
+        
+        # Load mappings
+        mappings_data = data.get("mappings", [])
+        self._mappings = [
+            CompanyTypeMapping.from_dict(m) for m in mappings_data
+        ]
+        logger.info(f"Loaded {len(self._mappings)} company-type mappings")
+        
+        # Load templates
+        templates_data = data.get("templates", {})
+        for name, config in templates_data.items():
             template = TemplateConfig.from_dict(name, config)
             self._templates[name] = template
             logger.info(f"Loaded template: {name}")
+
+    def _load_legacy_format(self, data: dict[str, Any]) -> None:
+        """Load the legacy template-based configuration format."""
+        logger.info("Loading legacy template-based configuration")
+        
+        for name, config in data.items():
+            template = LegacyTemplateConfig.from_dict(name, config)
+            self._legacy_templates[name] = template
+            logger.info(f"Loaded legacy template: {name}")
 
     def load_from_directory(self, dirpath: str) -> None:
         """Load templates from all YAML files in a directory.
@@ -204,13 +376,56 @@ class TemplateRegistry:
         """
         path = Path(dirpath)
         if not path.exists():
-            logger.warning(f"Template directory {dirpath} does not exist")
+            logger.warning(f"Configuration directory {dirpath} does not exist")
             return
 
         for yaml_file in path.glob("*.yaml") + path.glob("*.yml"):
             self.load_from_file(str(yaml_file))
 
-    def get(self, name: str) -> TemplateConfig | None:
+    def is_new_format(self) -> bool:
+        """Check if the loaded configuration uses the new mapping-based format."""
+        return self._is_new_format
+
+    def get_companies(self) -> list[str]:
+        """Get the list of valid companies.
+
+        Returns:
+            List of company names.
+        """
+        return self._companies
+
+    def get_document_types(self) -> list[str]:
+        """Get the list of valid document types.
+
+        Returns:
+            List of document type names.
+        """
+        return self._document_types
+
+    def get_date_extraction_patterns(self) -> list[DateExtractionPattern]:
+        """Get the list of date extraction regex patterns.
+
+        Returns:
+            List of DateExtractionPattern objects.
+        """
+        return self._date_extraction_patterns
+
+    def get_mapping(self, company: str, document_type: str) -> CompanyTypeMapping | None:
+        """Get the mapping for a specific (company, document_type) tuple.
+
+        Args:
+            company: The company name.
+            document_type: The document type.
+
+        Returns:
+            CompanyTypeMapping if found, None otherwise.
+        """
+        for mapping in self._mappings:
+            if mapping.matches(company, document_type):
+                return mapping
+        return None
+
+    def get_template(self, name: str) -> TemplateConfig | None:
         """Get a template by name.
 
         Args:
@@ -221,7 +436,18 @@ class TemplateRegistry:
         """
         return self._templates.get(name)
 
-    def list_all(self) -> list[str]:
+    def get_legacy_template(self, name: str) -> LegacyTemplateConfig | None:
+        """Get a legacy template by name.
+
+        Args:
+            name: The template name.
+
+        Returns:
+            The LegacyTemplateConfig, or None if not found.
+        """
+        return self._legacy_templates.get(name)
+
+    def list_all_templates(self) -> list[str]:
         """List all template names.
 
         Returns:
@@ -229,25 +455,108 @@ class TemplateRegistry:
         """
         return list(self._templates.keys())
 
+    def list_all_mappings(self) -> list[CompanyTypeMapping]:
+        """List all company-type mappings.
+
+        Returns:
+            List of CompanyTypeMapping objects.
+        """
+        return self._mappings
+
+    def is_valid_company(self, company: str) -> bool:
+        """Check if a company is in the predefined list.
+
+        Args:
+            company: The company name to check.
+
+        Returns:
+            True if valid, False otherwise.
+        """
+        return company in self._companies
+
+    def is_valid_document_type(self, document_type: str) -> bool:
+        """Check if a document type is in the predefined list.
+
+        Args:
+            document_type: The document type to check.
+
+        Returns:
+            True if valid, False otherwise.
+        """
+        return document_type in self._document_types
+
     def get_period_rule(self, template_name: str) -> "PeriodRule" | None:
         """Get the period rule for a template.
+
+        In the new format, period rules come from mappings, not templates.
+        This method is kept for backward compatibility.
 
         Args:
             template_name: The template name.
 
         Returns:
-            PeriodRule, or None if not configured.
+            PeriodRule from the first matching mapping, or None if not found.
         """
-        from .period import PeriodRule, PeriodGranularity, PeriodOffset
+        # In new format, period rules are in mappings, not templates
+        # For backward compatibility, look for a mapping with this template
+        for mapping in self._mappings:
+            if mapping.template == template_name:
+                return PeriodRule(
+                    granularity=mapping.period.granularity,
+                    offset=mapping.period.offset,
+                )
+        return None
 
-        template = self.get(template_name)
-        if not template or not template.period:
-            return None
+    def get_period_rule_for_mapping(
+        self, company: str, document_type: str
+    ) -> "PeriodRule" | None:
+        """Get the period rule for a specific (company, document_type) mapping.
 
-        return PeriodRule(
-            granularity=PeriodGranularity(template.period.get("granularity", "month")),
-            offset=PeriodOffset(template.period.get("offset", "current")),
-        )
+        Args:
+            company: The company name.
+            document_type: The document type.
+
+        Returns:
+            PeriodRule if mapping found, None otherwise.
+        """
+        mapping = self.get_mapping(company, document_type)
+        if mapping:
+            return PeriodRule(
+                granularity=mapping.period.granularity,
+                offset=mapping.period.offset,
+            )
+        return None
+
+    def get_template_for_mapping(
+        self, company: str, document_type: str
+    ) -> str | None:
+        """Get the template name for a specific (company, document_type) mapping.
+
+        Args:
+            company: The company name.
+            document_type: The document type.
+
+        Returns:
+            Template name if mapping found, None otherwise.
+        """
+        mapping = self.get_mapping(company, document_type)
+        if mapping:
+            return mapping.template
+        return None
+
+    def get_key_pattern(self, template_name: str) -> str | None:
+        """Get the key pattern for a template.
+
+        Args:
+            template_name: The template name.
+
+        Returns:
+            Key pattern string, or None if not found.
+        """
+        template = self.get_template(template_name)
+        if template:
+            return template.key_pattern
+        return None
 
 
 def load_config() -> AppConfig:
@@ -271,7 +580,7 @@ def load_templates(template_path: str | None = None) -> TemplateRegistry:
     registry = TemplateRegistry()
 
     if template_path is None:
-        template_path = os.environ.get("TEMPLATE_PATH", "./templates.yaml")
+        template_path = os.environ.get("TEMPLATE_PATH", "./config/templates.yaml")
 
     if not template_path:
         logger.warning("No template path configured")
@@ -286,3 +595,12 @@ def load_templates(template_path: str | None = None) -> TemplateRegistry:
         logger.warning(f"Template path {template_path} does not exist")
 
     return registry
+
+
+def load_config() -> AppConfig:
+    """Load application configuration from environment variables.
+
+    Returns:
+        AppConfig instance.
+    """
+    return AppConfig.from_env()
