@@ -169,6 +169,7 @@ class CompanyTypeMapping:
     document_type: str
     template: str
     period: PeriodRule = field(default_factory=PeriodRule)
+    field_groups: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CompanyTypeMapping":
@@ -178,15 +179,19 @@ class CompanyTypeMapping:
             document_type=data["document_type"],
             template=data["template"],
             period=PeriodRule.from_dict(data.get("period")),
+            field_groups=data.get("field_groups", []),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "company": self.company,
             "document_type": self.document_type,
             "template": self.template,
             "period": self.period.to_dict(),
         }
+        if self.field_groups:
+            result["field_groups"] = self.field_groups
+        return result
 
     def matches(self, company: str, document_type: str) -> bool:
         """Check if this mapping matches the given company and document type."""
@@ -294,6 +299,7 @@ class TemplateRegistry:
         self._legacy_templates: dict[str, LegacyTemplateConfig] = {}
         self._companies: list[str] = []
         self._document_types: list[str] = []
+        self._field_groups: dict[str, list[str]] = {}
         self._mappings: list[CompanyTypeMapping] = []
         self._date_extraction_patterns: list[DateExtractionPattern] = []
         self._config_version: str = "1.0"
@@ -337,6 +343,13 @@ class TemplateRegistry:
         # Load document_types
         self._document_types = data.get("document_types", [])
         logger.info(f"Loaded {len(self._document_types)} document types")
+        
+        # Load field_groups
+        field_groups_data = data.get("field_groups", {})
+        self._field_groups = {}
+        for group_name, values in field_groups_data.items():
+            self._field_groups[group_name] = list(values) if isinstance(values, list) else []
+        logger.info(f"Loaded {len(self._field_groups)} field groups")
         
         # Load date extraction patterns
         date_patterns_data = data.get("date_extraction", [])
@@ -484,6 +497,40 @@ class TemplateRegistry:
             True if valid, False otherwise.
         """
         return document_type in self._document_types
+
+    def get_field_groups(self) -> dict[str, list[str]]:
+        """Get the dictionary of field groups with their possible values.
+
+        Returns:
+            Dict mapping field group names to list of possible values.
+        """
+        return self._field_groups
+
+    def get_field_group_values(self, group_name: str) -> list[str]:
+        """Get the list of possible values for a specific field group.
+
+        Args:
+            group_name: The name of the field group.
+
+        Returns:
+            List of possible values, or empty list if group not found.
+        """
+        return self._field_groups.get(group_name, [])
+
+    def get_field_groups_for_mapping(self, company: str, document_type: str) -> list[str]:
+        """Get the list of field group names for a specific (company, document_type) mapping.
+
+        Args:
+            company: The company name.
+            document_type: The document type.
+
+        Returns:
+            List of field group names, or empty list if no mapping found.
+        """
+        mapping = self.get_mapping(company, document_type)
+        if mapping:
+            return mapping.field_groups
+        return []
 
     def get_period_rule(self, template_name: str) -> "PeriodRule" | None:
         """Get the period rule for a template.

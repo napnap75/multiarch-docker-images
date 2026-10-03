@@ -160,6 +160,21 @@ class DocumentProcessor:
 
             result.template_name = mapping.template
 
+            # Step 4b: Extract additional fields from field_groups
+            optional_fields = {}
+            field_groups = self.registry.get_field_groups_for_mapping(company, doc_type)
+            
+            for group_name in field_groups:
+                field_value, field_error = self._extract_field_value(
+                    extracted_text, group_name
+                )
+                if field_error:
+                    result.errors.append(field_error)
+                    result.status = SidecarStatus.NOT_PROCESSED.value
+                    return result
+                if field_value:
+                    optional_fields[group_name] = field_value
+
             # Step 5: Calculate period from emission date and mapping's period rule
             period_rule = PeriodRule(
                 granularity=PeriodGranularity(mapping.period.granularity),
@@ -186,6 +201,7 @@ class DocumentProcessor:
                         period=period,
                         template_name=mapping.template,
                         original_filename=original_key.split("/")[-1],
+                        **optional_fields,
                     )
                 except Exception as e:
                     result.errors.append(f"Failed to format key pattern: {e}")
@@ -208,7 +224,7 @@ class DocumentProcessor:
                 emitting_company=company,
                 document_type=doc_type,
                 confidence=confidence,
-                optional_fields={},
+                optional_fields=optional_fields,
                 extracted_text=extracted_text,
             )
 
@@ -222,6 +238,7 @@ class DocumentProcessor:
                     "emission_date": emission_date,
                     "period": period,
                     "confidence": confidence,
+                    "optional_fields": optional_fields,
                 },
             )
 
@@ -388,6 +405,38 @@ class DocumentProcessor:
         
         # If no company found, return unknown
         return ("", "", ["Could not determine company and document type"])
+
+    def _extract_field_value(self, text: str, group_name: str) -> tuple[str, str | None]:
+        """Extract a field value from text using ML from predefined list.
+
+        For each field group in the mapping, the value should be found
+        using ML from the predefined list of possible values for that group.
+
+        Args:
+            text: The extracted text.
+            group_name: The name of the field group.
+
+        Returns:
+            Tuple of (field_value, error_message).
+            If successful, error_message is None.
+            If no value can be determined, error_message describes the issue.
+        """
+        # Get the predefined list of values for this field group
+        possible_values = self.registry.get_field_group_values(group_name)
+        
+        if not possible_values:
+            return ("", f"No predefined values for field group '{group_name}'")
+        
+        # Try to find a value from the predefined list in the text
+        # This is a placeholder for ML-based extraction
+        # For now, we'll do simple string matching
+        text_lower = text.lower()
+        for value in possible_values:
+            if value.lower() in text_lower:
+                return (value, None)
+        
+        # If no value found, return error
+        return ("", f"Could not determine value for field group '{group_name}' from predefined list")
 
     def _format_key_pattern(
         self,
