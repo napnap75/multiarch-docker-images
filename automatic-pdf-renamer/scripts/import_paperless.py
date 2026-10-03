@@ -434,7 +434,7 @@ class DocumentProcessor:
         """
         assigned_fields: dict[str, str] = {}
         errors: list[str] = []
-        
+
         if not expected_categories:
             # No additional fields expected - all tags are just metadata
             if tags:
@@ -563,8 +563,11 @@ class DocumentProcessor:
                 doc.created_date,
                 period_format_config.to_dict()
             )
+
+            logger.debug(f"Calculated period '{period}' for document {doc.id} using format '{resolved.period_format}'")
         except Exception as e:
             errors.append(f"Failed to calculate period: {e}")
+            logger.exception(f"Error calculating period for document {doc.id}")
             return self._route_to_pending(doc, errors)
         
         # Step 6: Generate final key
@@ -770,7 +773,7 @@ class Importer:
         try:
             # Download PDF
             pdf_bytes = self.paperless_client.download_document(doc.id)
-            sha256 = self.pdf_processor.compute_sha256(pdf_bytes)
+            sha256 = self.doc_processor.pdf_processor.compute_sha256(pdf_bytes)
 
             # Process document
             target_key, sidecar, errors = self.doc_processor.process_document(

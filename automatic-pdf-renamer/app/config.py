@@ -173,8 +173,8 @@ class MappingMatch:
         company=None in match means match any company.
         document_type=None in match means match any document type.
         """
-        company_match = self.company is None or self.company == company
-        doc_type_match = self.document_type is None or self.document_type == document_type
+        company_match = self.company is None or (isinstance(self.company, list) and company in self.company) or self.company == company
+        doc_type_match = self.document_type is None or (isinstance(self.document_type, list) and document_type in self.document_type) or self.document_type == document_type
         return company_match and doc_type_match
 
 
@@ -439,7 +439,7 @@ class TemplateRegistry:
         self._mappings = [
             MappingRule.from_dict(m) for m in mappings_data
         ]
-        logger.info(f"Loaded {len(self._mappings)} mapping rules")
+        logger.info(f"Loaded {len(self._mappings)} mapping rules: {self._mappings}")
         
         # Load templates
         templates_data = data.get("templates", {})
