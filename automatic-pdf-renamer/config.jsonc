@@ -1,0 +1,178 @@
+{
+  "version": "1.0",
+  "companies": [
+    "EDF",
+    "Engie",
+    "BNP Paribas",
+    "Societe Generale",
+    "Credit Agricole",
+    "La Banque Postale",
+    "Orange",
+    "SFR",
+    "Free",
+    "Bouygues Telecom",
+    "TotalEnergies",
+    "ENEDIS",
+    "GRDF",
+    "Veolia",
+    "Suez"
+  ],
+  "document_types": [
+    "facture",
+    "releve",
+    "contrat",
+    "avis"
+  ],
+  "additional_fields": {
+    "bank_accounts": [
+      "FR76 1234 5678 9012 3456 7890 123",
+      "FR76 2345 6789 0123 4567 8901 234",
+      "AMBIGUOUS_VALUE"
+    ],
+    "properties": [
+      "123 Rue de Paris, 75001 Paris",
+      "456 Avenue des Champs, 75002 Paris"
+    ],
+    "contract_references": [
+      "CONT-2024-001",
+      "CONT-2024-002",
+      "AMBIGUOUS_VALUE"
+    ],
+    "customer_numbers": [
+      "CUST-12345678",
+      "CUST-87654321"
+    ]
+  },
+  "date_extraction": [
+    "([0-9]{1,2})[/-]([0-9]{1,2})[/-]([0-9]{4})",
+    "([0-9]{4})[-/]([0-9]{1,2})[-/]([0-9]{1,2})",
+    "([0-9]{1,2}) (janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre) ([0-9]{4})",
+    "(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre) ([0-9]{4})",
+    "([0-9]{4})"
+  ],
+  "period_formats": {
+    "monthly": {
+      "granularity": "month",
+      "format": "{month_name} {year}",
+      "offset": "current"
+    },
+    "monthly_numeric": {
+      "granularity": "month",
+      "format": "{year}-{month}",
+      "offset": "current"
+    },
+    "quarterly": {
+      "granularity": "quarter",
+      "format": "T{quarter} {year}",
+      "offset": "current"
+    },
+    "quarterly_q": {
+      "granularity": "quarter",
+      "format": "Q{quarter} {year}",
+      "offset": "current"
+    },
+    "semester": {
+      "granularity": "semester",
+      "format": "S{semester} {year}",
+      "offset": "current"
+    },
+    "yearly": {
+      "granularity": "year",
+      "format": "{year}",
+      "offset": "current"
+    }
+  },
+  "mappings": [
+    {
+      "match": {},
+      "set": {
+        "template": "default",
+        "period_format": "monthly"
+      }
+    },
+    {
+      "match": {
+        "document_type": "releve"
+      },
+      "set": {
+        "template": "bank_statement",
+        "additional_fields": [
+          "bank_accounts"
+        ]
+      }
+    },
+    {
+      "match": {
+        "company": "BNP Paribas"
+      },
+      "set": {
+        "period_format": "monthly"
+      }
+    },
+    {
+      "match": {
+        "document_type": "contrat"
+      },
+      "set": {
+        "template": "contract",
+        "period_format": "yearly"
+      }
+    },
+    {
+      "match": {
+        "company": "EDF",
+        "document_type": "facture"
+      },
+      "set": {
+        "template": "edf_invoice",
+        "period_format": "monthly",
+        "additional_fields": [
+          "contract_references",
+          "customer_numbers"
+        ]
+      }
+    },
+    {
+      "match": {
+        "company": "EDF",
+        "document_type": "avis"
+      },
+      "set": {
+        "template": "edf_notice",
+        "period_format": "quarterly_q"
+      }
+    },
+    {
+      "match": {
+        "company": "Veolia",
+        "document_type": "facture"
+      },
+      "set": {
+        "template": "water_invoice",
+        "additional_fields": [
+          "properties"
+        ]
+      }
+    }
+  ],
+  "templates": {
+    "default": {
+      "key_pattern": "{emitting_company}/{period}/{document_type}/{emission_date}_{original_filename}"
+    },
+    "edf_invoice": {
+      "key_pattern": "{emitting_company}/{period}/{document_type}/{emission_date}_{original_filename}"
+    },
+    "edf_notice": {
+      "key_pattern": "{emitting_company}/{period}/{document_type}/{emission_date}_{original_filename}"
+    },
+    "bank_statement": {
+      "key_pattern": "Banques/{emitting_company}/{period}/{document_type}/{emission_date}_{original_filename}"
+    },
+    "contract": {
+      "key_pattern": "Contrats/{emitting_company}/{period}/{document_type}/{emission_date}_{original_filename}"
+    },
+    "water_invoice": {
+      "key_pattern": "Eau/{emitting_company}/{period}/{document_type}/{emission_date}_{original_filename}"
+    }
+  }
+}

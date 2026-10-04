@@ -82,23 +82,19 @@ Every document, regardless of template, carries at least these five common field
 
 - Common field 1 — Template: the selected template (i.e. the document family: invoice, purchase order, contract, bank statement, rent receipt, etc.).
 - Common field 2 — Emission date: the date the document was emitted, extracted from its content (not the object modification date).
-- Common field 3 — Emitting company: the company or organization that emitted the document, matched against the counterparty gazetteer.
+- Common field 3 — Emitting company: the company or organization that emitted the document, matched against the companies list in configuration.
 - Common field 4 — Document type: the fine-grained type of document within the family (e.g. debit advice vs monthly statement for bank statements; quotes vs order confirmations for purchase documents).
-- Common field 5 — Period: the period the document refers to, in human-readable form, derived from the emission date according to the template's period rules. The granularity and the offset relative to the emission date are declared per template:
-  - Granularity `day`: the emission date itself, e.g. "20 September 2026" (a simple invoice).
-  - Granularity `month`: e.g. "September 2026" (a monthly rent receipt).
-  - Granularity `quarter`: e.g. "Q3 2026" (quarterly building-charge invoice).
-  - Granularity `year`: e.g. "2026" (yearly tax document).
-  - Offset `current`: the period containing the emission date (document sent after the start of the period; e.g. "Q3 2026" for 2026-09-20).
-  - Offset `next`: the period following the emission date's period (document sent in advance; e.g. "Q4 2026" for 2026-09-20).
-  - Offset is only meaningful for granularities coarser than a day; for `day` the period always equals the emission date.
+- Common field 5 u2014 Period: the period the document refers to, in human-readable form, derived from the emission date according to the period format configuration. The period format is selected per (company, document_type) mapping and includes:
+  - Granularity: `day`, `week`, `month`, `quarter`, `semester`, or `year`
+  - Format: custom template string with placeholders (e.g., `{month_name} {year}`, `Q{quarter} {year}`)
+  - Offset: `current` (date in middle of period), `previous` (arrives after period), `following` (arrives before period)
 
 The object key pattern of each template is composed from these common fields, plus the template's optional fields.
 
 #### 4.2 Optional fields (template-specific)
 
-- FR4.1 Each template declares in YAML its optional fields beyond the common five: name, type, format, extraction rules, validation rules, and whether the field is rendered in the object key, the target prefix, or stored only. Examples: bank statements carry account owner and statement type; rent receipts carry the concerned premises; contracts carry the counterparty signatory.
-- FR4.2 Fill common and optional fields using per-template regexes, dateutil for dates, and a counterparty gazetteer with rapidfuzz matching for the emitting company (similarity threshold configurable; below threshold the company is "unrecognized"). The period is computed from the emission date using the template's declared granularity and offset (current vs next period); it is recomputed whenever the emission date or template changes.
+- FR4.1 Each template declares in JSONC its optional fields beyond the common five. Additional fields are organized in predefined field groups (e.g., `bank_accounts`, `properties`, `contract_references`, `customer_numbers`) with their possible values. The (company, document_type) mapping specifies which field groups to extract for each document. Examples: bank statements extract from `bank_accounts` group; rent receipts extract from `properties` group.
+- FR4.2 Fill common and optional fields using per-template regexes for dates and the companies list for company matching. Additional fields are extracted from their predefined field groups using ML from the possible values. The period is computed from the emission date using the period format's granularity, format template, and offset (current/previous/following); it is recomputed whenever the emission date or period format changes.
 - FR4.3 Validate fields before renaming: emission date parses and is within a plausible range, period is non-empty and consistent with the emission date and the template's granularity/offset, emitting company recognized, document type among the template's allowed values, each optional field matches its declared format (empty optional fields are allowed). Any failure routes to not processed with the failing fields identified.
 - FR4.4 Collisions in the target prefix are resolved with an incremental suffix; the final key is always the one logged.
 
@@ -156,11 +152,11 @@ The object key pattern of each template is composed from these common fields, pl
 
 Sidecar JSON (source of truth), one per PDF at `{key}.meta.json`:
 
-- schema_version, sha256, original_key, current_key, status, template_name, confidence, emission_date, period, emitting_company, document_type, optional_field1, optional_field2, extracted_text, created_at, updated_at, events[] (type: classified / renamed / validated / corrected, payload, timestamp).
+- schema_version, sha256, original_key, current_key, status, template_name, confidence, emission_date, period, emitting_company, document_type, optional_fields (dict of additional field values), extracted_text, created_at, updated_at, events[] (type: classified / renamed / validated / corrected, payload, timestamp).
 
 SQLite replica (rebuilt from sidecars):
 
-- files: id, sha256, original_key, current_key, status, template_id, confidence, emission_date, period, emitting_company, document_type, optional_field1, optional_field2, created_at, updated_at, extracted_text, created_at, updated_at.
+- files: id, sha256, original_key, current_key, status, template_id, confidence, emission_date, period, emitting_company, document_type, optional_fields (JSON), created_at, updated_at, extracted_text, created_at, updated_at.
 - consistency_flags: id, file_id, kind (orphaned_object, missing_sidecar, drift).
 
 ## 8. API Surface (indicative)
