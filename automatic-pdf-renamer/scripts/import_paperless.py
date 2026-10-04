@@ -36,6 +36,7 @@ import requests
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from app.extractor import extract_first_page_text
 from app.sidecar import (
     Sidecar,
     SidecarStatus,
@@ -791,11 +792,12 @@ class Importer:
                 return True
 
             # Write PDF
-            self.storage.put_object(target_key, pdf_bytes)
+            self.storage.put_object(target_key + ".pdf", pdf_bytes)
             logger.debug(f"Uploaded PDF to {target_key}")
 
-            # Update sidecar with actual SHA256
+            # Update sidecar
             sidecar.sha256 = sha256
+            sidecar.extracted_text = extract_first_page_text(pdf_bytes)
 
             # Write sidecar
             sidecar_key = get_sidecar_key(target_key)
