@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document | Automatic PDF Renamer</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <h1>PDF Renamer</h1>
+        </div>
+        <nav class="nav">
+          <a class="active" href="/">Documents</a>
+          <a href="/">Templates</a>
+          <a href="/">Consistency</a>
+        </nav>
+      </aside>
+
+      <main class="main-panel">
+        <header class="toolbar detail-toolbar">
+          <div>
+            <p class="eyebrow">Document detail</p>
+            <h2 id="document-title">Loading document...</h2>
+          </div>
+          <div class="detail-toolbar-actions">
+            <nav class="document-navigation" aria-label="Document navigation">
+              <button id="previous-document" class="secondary-btn" type="button" disabled>Previous</button>
+              <span id="document-position" role="status" aria-live="polite">Finding position...</span>
+              <button id="next-document" class="secondary-btn" type="button" disabled>Next</button>
+            </nav>
+            <a class="secondary-btn back-link" href="/">Back to documents</a>
+          </div>
+        </header>
+
+        <p id="detail-status" class="action-status" role="status" aria-live="polite"></p>
+
+        <div id="document-content" class="document-layout" hidden>
+          <section class="pdf-section">
+            <div class="section-heading">
+              <h3>PDF preview</h3>
+              <a id="open-pdf" target="_blank" rel="noopener">Open PDF</a>
+            </div>
+            <iframe id="pdf-preview" title="Document PDF preview"></iframe>
+          </section>
+
+          <div class="document-info">
+            <section class="detail-section">
+              <h3>Document data</h3>
+              <form id="document-edit-form" class="document-edit-form">
+                <div class="edit-form-grid">
+                  <div class="field-group">
+                    <label for="edit-template">Template</label>
+                    <select id="edit-template" name="template_name" required></select>
+                  </div>
+                  <div class="field-group">
+                    <label for="edit-period-format">Period format</label>
+                    <select id="edit-period-format" name="period_format" required></select>
+                  </div>
+                  <div class="field-group">
+                    <label for="edit-company">Company</label>
+                    <select id="edit-company" name="emitting_company" required></select>
+                  </div>
+                  <div class="field-group">
+                    <label for="edit-document-type">Document type</label>
+                    <select id="edit-document-type" name="document_type" required></select>
+                  </div>
+                  <div class="field-group">
+                    <label for="edit-emission-date">Emission date</label>
+                    <input id="edit-emission-date" name="emission_date" type="text" inputmode="numeric" placeholder="dd/mm/yyyy" pattern="[0-9]{2}/[0-9]{2}/[0-9]{4}" aria-describedby="emission-date-hint" maxlength="10" required />
+                    <small id="emission-date-hint" class="field-hint">Use dd/mm/yyyy</small>
+                  </div>
+                </div>
+                <div class="edit-calculated-fields">
+                  <div>
+                    <span class="edit-output-label">Period, recalculated on save</span>
+                    <output id="period-preview">—</output>
+                  </div>
+                  <div>
+                    <span class="edit-output-label">Current key, recalculated on save</span>
+                    <output id="current-key-preview" class="key-text">—</output>
+                  </div>
+                </div>
+                <div class="edit-form-actions">
+                  <button id="save-document-button" class="primary-btn" type="submit">Save changes</button>
+                  <p id="edit-status" class="action-status" role="status" aria-live="polite"></p>
+                </div>
+              </form>
+              <div id="additional-section" class="additional-data">
+                <div class="additional-header">
+                  <h4>Additional fields</h4>
+                  <button id="add-additional-field" class="secondary-btn" type="button">Add field</button>
+                </div>
+                <div id="additional-fields" class="additional-field-list"></div>
+              </div>
+            </section>
+
+            <details class="detail-section foldable-section">
+              <summary>Technical data</summary>
+              <dl id="technical-data" class="metadata-list"></dl>
+            </details>
+
+            <details class="detail-section foldable-section">
+              <summary>History</summary>
+              <ol id="document-history" class="history-list"></ol>
+            </details>
+
+            <details class="detail-section extracted-section">
+              <summary>Extracted text</summary>
+              <pre id="extracted-text"></pre>
+            </details>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script src="/document.js"></script>
+  </body>
+</html>

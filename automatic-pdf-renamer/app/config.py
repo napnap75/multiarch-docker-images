@@ -61,31 +61,6 @@ class S3Config:
 
 
 @dataclass
-class PaperlessConfig:
-    """Paperless-ngx API configuration."""
-
-    url: str
-    token: str
-    timeout: int = 30
-
-    @classmethod
-    def from_env(cls) -> "PaperlessConfig":
-        """Create PaperlessConfig from environment variables."""
-        return cls(
-            url=os.environ.get("PAPERLESS_URL", ""),
-            token=os.environ.get("PAPERLESS_TOKEN", ""),
-            timeout=int(os.environ.get("PAPERLESS_TIMEOUT", "30")),
-        )
-
-    def validate(self) -> None:
-        """Validate that all required fields are set."""
-        if not self.url:
-            raise ValueError("PAPERLESS_URL environment variable is required")
-        if not self.token:
-            raise ValueError("PAPERLESS_TOKEN environment variable is required")
-
-
-@dataclass
 class PollerConfig:
     """Inbox poller configuration."""
 
@@ -268,8 +243,9 @@ class TemplateConfig:
 class AppConfig:
     """Main application configuration."""
 
+    storage_backend: str = "s3"
+    local_storage_dir: str = "./storage"
     s3: S3Config = field(default_factory=S3Config)
-    paperless: PaperlessConfig | None = None
     poller: PollerConfig = field(default_factory=PollerConfig)
     classifier: ClassifierConfig = field(default_factory=ClassifierConfig)
     debug: bool = False
@@ -279,27 +255,32 @@ class AppConfig:
     def from_env(cls) -> "AppConfig":
         """Create AppConfig from environment variables."""
         debug = os.environ.get("DEBUG", "").lower() in ("true", "1", "yes")
+        storage_backend = os.environ.get("APP_STORAGE_BACKEND", os.environ.get("STORAGE_BACKEND", "s3")).lower()
 
         config = cls(
+            storage_backend=storage_backend,
+            local_storage_dir=os.environ.get("LOCAL_STORAGE_DIR", "./storage"),
             s3=S3Config.from_env(),
-            paperless=None,  # Only needed for import script
             poller=PollerConfig.from_env(),
             classifier=ClassifierConfig.from_env(),
             debug=debug,
             sqlite_path=os.environ.get("SQLITE_PATH", "./renamer.db"),
         )
 
-        # Only load paperless config if PAPERLESS_URL is set
-        if os.environ.get("PAPERLESS_URL"):
-            config.paperless = PaperlessConfig.from_env()
+        if config.storage_backend not in {"s3", "file"}:
+            raise ValueError("STORAGE_BACKEND must be either 's3' or 'file'")
 
         return config
 
     def validate(self) -> None:
         """Validate the configuration."""
-        self.s3.validate()
-        if self.paperless:
-            self.paperless.validate()
+        if self.storage_backend == "s3":
+            self.s3.validate()
+        elif self.storage_backend == "file":
+            if not self.local_storage_dir:
+                raise ValueError("LOCAL_STORAGE_DIR is required when STORAGE_BACKEND=file")
+        else:
+            raise ValueError("STORAGE_BACKEND must be either 's3' or 'file'")
 
 
 class TemplateRegistry:
@@ -616,6 +597,10 @@ class TemplateRegistry:
             PeriodFormatConfig if found, None otherwise.
         """
         return self._period_formats.get(format_name)
+
+    def list_period_formats(self) -> list[str]:
+        """List configured named period formats."""
+        return list(self._period_formats.keys())
 
     def get_key_pattern(self, template_name: str) -> str | None:
         """Get the key pattern for a template.

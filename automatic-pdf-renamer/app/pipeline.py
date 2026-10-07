@@ -54,6 +54,7 @@ class ProcessingResult:
     company: str = ""
     document_type: str = ""
     template_name: str = ""
+    period_format: str = ""
     period: str = ""
     status: str = SidecarStatus.NOT_PROCESSED.value
 
@@ -159,7 +160,7 @@ class DocumentProcessor:
             
             # Extract resolved fields
             template_name = resolved.get("template")
-            period_format_name = resolved.get("period_format")
+            period_format = resolved.get("period_format")
             additional_field_groups = resolved.get("additional_fields", [])
             
             if not template_name:
@@ -171,6 +172,7 @@ class DocumentProcessor:
                 return result
             
             result.template_name = template_name
+            result.period_format = period_format
 
             # Step 4b: Extract additional fields from additional_fields lists
             optional_fields = {}
@@ -186,7 +188,7 @@ class DocumentProcessor:
                     optional_fields[group_name] = field_value
 
             # Step 5: Calculate period using period_format configuration
-            if not period_format_name:
+            if not period_format:
                 result.errors.append(
                     f"No period_format resolved for company='{company}', "
                     f"document_type='{doc_type}'. Routing to review."
@@ -194,10 +196,10 @@ class DocumentProcessor:
                 result.status = SidecarStatus.NOT_PROCESSED.value
                 return result
             
-            period_format_config = self.registry.get_period_format_config(period_format_name)
+            period_format_config = self.registry.get_period_format_config(period_format)
             if period_format_config is None:
                 result.errors.append(
-                    f"Period format '{period_format_name}' not found in configuration"
+                    f"Period format '{period_format}' not found in configuration"
                 )
                 result.status = SidecarStatus.NOT_PROCESSED.value
                 return result
@@ -224,6 +226,7 @@ class DocumentProcessor:
                         emission_date=emission_date,
                         period=period,
                         template_name=template_name,
+                        period_format=period_format,
                         emitting_company=company,
                         original_filename=original_key.split("/")[-1],
                         **optional_fields,
@@ -244,6 +247,7 @@ class DocumentProcessor:
                 current_key=final_key,
                 status=SidecarStatus.PROCESSED,
                 template_name=template_name,
+                period_format=period_format,
                 emission_date=emission_date,
                 period=period,
                 emitting_company=company,
@@ -263,6 +267,7 @@ class DocumentProcessor:
                     "emission_date": emission_date,
                     "period": period,
                     "confidence": confidence,
+                    "period_format": period_format,
                     "optional_fields": optional_fields,
                 },
             )

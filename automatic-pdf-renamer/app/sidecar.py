@@ -65,6 +65,7 @@ class Sidecar:
     current_key: str = ""
     status: str = SidecarStatus.NOT_PROCESSED.value
     template_name: str = ""
+    period_format: str = ""
     confidence: float = 0.0
     emission_date: str = ""
     period: str = ""
@@ -105,6 +106,7 @@ class Sidecar:
             current_key=data.get("current_key", ""),
             status=data.get("status", SidecarStatus.NOT_PROCESSED.value),
             template_name=data.get("template_name", ""),
+            period_format=data.get("period_format", ""),
             confidence=data.get("confidence", 0.0),
             emission_date=data.get("emission_date", ""),
             period=data.get("period", ""),
@@ -137,6 +139,7 @@ class Sidecar:
 # Required common fields per PRD section 4.1
 _REQUIRED_COMMON_FIELDS = {
     "template_name",
+    "period_format",
     "emission_date",
     "emitting_company",
     "document_type",
@@ -150,7 +153,7 @@ _REQUIRED_SIDECAR_FIELDS = {
     "original_key",
     "current_key",
     "status",
-    *"template_name emission_date emitting_company document_type period".split(),
+    *"template_name period_format emission_date emitting_company document_type period".split(),
     "created_at",
     "updated_at",
     "events",
@@ -236,6 +239,7 @@ def build_sidecar(
     current_key: str,
     status: SidecarStatus,
     template_name: str,
+    period_format: str,
     emission_date: str,
     period: str,
     emitting_company: str,
@@ -252,6 +256,7 @@ def build_sidecar(
         current_key: Current S3 key of the file.
         status: Current processing status.
         template_name: Document family/template name.
+        period_format: Format of the period string (e.g., "YYYY-MM", "YYYY-MM-DD").
         emission_date: Date the document was emitted (ISO format YYYY-MM-DD).
         period: Human-readable period string.
         emitting_company: Company that emitted the document.
@@ -269,6 +274,7 @@ def build_sidecar(
         current_key=current_key,
         status=status.value,
         template_name=template_name,
+        period_format=period_format,
         confidence=confidence,
         emission_date=emission_date,
         period=period,
@@ -317,8 +323,10 @@ def get_sidecar_key(pdf_key: str) -> str:
         pdf_key: The S3 key of the PDF file.
 
     Returns:
-        The corresponding sidecar key (e.g., 'files/doc.pdf' -> 'files/doc.pdf.meta.json').
+        The corresponding sidecar key (e.g., 'files/doc.pdf' -> 'files/doc.meta.json').
     """
+    if pdf_key.endswith(".pdf"):
+        return f"{pdf_key[:-4]}.meta.json"
     return f"{pdf_key}.meta.json"
 
 
@@ -345,7 +353,7 @@ def write_atomic(
                 - delete_object(key: str)
                 - object_exists(key: str) -> bool
         sidecar: The Sidecar to write.
-        target_key: The final destination key (e.g., 'files/doc.pdf.meta.json').
+        target_key: The final destination key (e.g., 'files/doc.meta.json').
         temp_prefix: Prefix for temporary keys (default: 'tmp/').
 
     Raises:

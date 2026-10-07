@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Automatic PDF Renamer</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <h1>PDF Renamer</h1>
+        </div>
+        <nav class="nav">
+          <a class="active" href="#">Documents</a>
+          <a href="#">Templates</a>
+          <a href="#">Consistency</a>
+        </nav>
+      </aside>
+
+      <main class="main-panel">
+        <header class="toolbar">
+          <div>
+            <p class="eyebrow">Dashboard</p>
+            <h2>Document list</h2>
+          </div>
+          <div class="toolbar-actions">
+            <button id="refresh-btn" class="primary-btn">Refresh</button>
+            <button id="rebuild-btn" class="secondary-btn" type="button">Rebuild database</button>
+          </div>
+        </header>
+
+        <p id="rebuild-status" class="action-status" role="status" aria-live="polite"></p>
+
+        <section class="summary-cards" id="summary-cards"></section>
+
+        <section class="filters-card">
+          <div class="field-group">
+            <label for="search-filter">Search all fields</label>
+            <input id="search-filter" type="text" placeholder="Search documents..." />
+          </div>
+        </section>
+
+        <section class="table-card">
+          <table class="documents-table">
+            <thead>
+              <tr>
+                <th scope="col" data-sort-column="status"><button class="sort-button" data-sort="status">Status <span></span></button></th>
+                <th scope="col" data-sort-column="current_key"><button class="sort-button" data-sort="current_key">Document <span></span></button></th>
+                <th scope="col" data-sort-column="template_name"><button class="sort-button" data-sort="template_name">Template <span></span></button></th>
+                <th scope="col" data-sort-column="emitting_company"><button class="sort-button" data-sort="emitting_company">Company <span></span></button></th>
+                <th scope="col" data-sort-column="document_type"><button class="sort-button" data-sort="document_type">Type <span></span></button></th>
+                <th scope="col" data-sort-column="period"><button class="sort-button" data-sort="period">Period <span></span></button></th>
+                <th scope="col" data-sort-column="confidence"><button class="sort-button" data-sort="confidence">Confidence <span></span></button></th>
+                <th scope="col" data-sort-column="updated_at" aria-sort="descending"><button class="sort-button" data-sort="updated_at">Updated <span>↓</span></button></th>
+              </tr>
+              <tr class="column-filters">
+                <th><label class="visually-hidden" for="filter-status">Filter by status</label><select id="filter-status" data-filter="status"><option value="">All</option><option value="processed">Processed</option><option value="validated">Validated</option><option value="not processed">Not processed</option><option value="unknown">Unknown</option></select></th>
+                <th><label class="visually-hidden" for="filter-document">Filter by document</label><input id="filter-document" data-filter="current_key" type="search" placeholder="Name or key" /></th>
+                <th><label class="visually-hidden" for="filter-template">Filter by template</label><input id="filter-template" data-filter="template" type="search" placeholder="Template" /></th>
+                <th><label class="visually-hidden" for="filter-company">Filter by company</label><input id="filter-company" data-filter="emitting_company" type="search" placeholder="Company" /></th>
+                <th><label class="visually-hidden" for="filter-type">Filter by type</label><input id="filter-type" data-filter="document_type" type="search" placeholder="Type" /></th>
+                <th><label class="visually-hidden" for="filter-period">Filter by period</label><input id="filter-period" data-filter="period" type="search" placeholder="Period" /></th>
+                <th><label class="visually-hidden" for="filter-confidence">Filter by confidence</label><input id="filter-confidence" data-filter="confidence" type="search" placeholder="Percent" /></th>
+                <th><label class="visually-hidden" for="filter-updated">Filter by updated date</label><input id="filter-updated" data-filter="updated_at" type="date" /></th>
+              </tr>
+            </thead>
+            <tbody id="documents-body">
+              <tr>
+                <td colspan="8" class="empty-state">Loading documents...</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+        <div class="list-footer">
+          <p id="list-status" class="action-status" role="status" aria-live="polite">Loading documents...</p>
+          <button id="load-more-btn" class="secondary-btn" type="button" hidden>Load 25 more</button>
+          <div id="load-sentinel" aria-hidden="true"></div>
+        </div>
+      </main>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

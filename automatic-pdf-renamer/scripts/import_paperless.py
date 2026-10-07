@@ -62,6 +62,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+PAPERLESS_URL = os.environ.get("PAPERLESS_URL", "")
+PAPERLESS_TOKEN = os.environ.get("PAPERLESS_TOKEN", "")
+
 
 @dataclass
 class PaperlessDocument:
@@ -400,6 +403,29 @@ class DocumentProcessor:
         self.storage = storage
         self.pdf_processor = PDFProcessor()
 
+    def _unique_target_key(self, target_key: str) -> str:
+        """Add an incremental suffix when a generated PDF key already exists."""
+        pdf_key = f"{target_key}.pdf"
+        if not self.storage.object_exists(pdf_key) and not self.storage.object_exists(
+            get_sidecar_key(pdf_key)
+        ):
+            return target_key
+
+        directory, separator, filename = target_key.rpartition("/")
+        extension = ".pdf" if filename.lower().endswith(".pdf") else ""
+        stem = filename[:-len(extension)] if extension else filename
+        counter = 2
+
+        while True:
+            candidate_filename = f"{stem} ({counter}){extension}"
+            candidate = f"{directory}{separator}{candidate_filename}"
+            candidate_pdf_key = f"{candidate}.pdf"
+            if not self.storage.object_exists(candidate_pdf_key) and not self.storage.object_exists(
+                get_sidecar_key(candidate_pdf_key)
+            ):
+                return candidate
+            counter += 1
+
     def resolve_mapping(self, company: str, document_type: str) -> ResolvedMapping:
         """Resolve the mapping for a document."""
         result = ResolvedMapping()
@@ -480,7 +506,7 @@ class DocumentProcessor:
         
         Returns:
             Tuple of (target_key, sidecar, errors)
-            - target_key: Either files/{final_key} or pending/{paperless_id}
+            - target_key: Either files/{final_key}.pdf or pending/{paperless_id}.pdf
             - sidecar: Sidecar metadata (or None if failed)
             - errors: List of error messages
         """
@@ -593,7 +619,7 @@ class DocumentProcessor:
             return self._route_to_pending(doc, errors)
         
         # Step 7: Build sidecar for files/
-        pdf_key = f"files/{final_key}"
+        pdf_key = self._unique_target_key(f"files/{final_key}.pdf")
         sha256 = ""  # Will be computed when writing
         
         sidecar = build_sidecar(
@@ -602,6 +628,7 @@ class DocumentProcessor:
             current_key=pdf_key,
             status=SidecarStatus.PROCESSED,
             template_name=template_name,
+            period_format=resolved.period_format,
             emission_date=doc.created_date,
             period=period,
             emitting_company=company,
@@ -629,12 +656,9 @@ class DocumentProcessor:
         errors: list[str]
     ) -> tuple[str, Sidecar | None, list[str]]:
         """Route document to pending/ with error sidecar."""
-        pdf_key = f"pending/{doc.id}"
+        pdf_key = f"pending/{doc.id}.pdf"
         
-        # Build sidecar with errors in optional_fields
-        # We use optional_fields to store errors for pending documents
         optional_fields = {"tags": doc.tags} if doc.tags else {}
-        optional_fields["_import_errors"] = errors
         
         # Build sidecar
         sidecar = build_sidecar(
@@ -643,6 +667,7 @@ class DocumentProcessor:
             current_key=pdf_key,
             status=SidecarStatus.NOT_PROCESSED,
             template_name="",
+            period_format="",
             emission_date=doc.created_date,
             period="",
             emitting_company=doc.correspondent_name,
@@ -792,7 +817,7 @@ class Importer:
                 return True
 
             # Write PDF
-            self.storage.put_object(target_key + ".pdf", pdf_bytes)
+            self.storage.put_object(target_key, pdf_bytes)
             logger.debug(f"Uploaded PDF to {target_key}")
 
             # Update sidecar

@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.git/
+.gitignore
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+.idea/
+.vscode/
+web/node_modules/
+web/dist/
+*.log
