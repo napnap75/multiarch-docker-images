@@ -26,6 +26,7 @@ import hashlib
 import json
 import logging
 import os
+from pydoc import doc
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -403,25 +404,22 @@ class DocumentProcessor:
         self.storage = storage
         self.pdf_processor = PDFProcessor()
 
-    def _unique_target_key(self, target_key: str) -> str:
-        """Add an incremental suffix when a generated PDF key already exists."""
-        pdf_key = f"{target_key}.pdf"
+    def _unique_target_key(self, pdf_key: str) -> str:
+        """Add an incremental suffix if the PDF key or its sidecar already exists."""
         if not self.storage.object_exists(pdf_key) and not self.storage.object_exists(
             get_sidecar_key(pdf_key)
         ):
-            return target_key
+            return pdf_key
 
-        directory, separator, filename = target_key.rpartition("/")
-        extension = ".pdf" if filename.lower().endswith(".pdf") else ""
-        stem = filename[:-len(extension)] if extension else filename
+        directory, separator, filename = pdf_key.rpartition("/")
+        stem, extension = os.path.splitext(filename)
         counter = 2
 
         while True:
             candidate_filename = f"{stem} ({counter}){extension}"
             candidate = f"{directory}{separator}{candidate_filename}"
-            candidate_pdf_key = f"{candidate}.pdf"
-            if not self.storage.object_exists(candidate_pdf_key) and not self.storage.object_exists(
-                get_sidecar_key(candidate_pdf_key)
+            if not self.storage.object_exists(candidate) and not self.storage.object_exists(
+                get_sidecar_key(candidate)
             ):
                 return candidate
             counter += 1
@@ -574,10 +572,12 @@ class DocumentProcessor:
         errors.extend(tag_errors)
         
         if resolved.additional_fields and not assigned_fields:
-            errors.append("No tags matched expected additional fields")
+            errors.append("The tags " + ", ".join(doc.tags) + " did not match expected additional fields: " + ", ".join(resolved.additional_fields))
         
         if errors:
             return self._route_to_pending(doc, errors)
+        
+        logger.debug(f"Resolved mapping for document {doc.id}: template={resolved.template}, period_format={resolved.period_format}, additional_fields={assigned_fields}")
         
         # Step 5: Calculate period
         try:
@@ -612,6 +612,7 @@ class DocumentProcessor:
                 emission_date=doc.created_date,
                 period=period,
                 original_filename=doc.filename,
+                additional_fields=", ".join(assigned_fields.values()) if assigned_fields else "",
                 **assigned_fields
             )
         except Exception as e:
@@ -619,7 +620,10 @@ class DocumentProcessor:
             return self._route_to_pending(doc, errors)
         
         # Step 7: Build sidecar for files/
-        pdf_key = self._unique_target_key(f"files/{final_key}.pdf")
+        pdf_key = f"files/{final_key}"
+        if not pdf_key.lower().endswith(".pdf"):
+            pdf_key += ".pdf"
+        pdf_key = self._unique_target_key(pdf_key)
         sha256 = ""  # Will be computed when writing
         
         sidecar = build_sidecar(

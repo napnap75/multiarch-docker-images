@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
-from app.config import load_templates
+from app.config import TemplateRegistry, load_templates
 from app.db import FileRecord, SQLiteFileRepository
 from app.period import format_period_from_emission_date
 from app.storage import StorageBackend
@@ -15,6 +18,7 @@ from .deps import get_current_user
 from .models import (
     FileDetail,
     FileListItem,
+    ConfigUpdateRequest,
     DocumentEditRequest,
     HealthResponse,
     ValidationRequest,
@@ -44,6 +48,15 @@ def _registry(request: Request):
         registry = load_templates()
         request.app.state.template_registry = registry
     return registry
+
+
+def _template_config_path() -> Path:
+    configured_path = Path(os.environ.get("TEMPLATE_PATH", "./config.jsonc"))
+    if configured_path.suffix.lower() not in {".json", ".jsonc"}:
+        raise HTTPException(status_code=400, detail="The configured template file is not JSON or JSONC.")
+    if not configured_path.is_file():
+        raise HTTPException(status_code=404, detail="The configured template file does not exist.")
+    return configured_path.resolve()
 
 
 def _parse_file_metadata(raw: str | bytes | None) -> dict[str, Any]:
@@ -318,6 +331,7 @@ async def edit_file(
         "period_format": period_format,
         "template_name": template_name,
         "emitting_company": emitting_company,
+        "additional_fields": ", ".join(updated_optional_fields.values()),
         "original_filename": record.original_key.rsplit("/", 1)[-1],
     })
     for _ in range(20):
@@ -517,43 +531,99 @@ async def validate_file(
 async def document_edit_options(
     request: Request,
     current_user: dict[str, str] | None = Depends(get_current_user),
-) -> dict[str, list[str]]:
+) -> dict[str, Any]:
     """Return configured templates and existing document values for edit suggestions."""
     registry = _registry(request)
     db = _db(request)
     records = db.list_files(page_size=10000)
 
-    companies = sorted({
+    companies = {
+        str(company).strip()
+        for company in registry.get_companies()
+        if str(company).strip()
+    } | {
         str(record.emitting_company).strip()
         for record in records
         if record.emitting_company and str(record.emitting_company).strip()
-    })
-    document_types = sorted({
+    }
+    document_types = {
+        str(document_type).strip()
+        for document_type in registry.get_document_types()
+        if str(document_type).strip()
+    } | {
         str(record.document_type).strip()
         for record in records
         if record.document_type and str(record.document_type).strip()
-    })
-    optional_field_names = sorted({
-        str(name).strip()
-        for record in records
-        for name in (record.optional_fields or {}).keys()
-        if str(name).strip()
-    })
-    optional_field_values = sorted({
-        str(value).strip()
-        for record in records
-        for value in (record.optional_fields or {}).values()
-        if value is not None and str(value).strip()
-    })
+    }
+    optional_field_values_by_name: dict[str, set[str]] = {}
+    for name, values in registry.get_additional_fields().items():
+        field_name = str(name).strip()
+        if field_name:
+            optional_field_values_by_name[field_name] = {
+                str(value).strip()
+                for value in values
+                if value is not None and str(value).strip()
+            }
+    optional_field_names = set(optional_field_values_by_name)
+    for record in records:
+        for name, value in (record.optional_fields or {}).items():
+            field_name = str(name).strip()
+            field_value = str(value).strip() if value is not None else ""
+            if field_name:
+                optional_field_names.add(field_name)
+                if field_value:
+                    optional_field_values_by_name.setdefault(field_name, set()).add(field_value)
+    optional_field_values = {
+        name: sorted(values)
+        for name, values in sorted(optional_field_values_by_name.items())
+    }
 
     return {
         "templates": registry.list_all_templates(),
         "period_formats": registry.list_period_formats(),
-        "companies": companies,
-        "document_types": document_types,
-        "optional_field_names": optional_field_names,
+        "companies": sorted(companies),
+        "document_types": sorted(document_types),
+        "optional_field_names": sorted(optional_field_names),
         "optional_field_values": optional_field_values,
     }
+
+
+@router.get("/api/config")
+async def get_config(
+    current_user: dict[str, str] | None = Depends(get_current_user),
+) -> dict[str, str]:
+    """Return the configured JSONC file for editing in the dashboard."""
+    path = _template_config_path()
+    try:
+        return {"content": path.read_text(encoding="utf-8")}
+    except OSError as error:
+        raise HTTPException(status_code=500, detail="Unable to read the configured template file.") from error
+
+
+@router.put("/api/config")
+async def update_config(
+    payload: ConfigUpdateRequest,
+    request: Request,
+    current_user: dict[str, str] | None = Depends(get_current_user),
+) -> dict[str, bool]:
+    """Validate and save JSONC configuration, then activate it without restarting the process."""
+    registry = TemplateRegistry()
+    try:
+        registry.load_from_content(payload.content)
+    except (json.JSONDecodeError, ValueError, TypeError, AttributeError, KeyError, re.error) as error:
+        raise HTTPException(status_code=422, detail=f"Invalid configuration: {error}") from error
+
+    path = _template_config_path()
+    try:
+        with path.open("w", encoding="utf-8") as config_file:
+            config_file.write(payload.content)
+            config_file.flush()
+            os.fsync(config_file.fileno())
+        request.app.state.template_registry = registry
+    except OSError as error:
+        raise HTTPException(status_code=500, detail="Unable to save the configured template file.") from error
+
+    return {"saved": True, "reloaded": True}
 
 
 @router.get("/templates")

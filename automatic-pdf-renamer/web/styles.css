@@ -160,11 +160,49 @@ body {
 }
 
 .filters-card,
-.table-card {
+.table-card,
+.config-card {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: 0 3px 10px rgba(26, 44, 64, 0.03);
+}
+
+.config-card {
+  padding: 18px;
+}
+
+.config-description {
+  margin: 0 0 14px;
+  color: var(--muted);
+}
+
+.config-editor {
+  display: block;
+  width: 100%;
+  min-height: 65vh;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  background: #fbfcfe;
+  color: var(--text);
+  font: 0.86rem/1.5 "SFMono-Regular", Consolas, monospace;
+  tab-size: 2;
+}
+
+.config-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.config-actions .action-status {
+  flex: 1 1 240px;
+  min-height: 0;
+  margin: 0;
 }
 
 .filters-card {

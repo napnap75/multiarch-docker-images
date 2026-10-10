@@ -24,7 +24,7 @@ const saveButton = document.getElementById('save-document-button');
 const editStatus = document.getElementById('edit-status');
 saveButton.disabled = true;
 let currentFileId = null;
-let fieldSuggestionState = { names: [], values: [] };
+let fieldSuggestionState = { names: [], values: {} };
 let initialDocumentState = null;
 
 const canonicalizeState = (value) => {
@@ -150,6 +150,11 @@ const addMetadata = (target, label, value) => {
   target.append(term, description);
 };
 
+const getFieldValueSuggestions = (suggestions, label) => {
+  const values = suggestions.values?.[label];
+  return Array.isArray(values) ? values : [];
+};
+
 const buildAdditionalFieldRow = (label = '', value = '', suggestions = {}) => {
   const row = document.createElement('div');
   row.className = 'additional-field-row';
@@ -163,8 +168,11 @@ const buildAdditionalFieldRow = (label = '', value = '', suggestions = {}) => {
   const valueSelect = document.createElement('select');
   valueSelect.className = 'additional-field-value';
   valueSelect.setAttribute('aria-label', 'Additional field value');
-  const valueValues = [...new Set([...(suggestions.values || []), value].filter((item) => item !== null && item !== undefined && String(item).trim() !== ''))];
+  const valueValues = [...new Set([...getFieldValueSuggestions(suggestions, labelSelect.value), value].filter((item) => item !== null && item !== undefined && String(item).trim() !== ''))];
   setSelectOptions(valueSelect, valueValues, value);
+  labelSelect.addEventListener('change', () => {
+    setSelectOptions(valueSelect, getFieldValueSuggestions(suggestions, labelSelect.value), '');
+  });
 
   const removeButton = document.createElement('button');
   removeButton.type = 'button';
@@ -207,7 +215,7 @@ const updateDocumentSuggestions = (options = {}) => {
 
   const suggestionState = {
     names: options.optional_field_names || [],
-    values: options.optional_field_values || [],
+    values: options.optional_field_values || {},
   };
 
   additionalFields.querySelectorAll('.additional-field-row').forEach((row) => {
@@ -219,7 +227,7 @@ const updateDocumentSuggestions = (options = {}) => {
     }
     if (valueSelect) {
       const current = valueSelect.value || '';
-      setSelectOptions(valueSelect, suggestionState.values, current);
+      setSelectOptions(valueSelect, getFieldValueSuggestions(suggestionState, labelSelect?.value || ''), current);
     }
   });
 
@@ -408,7 +416,7 @@ const loadDocument = async () => {
     ]);
     fieldSuggestionState = {
       names: options.optional_field_names || [],
-      values: options.optional_field_values || [],
+      values: options.optional_field_values || {},
     };
     setSelectOptions(templateSelect, options.templates || [], documentData.template_name);
     setSelectOptions(periodFormatSelect, options.period_formats || [], documentData.period_format);

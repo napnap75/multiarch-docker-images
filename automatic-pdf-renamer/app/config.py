@@ -351,7 +351,11 @@ class TemplateRegistry:
         
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
-        
+
+        self.load_from_content(content)
+
+    def load_from_content(self, content: str) -> None:
+        """Load configuration from JSONC text."""
         # Strip comments from JSONC
         json_content = self._strip_jsonc_comments(content)
         
@@ -359,10 +363,14 @@ class TemplateRegistry:
         try:
             data = json.loads(json_content)
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSONC file {path}: {e}")
+            logger.error(f"Failed to parse JSONC configuration: {e}")
             raise
-        
+
+        if not isinstance(data, dict):
+            raise ValueError("Configuration must be a JSON object.")
+
         self._load_new_format(data)
+        self._is_new_format = True
 
     def _strip_jsonc_comments(self, content: str) -> str:
         """Strip // line comments and /* */ block comments from JSONC content.

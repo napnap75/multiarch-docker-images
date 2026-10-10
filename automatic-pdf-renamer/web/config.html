@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Config | Automatic PDF Renamer</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <h1>PDF Renamer</h1>
+        </div>
+        <nav class="nav">
+          <a href="/">Documents</a>
+          <a class="active" href="/config.html">Config</a>
+        </nav>
+      </aside>
+
+      <main class="main-panel">
+        <header class="toolbar">
+          <div>
+            <p class="eyebrow">Application settings</p>
+            <h2>Config</h2>
+          </div>
+        </header>
+
+        <section class="config-card">
+          <p class="config-description">
+            Edit the configured JSON or JSONC file. The changes are validated before saving and loaded immediately.
+          </p>
+          <form id="config-form">
+            <label class="visually-hidden" for="config-editor">JSON configuration</label>
+            <textarea id="config-editor" class="config-editor" spellcheck="false" autocomplete="off" disabled></textarea>
+            <div class="config-actions">
+              <button id="save-config-button" class="primary-btn" type="submit" disabled>Save and reload</button>
+              <p id="config-status" class="action-status" role="status" aria-live="polite">Loading configuration...</p>
+            </div>
+          </form>
+        </section>
+      </main>
+    </div>
+
+    <script src="/config.js"></script>
+  </body>
+</html>

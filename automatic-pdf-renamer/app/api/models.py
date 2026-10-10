@@ -58,6 +58,12 @@ class DocumentEditRequest(BaseModel):
     optional_fields: dict[str, Any] = Field(default_factory=dict)
 
 
+class ConfigUpdateRequest(BaseModel):
+    """JSONC configuration text submitted by the dashboard."""
+
+    content: str
+
+
 class ValidationResponse(BaseModel):
     """Validation result payload."""
 

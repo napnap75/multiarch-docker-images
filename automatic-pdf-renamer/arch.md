@@ -136,7 +136,7 @@ A pure function of (emission date, template period rules): granularity in {day, 
 
 ### 4.7 Frontend
 
-Single-page React app, built with Vite into static assets served by FastAPI. Views: file list (filters, counters, badges), detail page (embedded react-pdf viewer, five common fields, optional fields, template dropdown with candidate scores, live key preview), templates list, retrain and consistency pages. Auth: login form, session cookie, all API routes behind the auth dependency except the PDF stream which shares it.
+The dashboard is served as static assets by FastAPI. Views: file list (filters, counters, badges), detail page (PDF preview and editable metadata), and a Config page for editing JSONC configuration. Saving validates the content before updating the configured file and reloading the in-memory template registry. Auth: API routes use the configured dashboard credentials.
 
 ## 5. Data Flow: Renaming and Validation
 
