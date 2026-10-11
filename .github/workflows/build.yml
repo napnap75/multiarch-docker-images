@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        repository: [rsync-server, recipe4reader, log-alert, immich-souvenirs, dnsupdater, webhook, restic-auto, shairport-sync]
+        repository: [automatic-pdf-renamer, rsync-server, recipe4reader, log-alert, immich-souvenirs, dnsupdater, webhook, restic-auto, shairport-sync]
 
     steps:
       - name: Checkout
