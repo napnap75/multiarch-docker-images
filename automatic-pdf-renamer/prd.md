@@ -100,7 +100,7 @@ The object key pattern of each template is composed from these common fields, pl
 
 ### Epic 5 — Renaming, moving, logging
 
-- FR5.1 Rename and move the object within the bucket (S3 copy to the target key per the template pattern, then delete of the source key). Write the sidecar first, then update SQLite; these stores do not share a transaction. A crash or replica failure is recovered by the consistency job. If a transient technical operation fails, retry it safely without assigning the business status `pending` solely because of the technical failure.
+- FR5.1 Rename and move the object within the bucket (S3 copy to the target key per the template pattern, then delete of the source key). Write the sidecar first, then update SQLite; these stores do not share a transaction. A crash or replica failure is recovered by the consistency job. If a transient technical operation fails, retry it safely for up to 3 times after the initial attempt, with delays of 5 seconds, 30 seconds, and 2 minutes. Do not assign business status `pending` solely because of technical failure.
 - FR5.2 Every event is logged in the sidecar history: file hash, old key, new key, template, extracted fields, confidence, decision, status, timestamps.
 - FR5.3 Objects missing from the bucket while not in a terminal state are detected by the consistency job and the record is flagged as orphaned.
 
@@ -142,7 +142,7 @@ The object key pattern of each template is composed from these common fields, pl
 - NFR1 Privacy: fully offline on self-hosted infrastructure. No network calls except the local Garage bucket, and serving the local dashboard. Dependencies must not require downloads at runtime.
 - NFR2 Performance: end-to-end processing of a standard PDF under 5 seconds on the target server, including the S3 download; dashboard file list loads under 1 s for 10,000 records (served from SQLite).
 - NFR3 Reliability: zero silent wrong renames. Every ambiguous case routes to `pending`.
-- NFR4 Durability: bucket versioning enabled; SQLite with WAL. Operations must be recoverable after crashes using copy-then-delete, atomic sidecar writes, idempotent retries, and consistency repair for SQLite-sidecar drift. Technical failures must not be represented as business status `pending`.
+- NFR4 Durability: bucket versioning enabled; SQLite with WAL. Operations must be recoverable after crashes using copy-then-delete, atomic sidecar writes, idempotent retries, and consistency repair for SQLite-sidecar drift. For transient technical failures, perform at most 3 retries after the initial attempt, with delays of 5 seconds, 30 seconds, and 2 minutes. After exhaustion, retain a visible technical error for diagnosis/recovery; do not represent it as business status `pending`.
 - NFR5 Language: documents in French; UI in English or French (single locale acceptable in v1).
 - NFR6 Deployment: runs as a container next to the Garage deployment and the Nextcloud server; configuration via a single JSONC file (templates) and environment variables (S3 endpoint, credentials, bucket).
 - NFR7 Stack: Python (FastAPI, boto3 or minio S3 client, scikit-learn, pdfplumber/PyMuPDF, rapidfuzz, spaCy fr model optional), React (Vite, a lightweight PDF viewer such as react-pdf), SQLite, Garage for S3 storage, Nextcloud with External Storage (S3) as the user-facing file interface.
