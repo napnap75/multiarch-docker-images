@@ -48,7 +48,7 @@ The following inventory consolidates the requirements from the project brief and
 - **FR-TXT-02 — Empty text handling:** route PDFs with empty or insufficient extracted text to human review with an explicit reason.
 - **FR-TXT-03 — Text persistence:** persist extracted text in the sidecar and SQLite replica so normal review and training workflows do not need to re-parse the PDF.
 - **FR-CLS-01 — Classification:** classify documents against configured templates. The initial light release uses deterministic rules; the ML epic adds TF-IDF and Logistic Regression classification.
-- **FR-CLS-02 — Confidence and unknown class:** ML classification exposes confidence and routes results below a configurable threshold to review.
+- **FR-CLS-02 — Confidence and unknown class (post-v1):** ML classification exposes confidence and routes results below a configurable threshold to review. The deterministic initial release uses explicit rule outcomes and does not generate artificial confidence scores.
 - **FR-FLD-01 — Common fields:** every document has template, emission date, emitting company, document type, and period.
 - **FR-FLD-02 — Optional fields:** templates define optional fields and reusable field groups with formats, allowed values, and extraction rules.
 - **FR-FLD-03 — Deterministic extraction:** the light release uses configured regular expressions, date parsing, company gazetteers, and fuzzy matching where useful.
@@ -220,7 +220,7 @@ So that newly uploaded documents enter the pipeline automatically.
 **When** its size and ETag are unchanged across two consecutive listings  
 **Then** it becomes eligible for processing  
 **And** non-PDF files, hidden files, `.part` files, and lock files are ignored  
-**And** a file that is still being uploaded is pending prematurely  
+**And** a file that is still being uploaded is not eligible for processing prematurely  
 **And** a poller error for one object does not stop discovery of other objects.
 
 ### Story 2.2: Extract and persist full PDF text
@@ -313,7 +313,7 @@ So that retries do not create duplicate processing or lose track of a file.
 **Given** the service restarts while files exist in `inbox/` or `pending/`  
 **When** the recovery scan runs  
 **Then** objects without a completed sidecar state are discovered and resumed or flagged for review  
-**And** objects already completed are pending again in a way that creates duplicate renames or events  
+**And** objects already completed are not processed again in a way that creates duplicate renames or events  
 **And** if a crash occurs between copy and delete, the recovery logic detects both keys and resolves the state from the sidecar and object hashes  
 **And** transient technical failures are distinguishable from the three business statuses.
 
