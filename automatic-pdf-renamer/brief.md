@@ -10,7 +10,7 @@ PDFs arrive continuously in an inbox S3 prefix (dropped via Nextcloud by the use
 
 ## 3. Objectives
 
-- Classify each incoming PDF against a known naming template, based on the file content (first-page text, header/footer), not the current object name.
+- Classify each incoming PDF against a known naming template, based on the full text content of every page (including headers and footers), not the current object name.
 - Fill the fields of the selected template (date, counterparty, reference, amount) from the content.
 - Rename and move the object within the bucket into an organized prefix structure depending on the document type.
 - High confidence: automatic processing. Low confidence or incomplete extraction: queued for human review in the dashboard.
@@ -22,13 +22,13 @@ PDFs arrive continuously in an inbox S3 prefix (dropped via Nextcloud by the use
 ### In scope (v1)
 
 - Ingestion by polling the `inbox/` prefix of a Garage S3 bucket for new objects only. Nextcloud (External Storage app) is the user-facing interface to upload, download, and share files.
-- PDF text extraction. All files are text-based, no OCR in v1.
+- Extract all available text from every page of each PDF. All files are text-based; OCR for scanned/image-only documents is out of scope for v1.
 - Template classification: TF-IDF + Logistic Regression (scikit-learn) on the extracted text, with a configurable confidence threshold.
 - Per-template slot filling: regex + dateutil for dates, amounts, references; gazetteer + fuzzy matching (rapidfuzz) for counterparties, with spaCy/CamemBERT NER as fallback if needed.
 - Templates and extractors declared in configuration (JSONC format), not in code.
 - Storage: Garage (self-hosted S3-compatible, https://garagehq.deuxfleurs.fr/) with a single versioned bucket; objects addressed by S3 keys, no local filesystem for documents.
 - Metadata: one JSON sidecar object per PDF in the bucket, holding template, fields, confidence, status, and history — the source of truth. SQLite acts as a replicated index for dashboard queries, rebuildable from the sidecars.
-- Local web dashboard: all processed files with status (not processed / processed / validated), file detail page with PDF preview streamed from S3, template and field correction, validation, history, statistics.
+- Local web dashboard: all processed files with status (not processed / processed / validated), file detail page with PDF preview streamed from S3, template and field correction, validation, history, statistics, and full-text search across the entire extracted document in addition to metadata/field search.
 - On-demand classifier retraining, using the existing corpus based on all the files with "validated" status.
 
 ### Out of scope (v1)
@@ -45,7 +45,7 @@ PDFs arrive continuously in an inbox S3 prefix (dropped via Nextcloud by the use
 Single user (personal use), technically proficient. Nominal flow:
 
 1. A PDF is uploaded into the `inbox/` prefix via Nextcloud (or any S3 client).
-2. The poller detects the new object, waits for write completion (stable ETag/content-length on repeated listing), downloads it, extracts the text, classifies, extracts the fields, validates.
+2. The poller detects the new object, waits for write completion (stable ETag/content-length on repeated listing), downloads it, extracts text from every page, classifies, extracts the fields, validates.
 3. High confidence and valid fields: the object is copied to its renamed key in the target prefix and the inbox copy deleted; metadata is written to the sidecar and replicated to SQLite; the event is logged.
 4. Otherwise: the file appears in the dashboard review queue; the user corrects or validates; the correction feeds the training corpus.
 
@@ -84,7 +84,7 @@ Single user (personal use), technically proficient. Nominal flow:
 
 - Limited training corpus (~500 files): start simple (TF-IDF + LogReg), optionally sentence-transformers embeddings if accuracy is insufficient; the review loop continuously enriches the corpus.
 - Templates too weakly distinguished in the text: enrich features (header, issuer, business keywords per template).
-- Poorly extracted or empty text files: systematic detection and routing to review.
+- Poorly extracted or empty text files: systematic detection and routing to review; extraction and search must cover all pages, not only page one.
 - Partial uploads (Nextcloud chunked uploads): poll-only keys with a stable size across two listing cycles and a `.part`/`.~lock` exclusion list.
 - Sidecar/object drift (sidecar missing or out of sync with SQLite): sidecars win; a consistency job rebuilds SQLite and flags orphaned or missing sidecars.
 - Garage version of S3 API: pin a Garage release and run a compatibility spike (listing, multipart, copy-object, versioning).
