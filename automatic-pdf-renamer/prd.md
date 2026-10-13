@@ -63,9 +63,9 @@ Transitions:
 ### Epic 2 — Text extraction
 
 - FR2.1 Download the object from S3 and extract text with pdfplumber or PyMuPDF (choice fixed at implementation, documented in config).
-- FR2.2 Extract the full first page only.
+- FR2.2 Extract all available text from every page of each PDF; extraction must not stop after the first page. OCR of scanned/image-only documents remains out of scope for v1.
 - FR2.3 If extracted text is empty or below a minimum length, route the file to not processed with reason "empty text".
-- FR2.4 Store the extracted text in the sidecar (and replicated to SQLite) for the file's lifetime, so the detail page and retraining never need to re-download and re-parse the object.
+- FR2.4 Store the complete extracted text from all pages in the sidecar and replicate it to SQLite for the file's lifetime, so search, the detail page, and retraining do not need to re-download and re-parse the object.
 
 ### Epic 3 — Template classification
 
@@ -107,7 +107,7 @@ The object key pattern of each template is composed from these common fields, pl
 ### Epic 6 — Dashboard: file list
 
 - FR6.1 A single list shows every file the system has seen, with columns: emission date, period, current object name, status, template (document family), document type, emitting company, confidence. Served from SQLite.
-- FR6.2 Filter by status, template, document type, emitting company, period, and date range; sort by any column; free-text search on object name, any field and optionnally first-page content.
+- FR6.2 Filter by status, template, document type, emitting company, period, and date range; sort by any column; free-text search on object name, metadata fields, and the complete extracted text from every page of the PDF.
 - FR6.3 Status is visually distinguishable (badge): not processed, processed, validated.
 - FR6.4 The list shows counters: files per status, automation rate (processed / total), validation rate, plus a consistency indicator (orphaned objects, missing sidecars).
 
@@ -152,7 +152,7 @@ The object key pattern of each template is composed from these common fields, pl
 
 Sidecar JSON (source of truth), one per PDF at `{key}.meta.json`:
 
-- schema_version, sha256, original_key, current_key, status, template_name, confidence, emission_date, period, emitting_company, document_type, optional_fields (dict of additional field values), extracted_text, created_at, updated_at, events[] (type: classified / renamed / validated / corrected, payload, timestamp).
+- schema_version, sha256, original_key, current_key, status, template_name, confidence, emission_date, period, emitting_company, document_type, optional_fields (dict of additional field values), extracted_text (full text from all pages), created_at, updated_at, events[] (type: classified / renamed / validated / corrected, payload, timestamp).
 
 SQLite replica (rebuilt from sidecars):
 
