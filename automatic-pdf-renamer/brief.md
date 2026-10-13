@@ -2,7 +2,7 @@
 
 ## 1. Vision
 
-A personal, 100% offline tool that watches an S3 bucket hosted on a self-hosted Garage storage cluster, automatically identifies the type of each incoming PDF (invoice, purchase order, contract, etc.) from its content, applies the corresponding naming template by extracting the fields (date, counterparty, reference, amount), and moves the object into an organized S3 prefix structure. Users upload, download, and share files through Nextcloud, which mounts the bucket as external storage. Low-confidence decisions go through human review in a local web dashboard. Every operation is logged in JSON sidecar files (source of truth) and replicated to SQLite, and every rename is reversible.
+A personal, 100% offline tool that watches an S3 bucket hosted on a self-hosted Garage storage cluster, automatically identifies the type of each incoming PDF (invoice, purchase order, contract, etc.) from its content, applies the corresponding naming template by extracting the fields (date, counterparty, reference, amount), and moves the object into an organized S3 prefix structure. Users upload, download, and share files through Nextcloud, which mounts the bucket as external storage. Uncertain or incomplete results go through human review in a local web dashboard. Every operation is logged in JSON sidecar files (source of truth) and replicated to SQLite.
 
 ## 2. Problem and Context
 
@@ -14,7 +14,7 @@ PDFs arrive continuously in an inbox S3 prefix (dropped via Nextcloud by the use
 - Fill the fields of the selected template (date, counterparty, reference, amount) from the content.
 - Rename and move the object within the bucket into an organized prefix structure depending on the document type.
 - Unambiguous deterministic rules and valid fields: automatic processing. If rules cannot determine a valid result or extraction is incomplete, queue the file with status `pending` for human review in the dashboard.
-- Write metadata as JSON sidecar objects in the bucket (source of truth) and replicate every decision into SQLite for fast queries, with rollback capability and retraining from corrections.
+- Write metadata as JSON sidecar objects in the bucket (source of truth) and replicate every decision into SQLite for fast queries, with retraining from corrections.
 - Run fully offline on self-hosted infrastructure: no cloud APIs, no data ever leaves the server.
 
 ## 4. Scope
@@ -56,7 +56,7 @@ Single user (personal use), technically proficient. Nominal flow:
 - FR3: fill each template field according to its schema (type, format, validity range).
 - FR4: validate fields before renaming (parseable date, numeric amount, recognized or flagged counterparty); any failed validation routes to review.
 - FR5: rename and move within the bucket via S3 copy + delete to the template's target prefix, resolving key collisions (incremental suffix).
-- FR6: write a JSON sidecar per file (old key → new key → decision mapping, per-file status pending / processed / validated) and replicate to SQLite, enabling rollback and selecting training data.
+- FR6: write a JSON sidecar per file (old key → new key → decision mapping, per-file status pending / processed / validated) and replicate to SQLite, enabling auditability and selecting training data.
 - FR7: local web dashboard (FastAPI + React): file list, detail page, review, correction, validation, history, retraining trigger. PDFs are streamed from the bucket for preview.
 - FR7a: the dashboard shows every processed file with its status: "pending" (deterministic classification or required-field validation needs manual correction), "processed" (automatically renamed and moved), or "validated" (the user confirmed or corrected the result — such files are eligible for future model retraining).
 - FR7b: clicking a file opens a detail page displaying the PDF, where the user can change the template if misclassified, correct the extracted field values, and validate the result. Validation sets the status to "validated" and feeds the corrected data into the training corpus.
@@ -76,7 +76,7 @@ Single user (personal use), technically proficient. Nominal flow:
 
 - ≥ 95% correct template classification on typical files after initial training on the existing corpus.
 - ≥ 80% of files processed without human intervention (the rest in review, never a silent wrong rename).
-- Zero non-reversible renames.
+- Every rename is logged and traceable; no user-facing undo or rollback of file renames is required.
 - Adding a new template in under 30 minutes without writing code.
 - SQLite can be fully rebuilt from the bucket sidecars at any time.
 
