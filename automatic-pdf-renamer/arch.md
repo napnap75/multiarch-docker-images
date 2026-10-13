@@ -129,8 +129,6 @@ Every terminal step writes a sidecar event (classified, renamed, corrected, vali
 - `POST /consistency/rebuild` and the CLI rebuild command both clear and repopulate SQLite from all sidecars (AC9).
 - Divergence resolution is always sidecar-wins (PRD 3.2); the consistency job flags drift rather than guessing.
 
-#
-
 ### 4.5.1 Sidecar file format and schema
 
 The sidecar is the authoritative metadata record for one PDF. Its schema and serialization behavior are implemented in `app/sidecar.py`; this section documents that implementation. The current schema version is `"1.0"`.
@@ -274,15 +272,15 @@ SQLite also creates an index for the `id` primary key and a unique index for `sh
 
 ## 4.6 Period computation
 
-### Requirement
+#### 4.6.1 Requirement
 
 The system shall generate the `period` field exclusively from the document's `emission_date` and the period rule configured by the selected template. The filename shall not be used as an input to period generation or to override the generated value. The system shall parse and validate `emission_date`, apply the template's granularity, offset, and output format, and store the resulting string in `period`. If the date or rule is invalid or insufficient to generate a period, the system shall report a clear error rather than infer a value from the filename.
 
-### 4.6.1 Source date
+#### 4.6.2 Source date
 
-`emission_date` is the sole date input for period generation. The system shall accept a date value or supported date strings, including ISO `YYYY-MM-DD`, `DD/MM/YYYY`, `MM/DD/YYYY`, `DD-MM-YYYY`, `YYYY/MM/DD`, `YYYY-MM`, `MM-YYYY`, a four-digit year, and French or English month names followed by a year. Month-only and year-only values shall be normalized to representative valid dates according to a documented deterministic rule. Invalid or ambiguous values that cannot be resolved safely shall produce a validation error.
+`emission_date` is the sole date input for period generation. The system shall accept a date value or supported date strings, including ISO `YYYY-MM-DD`. Invalid or ambiguous values that cannot be resolved safely shall produce a validation error.
 
-### 4.6.2 Template period rules
+#### 4.6.3 Template period rules
 
 The selected template shall define the period granularity and may define an offset and a custom output format.
 
@@ -294,7 +292,7 @@ The selected template shall define the period granularity and may define an offs
 
 The system shall apply the offset at the selected granularity, correctly handling month, quarter, semester, year, and ISO-week boundaries. Weekly periods shall use ISO week numbering and the associated ISO week-year. Unknown granularity or offset values shall be reported as configuration errors; they shall not trigger filename-based fallback.
 
-### 4.6.3 Period formatting
+#### 4.6.4 Period formatting
 
 If a custom format is defined, the system shall generate `period` by substituting supported placeholders with values derived from the emission date after applying the template's granularity and offset. Supported placeholders are:
 
@@ -311,19 +309,6 @@ If a custom format is defined, the system shall generate `period` by substitutin
 | `{week}` | ISO week number (`1`–`53`). |
 
 When no custom format is provided, the system shall use a deterministic standard representation appropriate to the granularity, with French month names by default. An unknown placeholder shall produce a clear format error.
-
-### 4.6.4 Period consistency validation
-
-When validating a document, the system shall recompute the expected period from `emission_date` and the selected template rule, then compare it with the stored or user-provided `period`. Comparison shall be case-insensitive and may normalize equivalent supported representations. A mismatch shall fail validation with a diagnostic containing the supplied period, emission date, rule granularity and offset, and expected period. A user may correct the emission date or period, but the system shall not silently accept an inconsistent value. Any subsequent regeneration of `period` shall use only the emission date and template rule.
-
-### 4.6.5 Acceptance criteria
-
-- Given a valid `emission_date` and template rule, when period generation runs, then `period` is computed solely from those inputs, regardless of the filename.
-- Given a filename containing a period that conflicts with the date-derived period, when period generation runs, then the filename is ignored and the template-derived value is used.
-- Given an omitted granularity or offset, when period generation runs, then the documented defaults are applied.
-- Given a previous or following offset crossing a calendar boundary, when period generation runs, then the correct adjacent period and year are produced.
-- Given a custom format containing supported placeholders, when period generation runs, then each placeholder is replaced using values derived from the emission date and applied rule.
-- Given an invalid date, unsupported rule value, unknown placeholder, or inconsistent supplied period, when validation runs, then the system returns an explicit actionable error and does not fall back to filename parsing.
 
 ### 4.7 Frontend
 
