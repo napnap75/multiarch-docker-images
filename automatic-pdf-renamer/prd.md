@@ -15,7 +15,7 @@ Single user: the owner. Technically proficient, wants minimal manual work but ze
 ### 3.1 Object storage
 
 - Garage ([https://garagehq.deuxfleurs.fr/](https://garagehq.deuxfleurs.fr/)), self-hosted, S3 API. One versioned bucket, e.g. `pdf-renamer`.
-- Key layout: `inbox/` (entry point), `pending/` (not-processed files moved out of inbox to avoid re-processing), and `files/` for the processes files (validated or not).
+- Key layout: `inbox/` (entry point), `pending/` (files awaiting manual correction, moved out of inbox to avoid re-processing), and `files/` for the processes files (validated or not).
 - Sidecars: `{object-key}.meta.json` next to each PDF.
 - No encryption at rest in v1 (documents not sensitive); bucket served on the local network only.
 - Renames are copy-object + delete within the bucket; collisions resolved with an incremental suffix.
@@ -46,7 +46,7 @@ Single user: the owner. Technically proficient, wants minimal manual work but ze
 Transitions:
 
 - new object in `inbox/` → pending (deterministic rules cannot determine a valid result; object copied to `pending/`)
-- new object in `inbox/` → processed (high confidence, valid fields)
+- new object in `inbox/` → processed (deterministic rules yield an unambiguous result and all required fields are valid)
 - pending → validated (user corrects and validates in the detail page; rename then applied)
 - processed → validated (user confirms or corrects and validates in the detail page; rename only if the user maid some changes)
 
@@ -58,7 +58,7 @@ Transitions:
 - FR1.2 Wait for object stability: process a key only after its size and ETag are unchanged across two consecutive listings (handles chunked uploads and partial writes).
 - FR1.3 On service restart, detect objects present in `inbox/` (or `pending/`) with no sidecar record and process them.
 - FR1.4 Optionally reduce latency with bucket notification hooks if the Garage deployment supports them; polling is the v1 baseline.
-- FR1.5 After processing, the inbox copy is deleted (processed files) or the object is copied to `pending/` and the inbox copy deleted (not-processed files), so `inbox/` always converges to empty.
+- FR1.5 After processing, the inbox copy is deleted (processed files) or the object is copied to `pending/` and the inbox copy deleted (pending files), so `inbox/` always converges to empty.
 
 ### Epic 2 — Text extraction
 
@@ -70,9 +70,9 @@ Transitions:
 ### Epic 3 — Template classification
 
 - FR3.1 Classify the document into one of the configured templates using configured deterministic rules, extracted text, and reference data in the initial release. TF-IDF + Logistic Regression is a post-v1 enhancement specified in Epic 3, not a dependency of the initial release.
-- FR3.2 Output a confidence score per template; the top score below a configurable threshold (default 0.8) yields "unknown" and routes the file to `pending` with reason "low confidence".
-- FR3.3 Display the top-N template candidates with scores on the detail page.
-- FR3.4 Retrain the classifier on demand from: the initial corpus + all files with validated status. Retraining is a manual action from the dashboard, with the training date and resulting evaluation metrics stored in the sidecar-adjacent model registry and displayed.
+- FR3.2 In the initial release, if deterministic rules do not yield one unambiguous template, route the file to `pending` with reason `insufficient deterministic evidence`; do not fabricate a confidence score. In the post-v1 ML enhancement, expose model scores and route predictions below the configured threshold to `pending`.
+- FR3.3 In the initial release, display the matching rules and ambiguity/review reason on the detail page. When ML is enabled in a future release, also display ranked candidates and scores.
+- FR3.4 Post-v1 only: retrain the classifier on demand from the initial corpus plus eligible validated files. Record the training date and evaluation metrics in the local model registry and display them in the dashboard.
 
 ### Epic 4 — Document data model, slot filling and validation
 
@@ -171,8 +171,8 @@ SQLite replica (rebuilt from sidecars):
 
 ## 9. Acceptance Criteria (v1)
 
-- AC1 A new PDF dropped in `inbox/` via Nextcloud with high-confidence classification and valid fields appears as processed within the poll interval, renamed and moved in the bucket.
-- AC2 A PDF below the confidence threshold appears as `pending`, is moved to `pending/`; correcting and validating it on the detail page renames it and sets validated.
+- AC1 A new PDF dropped in `inbox/` via Nextcloud whose deterministic rules yield an unambiguous template and valid fields appears as processed within the poll interval, renamed and moved in the bucket.
+- AC2 A PDF that cannot be classified unambiguously by deterministic rules, or has missing/invalid required fields, appears as `pending` and is moved to `pending/`; correcting and validating it on the detail page renames it and sets validated.
 - AC3 Opening a processed file and validating without changes sets validated without re-renaming.
 - AC4 The file list filters by status, template, document type, emitting company, period, and date; counters match the data.
 - AC5 Changing the template on the detail page keeps the common fields, reloads the optional fields per the new template schema, recomputes the period per the new template's granularity and offset, and shows the live target key preview.
@@ -195,6 +195,6 @@ SQLite replica (rebuilt from sidecars):
 
 - Choice between pdfplumber and PyMuPDF (license and performance tradeoff) — decide in Week 1 spike.
 - S3 client library: boto3 vs minio-py against Garage — covered by the Week 1 Garage compatibility spike (listing, copy-object, multipart, versioning behavior).
-- Exact confidence threshold and per-template overrides — calibrate on the initial corpus.
+- Post-v1 ML decision: exact model confidence threshold and per-template overrides, to be calibrated on the initial corpus before enabling ML.
 - Poll interval tradeoff between responsiveness and Garage listing load.
 - Exact human-readable period formats (French month names, quarter notation) and their rendering in the object key — to be fixed in the template JSONC spec.
