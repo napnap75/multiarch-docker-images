@@ -172,6 +172,50 @@ body {
   padding: 18px;
 }
 
+.maintenance-actions {
+  display: grid;
+  gap: 14px;
+  max-width: 900px;
+}
+
+.maintenance-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 12px 24px;
+  padding: 18px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.maintenance-action h3 {
+  margin: 0 0 6px;
+  font-size: 1.05rem;
+}
+
+.maintenance-action > div:first-child p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.maintenance-operation {
+  grid-column: 1 / -1;
+}
+
+.maintenance-operation progress {
+  display: block;
+  width: 100%;
+  height: 8px;
+  accent-color: var(--primary);
+}
+
+.maintenance-operation .action-status {
+  min-height: 0;
+  margin: 8px 0 0;
+}
+
 .config-description {
   margin: 0 0 14px;
   color: var(--muted);
@@ -521,13 +565,14 @@ body {
 
 .additional-field-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) minmax(180px, 1.5fr) auto;
-  gap: 8px;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) auto;
+  gap: 10px;
+  align-items: end;
 }
 
-.additional-field-row input {
+.additional-field-row select {
   width: 100%;
+  min-width: 0;
 }
 
 .additional-field-empty {
@@ -686,6 +731,14 @@ body {
 
   .filters-card {
     grid-template-columns: 1fr;
+  }
+
+  .maintenance-action {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .maintenance-action > button {
+    justify-self: start;
   }
 
   .main-panel {

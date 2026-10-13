@@ -24,7 +24,7 @@ from .config import (
     MappingRule,
     PeriodFormatConfig,
 )
-from .extractor import extract_first_page_text, is_text_empty, TextExtractionError
+from .extractor import extract_document_text, is_text_empty, TextExtractionError
 from .period import (
     format_period_from_emission_date,
 )
@@ -99,7 +99,7 @@ class DocumentProcessor:
         result = ProcessingResult(success=False)
 
         try:
-            # Step 1: Extract first page text
+            # Step 1: Extract document text
             if extracted_text is None:
                 extracted_text = self._extract_text(pdf_bytes)
             
@@ -293,7 +293,7 @@ class DocumentProcessor:
             Extracted text, or None if extraction fails.
         """
         try:
-            text = extract_first_page_text(pdf_bytes)
+            text = extract_document_text(pdf_bytes)
             if is_text_empty(text, self.min_text_length):
                 return None
             return text

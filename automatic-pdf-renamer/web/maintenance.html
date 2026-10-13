@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Maintenance | Automatic PDF Renamer</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <h1>PDF Renamer</h1>
+        </div>
+        <nav class="nav">
+          <a href="/">Documents</a>
+          <a href="/config.html">Config</a>
+          <a class="active" href="/maintenance.html">Maintenance</a>
+        </nav>
+      </aside>
+
+      <main class="main-panel">
+        <header class="toolbar">
+          <div>
+            <p class="eyebrow">System tools</p>
+            <h2>Maintenance</h2>
+          </div>
+        </header>
+
+        <section class="maintenance-actions" aria-label="Maintenance actions">
+          <article class="maintenance-action">
+            <div>
+              <h3>Rebuild database</h3>
+              <p>Replace the database index using the metadata sidecar files in storage.</p>
+            </div>
+            <button id="rebuild-button" class="secondary-btn" type="button">Rebuild database</button>
+            <div id="rebuild-operation" class="maintenance-operation" hidden>
+              <progress id="rebuild-progress" aria-label="Database rebuild progress"></progress>
+              <p id="rebuild-status" class="action-status" role="status" aria-live="polite"></p>
+            </div>
+          </article>
+
+          <article class="maintenance-action">
+            <div>
+              <h3>Consistency check</h3>
+              <p>Compare database records and metadata sidecars with the files present in storage.</p>
+            </div>
+            <button id="check-button" class="secondary-btn" type="button">Run consistency check</button>
+            <div id="check-operation" class="maintenance-operation" hidden>
+              <progress id="check-progress" aria-label="Consistency check progress"></progress>
+              <p id="check-status" class="action-status" role="status" aria-live="polite"></p>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <script src="/maintenance.js"></script>
+  </body>
+</html>

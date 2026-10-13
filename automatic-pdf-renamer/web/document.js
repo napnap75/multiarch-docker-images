@@ -159,15 +159,25 @@ const buildAdditionalFieldRow = (label = '', value = '', suggestions = {}) => {
   const row = document.createElement('div');
   row.className = 'additional-field-row';
 
+  const labelGroup = document.createElement('div');
+  labelGroup.className = 'field-group';
+  const labelCaption = document.createElement('label');
+  labelCaption.textContent = 'Field name';
   const labelSelect = document.createElement('select');
   labelSelect.className = 'additional-field-label';
   labelSelect.setAttribute('aria-label', 'Additional field name');
+  labelGroup.append(labelCaption, labelSelect);
   const labelValues = [...new Set([...(suggestions.names || []), label].filter((item) => item !== null && item !== undefined && String(item).trim() !== ''))];
   setSelectOptions(labelSelect, labelValues, label);
 
+  const valueGroup = document.createElement('div');
+  valueGroup.className = 'field-group';
+  const valueCaption = document.createElement('label');
+  valueCaption.textContent = 'Value';
   const valueSelect = document.createElement('select');
   valueSelect.className = 'additional-field-value';
   valueSelect.setAttribute('aria-label', 'Additional field value');
+  valueGroup.append(valueCaption, valueSelect);
   const valueValues = [...new Set([...getFieldValueSuggestions(suggestions, labelSelect.value), value].filter((item) => item !== null && item !== undefined && String(item).trim() !== ''))];
   setSelectOptions(valueSelect, valueValues, value);
   labelSelect.addEventListener('change', () => {
@@ -189,7 +199,7 @@ const buildAdditionalFieldRow = (label = '', value = '', suggestions = {}) => {
     updateSaveButtonState();
   });
 
-  row.append(labelSelect, valueSelect, removeButton);
+  row.append(labelGroup, valueGroup, removeButton);
   return row;
 };
 

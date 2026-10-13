@@ -277,10 +277,10 @@ class SQLiteFileRepository:
                 params.append(f"%{confidence_filter.lower()}%")
         if q:
             conditions.append(
-                "(LOWER(current_key) LIKE ? OR LOWER(original_key) LIKE ? OR LOWER(template_name) LIKE ?  OR LOWER(document_type) LIKE ? OR LOWER(emitting_company) LIKE ? OR LOWER(period) LIKE ? OR LOWER(emission_date) LIKE ? OR LOWER(period_format) LIKE ?)"
+                "(LOWER(current_key) LIKE ? OR LOWER(original_key) LIKE ? OR LOWER(template_name) LIKE ? OR LOWER(document_type) LIKE ? OR LOWER(emitting_company) LIKE ? OR LOWER(period) LIKE ? OR LOWER(emission_date) LIKE ? OR LOWER(period_format) LIKE ? OR LOWER(extracted_text) LIKE ?)"
             )
             like_value = f"%{q.lower()}%"
-            params.extend([like_value] * 8)
+            params.extend([like_value] * 9)
 
         return conditions, params
 

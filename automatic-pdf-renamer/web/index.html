@@ -15,6 +15,7 @@
         <nav class="nav">
           <a class="active" href="/">Documents</a>
           <a href="/config.html">Config</a>
+          <a href="/maintenance.html">Maintenance</a>
         </nav>
       </aside>
 
@@ -26,18 +27,15 @@
           </div>
           <div class="toolbar-actions">
             <button id="refresh-btn" class="primary-btn">Refresh</button>
-            <button id="rebuild-btn" class="secondary-btn" type="button">Rebuild database</button>
           </div>
         </header>
-
-        <p id="rebuild-status" class="action-status" role="status" aria-live="polite"></p>
 
         <section class="summary-cards" id="summary-cards"></section>
 
         <section class="filters-card">
           <div class="field-group">
-            <label for="search-filter">Search all fields</label>
-            <input id="search-filter" type="text" placeholder="Search documents..." />
+            <label for="search-filter">Global search</label>
+            <input id="search-filter" type="text" placeholder="Search metadata and document content..." />
           </div>
         </section>
 
