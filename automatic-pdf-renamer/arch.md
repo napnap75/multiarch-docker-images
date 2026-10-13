@@ -38,7 +38,7 @@ flowchart TD
 ## 2. Architecture Goals and Constraints
 
 - Offline-first: no runtime downloads, no external services (NFR1, AC10).
-- Zero silent wrong renames: every ambiguous path routes to not processed (NFR3).
+- Zero silent wrong renames: every ambiguous path routes to `pending` (NFR3).
 - Crash safety: copy-then-delete renames, atomic sidecar writes, SQLite repairable from sidecars alone (NFR4, AC8, AC9).
 - Minimal operational surface: one container, one JSONC configuration file, env-var credentials (NFR6).
 - Single user, local network: performance targets are modest (NFR2) but correctness targets are strict.
@@ -52,7 +52,7 @@ flowchart TD
 | Text extraction | PyMuPDF | Fastest option; AGPL acceptable for a personal offline tool. Wrapped behind a small extractor interface so it remains swappable (PRD open question resolved). |
 | S3 client | boto3 | Most complete API coverage (copy-object, versioning, ETag), mature Garage compatibility. Wrapped behind a thin storage interface; v1 ships one implementation. |
 | SQLite access | SQLAlchemy ORM, WAL mode | Declared replica schema, typed models, migrations via Alembic. Sidecar remains authoritative; ORM layer only reads/writes the mirror. |
-| ML classification | scikit-learn TF-IDF + Logistic Regression | PRD FR3.1; small corpus is sufficient, no deep learning needed. |
+| Initial classification | Configured deterministic rules and reference data | Initial release must work without ML; TF-IDF + Logistic Regression is a post-v1 enhancement. |
 | Fuzzy matching | rapidfuzz | PRD FR4.2, counterparty gazetteer. |
 | Dates | python-dateutil | PRD FR4.2, emission date parsing and period computation. |
 | Frontend | React + Vite, react-pdf viewer | NFR7; built to static assets served by FastAPI. |
@@ -103,7 +103,7 @@ flowchart TD
   dl --> tx["Extract text from every PDF page (PyMuPDF)"]
   tx --> empty{"Text empty?"}
   empty -- yes --> pending["Move to pending/ (reason: empty text)"]
-  empty -- no --> cls["Classify (TF-IDF + LogReg)"]
+  empty -- no --> cls["Classify using deterministic rules"]
   cls --> conf{"Confidence >= threshold?"}
   conf -- no --> pending
   conf -- yes --> fill["Fill fields: regexes, companies list, additional fields from groups, period from emission date"]
@@ -111,7 +111,7 @@ flowchart TD
   valid -- no --> pending
   valid -- yes --> rename["Compute key, copy-then-delete, write sidecar + SQLite"]
   rename --> done["Status: processed"]
-  pending --> wait["Status: not processed (sidecar with failing fields)"]
+  pending --> wait["Status: pending (sidecar with failing fields)"]
 ```
 
 Every terminal step writes a sidecar event (classified, renamed, corrected, validated) per FR5.2. Sidecar first, SQLite second (FR5.1); the consistency job repairs any drift after a crash.
@@ -188,7 +188,7 @@ The following is a JSONC-readable example. Comments explain the fields and are n
 | `sha256` | string | Required. SHA-256 digest of the PDF content; used to identify content and support safe resume checks. |
 | `original_key` | string | Required. S3 key where the PDF was first registered, retained across renames. |
 | `current_key` | string | Required. S3 key currently associated with the PDF. |
-| `status` | string | Required. One of `not processed`, `processed`, or `validated`. |
+| `status` | string | Required. One of `pending`, `processed`, or `validated`. |
 | `template_name` | string | Required. Name of the configured template/document family. |
 | `period_format` | string | Required. Period format/rule label, e.g. `monthly` or `yearly`. |
 | `confidence` | number | Emitted by the dataclass serializer, default `0.0`. Intended for a classification score between 0 and 1; the current validator checks only that it is numeric, not that it is within that range. |
@@ -208,7 +208,7 @@ The dataclass serializer emits all fields listed above, including `confidence`, 
 
 The only business statuses accepted by `validate_sidecar` are:
 
-- `not processed` — not successfully processed for automatic filing, including items awaiting review.
+- `pending` — deterministic rules could not produce a valid result; the item awaits manual correction.
 - `processed` — processed by the pipeline.
 - `validated` — reviewed/confirmed by the owner.
 
@@ -353,7 +353,7 @@ Subprocesses report progress and metrics by writing a status JSON consumed by th
 
 ## 8. Error Handling and Crash Safety
 
-- Ingestion: any unexpected exception marks the file not processed with the reason in the sidecar; the poller continues.
+- Ingestion: any unexpected exception marks the file `pending` with the reason in the sidecar; the poller continues.
 - Rename: copy strictly before delete; a crash between the two leaves both keys, and the startup scan re-evaluates (the sidecar's current key is authoritative).
 - Sidecar/SQLite: sidecar first; drift repaired by the consistency job; rebuild is always possible from sidecars alone.
 - Retrain: trained models land in a new versioned directory; activation swaps an active-model pointer; a failed training run leaves the current model untouched.
