@@ -16,7 +16,7 @@ inputDocuments:
 
 ### Product vision
 
-Build a personal, fully offline application that watches a self-hosted Garage S3 bucket for new French text-based PDFs, extracts document data, classifies documents, applies configurable naming rules, and moves files into an organized bucket structure. A local dashboard lets the owner review and correct uncertain results. JSON sidecars are the source of truth; SQLite is a rebuildable query index.
+Build a personal, fully offline application that watches a self-hosted Garage S3 bucket for new French text-based PDFs, extracts document data, classifies documents, applies configurable naming rules, and moves files into an organized bucket structure. This bucket is accessible through Nextcloud when the user wants to consult one file. A local dashboard lets the owner review and correct uncertain results. JSON sidecars are the source of truth; SQLite is a rebuildable query index.
 
 ### Product principles
 
@@ -94,9 +94,6 @@ The following inventory consolidates the requirements from the project brief and
 - Existing correctly named documents provide the initial labeled corpus; v1 processes new incoming files only, not the historical backlog.
 - OCR, scanned PDFs, multilingual documents, cloud services, and automatic periodic retraining are out of scope for v1.
 - The three business statuses must not be overloaded with transient technical states. Processing failures and recovery steps need separate technical flags/reasons.
-- **Configuration format must be reconciled:** the brief and PRD refer to YAML, while the architecture specifies JSONC. For this backlog, JSONC is the planning baseline because it is the architecture's stated decision. Update the brief/PRD or explicitly reverse this decision before implementation.
-- **Period rules must be reconciled:** the PRD requires day/week/month/quarter/semester/year and current/previous/following offsets; the architecture currently describes a narrower set. The implementation must support the full PRD set unless the product owner approves a reduced scope.
-- **Authentication scope must be reconciled:** the brief and PRD exclude dashboard authentication for the single-user v1, while the architecture describes a password-protected dashboard. This backlog follows the brief/PRD: no application-level authentication in v1; revisit before exposing the dashboard beyond the trusted local network.
 - S3 object operations, sidecar updates, and SQLite writes do not form one distributed transaction. Each state transition must be recoverable and verifiable rather than relying on a claim of cross-system atomicity.
 
 ## 3. Functional Requirements Coverage Map
@@ -383,7 +380,7 @@ So that the application can resolve more document-specific values without hard-c
 
 **Acceptance Criteria:**
 
-**Given** a template maps a company/document type to a predefined field group with allowed values  
+**Given** a template maps a period format/emitting company/document type/additional fields to a predefined field group with allowed values  
 **When** ML-assisted extraction is enabled for that field  
 **Then** the extractor proposes a value from the configured candidate set and records the method and score where available  
 **And** regex and deterministic lookup results remain available as inputs or fallback paths  
@@ -456,7 +453,7 @@ So that I can understand and correct the system's decision.
 **Given** a file appears in the list  
 **When** I open its detail page  
 **Then** the page displays the PDF streamed from Garage through the backend alongside its extracted fields  
-**And** it displays the current status, template, extracted text, decision/review reason, and ML candidates/scores when available  
+**And** it displays the current status, metadata, extracted text, decision/review reason, and ML candidates/scores when available  
 **And** a missing or unavailable PDF is reported clearly without breaking the rest of the dashboard.
 
 ### Story 4.4: Correct metadata and preview the target key
@@ -557,37 +554,6 @@ So that files are not stranded in an unknown state.
 **And** it repairs SQLite drift from authoritative sidecars  
 **And** it never deletes the only known copy of a PDF as an unverified recovery shortcut.
 
-### Story 5.4: Verify offline operation and Garage compatibility
-
-As the owner,
-I want the deployment and critical storage operations tested against the actual local environment,
-So that the system meets its privacy and reliability requirements in practice.
-
-**Acceptance Criteria:**
-
-**Given** the application is deployed with a pinned Garage version  
-**When** the integration test suite runs  
-**Then** listing, HEAD/GET, PUT, copy, delete, versioning, and collision handling are tested against Garage  
-**And** a network audit confirms that runtime traffic is limited to approved local services and no cloud API or telemetry endpoint is contacted  
-**And** tests cover interruptions during rename, sidecar update, SQLite synchronization, and rebuild  
-**And** the critical ingestion-to-review and ingestion-to-rename journeys are exercised end to end.
-
-### Story 5.5: Verify performance and document operations
-
-As the owner,
-I want measurable performance checks and clear operating instructions,
-So that I can deploy, monitor, and troubleshoot the application confidently.
-
-**Acceptance Criteria:**
-
-**Given** a representative test dataset and target server are available  
-**When** performance checks run  
-**Then** standard-PDF processing is measured against the under-5-second target  
-**And** the dashboard list is measured against the under-1-second target for 10,000 records, with the PRD's 1,000-file check retained as an additional acceptance test  
-**And** failures and slow operations produce actionable local logs without exposing credentials  
-**And** deployment documentation covers configuration, Garage bucket/versioning prerequisites, Nextcloud visibility, backup/rebuild, consistency checks, model registry backup, and troubleshooting  
-**And** the v1 decision to omit at-rest encryption and application-level dashboard authentication is explicitly documented, including the trusted-network assumption.
-
 ---
 
 ## 5. Cross-Epic Definition of Done
@@ -614,12 +580,9 @@ Adds Epic 3 and its integration with the review workflow. ML is an enhancement, 
 
 ### Release C — Operationally complete v1
 
-Completes the remaining Epic 4 capabilities and Epic 5, including consistency repair, rebuild, recovery, offline verification, performance checks, and deployment documentation.
+Completes the remaining Epic 4 capabilities and Epic 5, including consistency repair, rebuild, recovery, offline verification, and deployment documentation.
 
 ## 7. Open Decisions to Resolve Before the Affected Stories
 
-1. **Template format:** select YAML or JSONC as the single supported format and align brief, PRD, and architecture. This backlog currently assumes JSONC.
-2. **Period configuration:** confirm that all PRD granularities and offsets are required in v1 and update the architecture accordingly.
-3. **Dashboard authentication:** confirm the brief/PRD decision to omit application-level authentication for the single-user v1, despite the architecture's proposed password-based login.
-4. **Reversibility semantics:** define the user-facing undo operation, collision behavior, and exact state transitions before implementing the final rollback workflow.
-5. **ML field extraction:** specify which field groups use ML in v1 and what evaluation threshold is required before enabling each extractor. Classification and deterministic validation must remain usable independently.
+1. **Reversibility semantics:** define the user-facing undo operation, collision behavior, and exact state transitions before implementing the final rollback workflow.
+2. **ML field extraction:** specify which field groups use ML in v1 and what evaluation threshold is required before enabling each extractor. Classification and deterministic validation must remain usable independently.
