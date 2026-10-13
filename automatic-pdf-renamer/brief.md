@@ -56,9 +56,9 @@ Single user (personal use), technically proficient. Nominal flow:
 - FR3: fill each template field according to its schema (type, format, validity range).
 - FR4: validate fields before renaming (parseable date, numeric amount, recognized or flagged counterparty); any failed validation routes to review.
 - FR5: rename and move within the bucket via S3 copy + delete to the template's target prefix, resolving key collisions (incremental suffix).
-- FR6: write a JSON sidecar per file (key mapping, decisions, business status, and processing/error details) and replicate to SQLite, enabling auditability and selecting training data. Transient technical failures receive up to 3 retries after the initial attempt, delayed by 5 seconds, 30 seconds, and 2 minutes; they do not set the business status to `pending`.
+- FR6: write a JSON sidecar per file (key mapping, decisions, and business status) and replicate to SQLite, enabling auditability and selecting training data.
 - FR7: local web dashboard (FastAPI + React): file list, detail page, review, correction, validation, history, retraining trigger. PDFs are streamed from the bucket for preview.
-- FR7a: the dashboard shows each document's business status: `pending` (deterministic classification or required-field validation needs manual correction), `processed` (automatically renamed and moved), or `validated` (the user confirmed or corrected the result — eligible for future model retraining). Transient technical errors are shown separately from business status, with retry count and the last error.
+- FR7a: the dashboard shows each document's status: `pending` (deterministic classification or required-field validation needs manual correction), `processed` (automatically renamed and moved), or `validated` (the user confirmed or corrected the result — eligible for future model retraining).
 - FR7b: clicking a file opens a detail page displaying the PDF, where the user can change the template if misclassified, correct the extracted field values, and validate the result. Validation sets the status to "validated" and feeds the corrected data into the training corpus.
 - FR8: adding a new template is done through a configuration entry (JSONC) plus example files, with no code changes.
 
