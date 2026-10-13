@@ -93,7 +93,7 @@ The following inventory consolidates the requirements from the project brief and
 
 - Existing correctly named documents provide the initial labeled corpus; v1 processes new incoming files only, not the historical backlog.
 - OCR, scanned PDFs, multilingual documents, cloud services, and automatic periodic retraining are out of scope for v1.
-- The three business statuses must not be overloaded with technical states. Transient technical failures use a separate retry/error state, with attempt count, next retry time, and error details; only document/business issues requiring manual correction use `pending`.
+- The three business statuses must not be overloaded with technical states. Transient technical failures use a separate retry/error state, with attempt count, next retry time, and error details. Retry up to 3 times after the initial attempt, with delays of 5 seconds, 30 seconds, and 2 minutes; only document/business issues requiring manual correction use `pending`.
 - S3 object operations, sidecar updates, and SQLite writes do not form one distributed transaction. Each state transition must be recoverable and verifiable rather than relying on a claim of cross-system atomicity.
 
 ## 3. Functional Requirements Coverage Map
@@ -222,7 +222,7 @@ So that newly uploaded documents enter the pipeline automatically.
 **And** non-PDF files, hidden files, `.part` files, and lock files are ignored  
 **And** a file that is still being uploaded is not eligible for processing prematurely  
 **And** a poller error for one object does not stop discovery of other objects
-**And** transient technical failures are retried with bounded backoff and recorded separately from business status
+**And** transient technical failures are retried up to 3 times after the initial attempt, with delays of 5 seconds, 30 seconds, and 2 minutes, and recorded separately from business status
 **And** a technical failure alone never moves a document to `pending/`..
 
 ### Story 2.2: Extract and persist full PDF text
@@ -318,7 +318,7 @@ So that retries do not create duplicate processing or lose track of a file.
 **And** objects already completed are not processed again in a way that creates duplicate renames or events  
 **And** if a crash occurs between copy and delete, the recovery logic detects both keys and resolves the state from the sidecar and object hashes  
 **And** transient technical failures are recorded separately from the three business statuses
-**And** retryable failures are retried safely with bounded backoff
+**And** retryable failures are retried safely up to 3 times after the initial attempt, with delays of 5 seconds, 30 seconds, and 2 minutes
 **And** exhausted retries remain visible as technical errors for recovery/operations, not as `pending` unless manual correction is independently required.
 
 ---
