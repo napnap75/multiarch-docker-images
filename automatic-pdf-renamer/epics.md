@@ -44,7 +44,7 @@ The following inventory consolidates the requirements from the project brief and
 - **FR-ING-01 — Polling and discovery:** poll a configurable Garage S3 `inbox/` prefix at a configurable interval; consider only PDFs and ignore temporary, hidden, and lock files.
 - **FR-ING-02 — Upload stability:** process a PDF only after its size and ETag remain stable across consecutive listings.
 - **FR-ING-03 — Restart recovery:** on startup, discover eligible inbox or pending objects that have not completed processing.
-- **FR-TXT-01 — Text extraction:** extract text from the first page of a PDF using a local library; no OCR in v1.
+- **FR-TXT-01 — Text extraction:** extract all available text from every page of a PDF using a local library; no OCR in v1.
 - **FR-TXT-02 — Empty text handling:** route PDFs with empty or insufficient extracted text to human review with an explicit reason.
 - **FR-TXT-03 — Text persistence:** persist extracted text in the sidecar and SQLite replica so normal review and training workflows do not need to re-parse the PDF.
 - **FR-CLS-01 — Classification:** classify documents against configured templates. The initial light release uses deterministic rules; the ML epic adds TF-IDF and Logistic Regression classification.
@@ -61,7 +61,7 @@ The following inventory consolidates the requirements from the project brief and
 - **FR-STO-04 — Safe moves:** move objects using copy-before-delete, resolve destination collisions with an incremental suffix, and record the actual final key.
 - **FR-STO-05 — Reversible operations:** preserve sufficient history and key information to trace and reverse a rename without silently overwriting another object.
 - **FR-DASH-01 — File list:** list all known files and show emission date, period, current key/name, status, template, document type, company, and confidence where available.
-- **FR-DASH-02 — Search and filters:** filter by status, template, document type, company, period, and date range; sort columns and search object names and metadata, with extracted-text search where feasible.
+- **FR-DASH-02 — Search and filters:** filter by status, template, document type, company, period, and date range; sort columns and search object names and metadata, and full extracted text across every PDF page.
 - **FR-DASH-03 — Statistics:** show counts by status, automation and validation rates, and consistency indicators.
 - **FR-DASH-04 — PDF detail and preview:** stream the PDF from Garage through the backend and show it alongside extracted metadata.
 - **FR-DASH-05 — Correction and validation:** allow the owner to change the template and field values, preview the resulting target key, and validate the final result.
@@ -204,7 +204,7 @@ So that a damaged or deleted local database does not require reprocessing the PD
 
 ## Epic 2: Rules-Based PDF Ingestion and Classification (Light Release)
 
-**Goal:** Deliver a complete end-to-end workflow for new PDFs using deterministic rules only. The application polls Garage, extracts first-page text, fills fields with regexes and configured lookup data, validates the result, and safely renames or routes the file for review. This epic must not depend on a machine-learning model.
+**Goal:** Deliver a complete end-to-end workflow for new PDFs using deterministic rules only. The application polls Garage, extracts text from every PDF page, fills fields with regexes and configured lookup data, validates the result, and safely renames or routes the file for review. This epic must not depend on a machine-learning model.
 
 **Requirements covered:** FR-ING-01 to FR-ING-03, FR-TXT-01 to FR-TXT-03, deterministic part of FR-CLS-01, FR-FLD-01 to FR-FLD-03 and FR-FLD-05 to FR-FLD-06, FR-STO-04 to FR-STO-05, FR-TPL-01, FR-OPS-02, NFR-02 to NFR-04.
 
@@ -223,17 +223,17 @@ So that newly uploaded documents enter the pipeline automatically.
 **And** a file that is still being uploaded is not processed prematurely  
 **And** a poller error for one object does not stop discovery of other objects.
 
-### Story 2.2: Extract and persist first-page PDF text
+### Story 2.2: Extract and persist full PDF text
 
 As the application,
-I want to extract first-page text from each eligible PDF,
+I want to extract and persist all available text from every page of each eligible PDF,
 So that downstream classification and field extraction use the document's content.
 
 **Acceptance Criteria:**
 
 **Given** an eligible PDF contains extractable text  
 **When** the extraction step runs  
-**Then** the configured local PDF library extracts the first page's text  
+**Then** the configured local PDF library extracts text from every page of the PDF  
 **And** the text is saved in the sidecar and mirrored to SQLite  
 **And** the application does not call an external OCR or document-processing service  
 **And** if the text is empty or below the configured minimum length, the file is routed to review with reason `empty text`.
@@ -261,7 +261,7 @@ So that the light release can classify and name common document types without ML
 
 **Acceptance Criteria:**
 
-**Given** first-page text and a configured set of templates are available  
+**Given** full-document extracted text and a configured set of templates are available  
 **When** deterministic extraction runs  
 **Then** it extracts candidate values for emission date, emitting company, document type, and configured optional fields using the applicable regexes and lookup lists  
 **And** date parsing uses a local date parser and company matching uses the configured gazetteer, with fuzzy matching only where configured  
@@ -424,7 +424,7 @@ So that I can find documents and understand their processing status.
 **When** I open the dashboard file list  
 **Then** each row shows emission date, period, current object name/key, status, template, document type, emitting company, and confidence where available  
 **And** I can filter by status, template, document type, company, period, and date range  
-**And** I can sort by supported columns and search object names and metadata  
+**And** I can sort by supported columns and search object names, metadata fields, and the full extracted text across all pages  
 **And** status badges distinguish `not processed`, `processed`, and `validated`  
 **And** the list is served from SQLite rather than performing a full S3 scan for every request.
 
