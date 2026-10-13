@@ -5,9 +5,9 @@ version: "1.0"
 status: "draft"
 date: "2026-10-13"
 inputDocuments:
-  - "automatic-pdf-renamer/brief.md"
-  - "automatic-pdf-renamer/prd.md"
-  - "automatic-pdf-renamer/arch.md"
+  - "brief.md"
+  - "prd.md"
+  - "arch.md"
 ---
 
 # Automatic PDF Renamer — Epics and Stories
