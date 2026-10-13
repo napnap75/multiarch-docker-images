@@ -274,7 +274,37 @@ SQLite also creates an index for the `id` primary key and a unique index for `sh
 
 ## 4.6 Period computation
 
-A pure function of (emission date, template period rules): granularity in {day, week, month, quarter, semester, year} and offset in {current, next}. Produces the human-readable period string (e.g. "Q3 2026", "September 2026", "2026"). Recomputed whenever the emission date or template changes on the detail page; the user can override the suggested value, and validation checks consistency between period, date, and template rules (FR4.2, FR4.3, AC5c).
+### Requirement
+
+The system shall determine a document period deterministically. It shall first try to extract a period from the filename; if none is found, it shall compute one from the emission date and the selected template rule. If no rule is supplied, the emission date shall yield a French month-year period. If no period can be determined, the system shall return a clear error. The result shall indicate whether it was extracted or computed.
+
+### 4.6.1 Period discovery
+
+The filename parser shall inspect the basename without its extension and recognize period patterns wherever they occur. Supported forms include month-year values (numeric, French or English month names, and English three-letter abbreviations), quarters (such as Q3 2025, T3 2025, 3T2025, or expressions using “trimestre” / “quarter”), common numeric dates, and a four-digit year. More specific quarter or month-year patterns shall take precedence over a year-only match. A full date shall yield its month-year period unless a quarter representation is recognized first.
+
+### 4.6.2 Date inputs
+
+The system shall accept date values and common strings: YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY, DD-MM-YYYY, YYYY/MM/DD, YYYY-MM, MM-YYYY, a four-digit year, and French or English month names followed by a year. Month-only and year-only values shall be normalized to representative valid dates. Invalid or unparseable values shall produce a clear error.
+
+### 4.6.3 Period rules
+
+Each template may define a granularity (`day`, `week`, `month`, `quarter`, `semester`, `year`) and an offset (`current`, `previous`, `following`). Granularity defaults to `month` and offset defaults to `current`. Current means the period containing the emission date; previous and following mean the adjacent period at the selected granularity. Calendar and year boundaries shall be handled correctly. Weekly periods shall use ISO week numbering and its associated week-year. Unknown granularity or offset values shall be reported as configuration errors.
+
+### 4.6.4 Output formatting
+
+Standard labels shall use French month names by default, quarter labels such as `Q3 2025`, semester labels such as `S2 2025`, ISO week labels such as `Week 32 2025`, and four-digit years. Templates may supply a custom format string using `{year}`, `{year_next}`, `{year_previous}`, `{month}`, `{month_name}`, `{month_abbr}`, `{day}`, `{quarter}`, `{semester}`, and `{week}`. Month and day numeric values shall be zero-padded; month names shall be French and abbreviations shall be English three-letter forms. For month-, quarter-, semester-, and year-based periods, the representative day shall be the first day of the period. An unknown placeholder shall produce a clear format error.
+
+### 4.6.5 Consistency validation
+
+Given a period, emission date, and rule, the system shall compute the expected period and validate the supplied value. Comparison shall be case-insensitive and may normalize equivalent year-only, month-year, or quarter labels. A mismatch or unparseable period shall fail validation with a diagnostic containing the supplied period, date, rule granularity and offset, and expected period.
+
+### 4.6.6 Acceptance criteria
+
+- A supported period in the filename is extracted before any fallback computation and is marked as filename-derived.
+- Without a filename period, a valid date and rule produce a rule-derived period; without a rule, the date produces a French month-year value.
+- Previous/following offsets crossing a calendar boundary produce the correct adjacent period and year.
+- Supported custom placeholders are replaced with values corresponding to the computed period.
+- Invalid dates, unknown rules, unknown placeholders, and inconsistent periods produce explicit errors rather than silent guesses.
 
 ### 4.7 Frontend
 
