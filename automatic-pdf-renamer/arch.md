@@ -72,7 +72,7 @@ One Python process runs:
 - Poller task: asyncio loop, configurable interval, lists the `inbox/` prefix.
 - Job supervisor: spawns subprocesses for retrain, consistency scan, and SQLite rebuild; tracks their status in memory and in SQLite.
 
-On startup, the process runs the recovery scan (FR1.3, FR10.3): objects in `inbox/` and `pending/` without sidecar records are enqueued for processing.
+On startup, the process recovers interrupted technical operations and discovers eligible objects in `inbox/`. The `pending/` prefix is reconciled for metadata and anomalies; documents awaiting manual correction are not automatically reclassified or renamed until corrected/requested.
 
 ### 4.2 Module layout
 
@@ -212,7 +212,7 @@ The only business statuses accepted by `validate_sidecar` are:
 - `processed` — processed by the pipeline.
 - `validated` — reviewed/confirmed by the owner.
 
-Technical progress and error details must not be invented as additional business statuses. Store detailed failure or review reasons in event payloads and/or the appropriate processing metadata, while keeping these three statuses stable.
+Technical progress and error details must not be invented as additional business statuses. Store retry state, attempt count, next retry time, and failure details in technical processing metadata/events, separate from the three business statuses. Use `pending` only when manual correction of document classification or fields is required.
 
 The event names declared by `EventType` are:
 
@@ -353,7 +353,7 @@ Subprocesses report progress and metrics by writing a status JSON consumed by th
 
 ## 8. Error Handling and Crash Safety
 
-- Ingestion: any unexpected exception marks the file `pending` with the reason in the sidecar; the poller continues.
+- Ingestion: classify errors as transient/retryable technical failures, permanent technical failures, or document/business validation failures. Retry transient failures with bounded backoff and idempotent recovery. Do not set business status `pending` solely because a technical operation failed. Record technical state and error details separately from business status, and continue processing other objects.
 - Rename: copy strictly before delete; a crash between the two leaves both keys, and the startup scan re-evaluates (the sidecar's current key is authoritative).
 - Sidecar/SQLite: sidecar first; drift repaired by the consistency job; rebuild is always possible from sidecars alone.
 - Retrain: trained models land in a new versioned directory; activation swaps an active-model pointer; a failed training run leaves the current model untouched.
