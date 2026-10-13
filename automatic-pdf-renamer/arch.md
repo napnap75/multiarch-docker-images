@@ -100,7 +100,7 @@ One ingestion run, fully synchronous within the poller task:
 ```mermaid
 flowchart TD
   in["Stable object in inbox/"] --> dl["Download PDF"]
-  dl --> tx["Extract first-page text (PyMuPDF)"]
+  dl --> tx["Extract text from every PDF page (PyMuPDF)"]
   tx --> empty{"Text empty?"}
   empty -- yes --> pending["Move to pending/ (reason: empty text)"]
   empty -- no --> cls["Classify (TF-IDF + LogReg)"]
@@ -125,7 +125,7 @@ Every terminal step writes a sidecar event (classified, renamed, corrected, vali
 ### 4.5 Metadata and replica
 
 - Sidecar JSON is the sole source of truth; schema per PRD section 7 (now including the period field).
-- SQLAlchemy models `files` and `consistency_flags` mirror it. `extracted_text` is stored in SQLite for search; it is a replica, and the rebuild command repopulates it from sidecars.
+- SQLAlchemy models `files` and `consistency_flags` mirror it. `extracted_text` contains the complete text extracted from every PDF page and is stored in SQLite for full-text search alongside metadata/field search; it is a replica, and the rebuild command repopulates it from sidecars.
 - `POST /consistency/rebuild` and the CLI rebuild command both clear and repopulate SQLite from all sidecars (AC9).
 - Divergence resolution is always sidecar-wins (PRD 3.2); the consistency job flags drift rather than guessing.
 
@@ -164,7 +164,7 @@ The following is a JSONC-readable example. Comments explain the fields and are n
     "amount": 125.5,
     "currency": "EUR"
   },
-  "extracted_text": "Invoice ACME ...", // Serialized by the model; text extracted from the first page.
+  "extracted_text": "Invoice ACME ... [text from all pages]", // Complete text extracted from every page.
   "created_at": "2026-01-15T10:20:30+00:00", // Required. Creation timestamp in ISO 8601.
   "updated_at": "2026-01-15T10:21:05+00:00", // Required. Last sidecar mutation timestamp in ISO 8601.
   "events": [ // Required array; may be empty.
@@ -197,7 +197,7 @@ The following is a JSONC-readable example. Comments explain the fields and are n
 | `emitting_company` | string | Required. Issuing company name. |
 | `document_type` | string | Required. More specific document type within the template. |
 | `optional_fields` | object | Emitted by the dataclass serializer, default `{}`. Template-specific values; values may be strings, numbers, booleans, arrays, objects, or null as allowed by the application schema. |
-| `extracted_text` | string | Emitted by the dataclass serializer, default empty string. Extracted first-page text. |
+| `extracted_text` | string | Emitted by the dataclass serializer, default empty string. Complete text extracted from all PDF pages. |
 | `created_at` | string | Required. ISO 8601 timestamp set on object construction if not supplied. |
 | `updated_at` | string | Required. ISO 8601 timestamp set on construction and refreshed by `add_event` and `set_status`. |
 | `events` | array of objects | Required. Chronological event history; each event has `type`, `payload`, and `timestamp`. |
@@ -254,7 +254,7 @@ The implementation should create one table, `files`. Columns are stored as follo
 | `emission_date` | `TEXT` | Nullable | Document emission date. |
 | `confidence` | `REAL` | Nullable | Classification confidence. |
 | `optional_fields` | `TEXT` | Nullable | JSON-serialized object of template-specific fields. |
-| `extracted_text` | `TEXT` | Nullable | Extracted document text, used by search. |
+| `extracted_text` | `TEXT` | Nullable | Complete extracted document text from all pages, used by full-text search. |
 | `created_at` | `TEXT` | Nullable | Creation timestamp, represented as text (normally ISO 8601). |
 | `updated_at` | `TEXT` | Nullable | Last-update timestamp, represented as text (normally ISO 8601). |
 
