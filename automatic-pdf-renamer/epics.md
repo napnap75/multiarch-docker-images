@@ -22,7 +22,7 @@ Build a personal, fully offline application that watches a self-hosted Garage S3
 
 - **Offline by design:** no cloud APIs, telemetry, or runtime downloads. Documents remain on self-hosted infrastructure.
 - **No silent wrong renames:** ambiguous, incomplete, or invalid results must be routed for human review.
-- **Recoverability:** renames are traceable and reversible; sidecars are authoritative and SQLite can be rebuilt from them.
+- **Recoverability:** file operations are traceable; sidecars are authoritative and SQLite can be rebuilt from them. User-facing undo of file renames is out of scope.
 - **Incremental delivery:** first deliver deterministic extraction with regular expressions and configured lookup lists; add ML as a separate capability without replacing the stable ingestion pipeline.
 - **Configuration over code:** adding a document template should not require changing application code.
 - **Single-user v1:** Nextcloud handles user-facing file access and sharing. Dashboard authentication and multi-user management are outside the v1 scope unless explicitly re-approved.
@@ -59,7 +59,7 @@ The following inventory consolidates the requirements from the project brief and
 - **FR-STO-02 — Sidecar source of truth:** store a JSON sidecar for each PDF with identifiers, current and original keys, status, extracted fields/text, confidence where applicable, timestamps, and event history.
 - **FR-STO-03 — SQLite replica:** mirror sidecar data into SQLite for fast listing, filtering, search, and statistics.
 - **FR-STO-04 — Safe moves:** move objects using copy-before-delete, resolve destination collisions with an incremental suffix, and record the actual final key.
-- **FR-STO-05 — Reversible operations:** preserve sufficient history and key information to trace and reverse a rename without silently overwriting another object.
+- **FR-STO-05 — Operation audit trail:** preserve sufficient history and key information to trace file moves and renames. A user-facing undo/rollback feature for file renames is out of scope.
 - **FR-DASH-01 — File list:** list all known files and show emission date, period, current key/name, status, template, document type, company, and confidence where available.
 - **FR-DASH-02 — Search and filters:** filter by status, template, document type, company, period, and date range; sort columns and search object names and metadata, and full extracted text across every PDF page.
 - **FR-DASH-03 — Statistics:** show counts by status, automation and validation rates, and consistency indicators.
@@ -104,7 +104,7 @@ The following inventory consolidates the requirements from the project brief and
 | FR-TXT-01 to FR-TXT-03: text extraction and persistence | Epic 2 |
 | FR-CLS-01 to FR-CLS-02: rules-first classification and ML confidence | Epics 2 and 3 |
 | FR-FLD-01 to FR-FLD-06: fields, deterministic/ML extraction, periods, validation | Epics 2 and 3; review overrides in Epic 4 |
-| FR-STO-01 to FR-STO-05: S3, sidecars, SQLite, safe and reversible moves | Epics 1 and 2; recovery in Epic 5 |
+| FR-STO-01 to FR-STO-05: S3, sidecars, SQLite, safe and traceable moves | Epics 1 and 2; recovery in Epic 5 |
 | FR-DASH-01 to FR-DASH-06: list, search, preview, correction, validation, lifecycle | Epic 4 |
 | FR-TPL-01 to FR-TPL-02: templates and template visibility | Epics 2 and 4 |
 | FR-ML-01 to FR-ML-03: training, evaluation, model lifecycle | Epic 3 |
@@ -300,7 +300,7 @@ So that routine files are organized without risking silent data loss.
 **And** the file receives status `processed` only after the required state updates have been persisted or recoverably recorded  
 **And** when confidence is not applicable in this rules-only release, the decision is based on explicit rule outcomes and field validation rather than a fabricated ML confidence score  
 **And** ambiguous, incomplete, or invalid files are moved to `pending/` and receive status `pending` with a review reason  
-**And** the operation can be audited and safely reversed without overwriting another object.
+**And** the operation can be audited from its recorded history; no user-facing rename reversal is required.
 
 ### Story 2.7: Make ingestion idempotent and restart-safe
 
@@ -584,5 +584,4 @@ Completes the remaining Epic 4 capabilities and Epic 5, including consistency re
 
 ## 7. Open Decisions to Resolve Before the Affected Stories
 
-1. **Reversibility semantics:** define the user-facing undo operation, collision behavior, and exact state transitions before implementing the final rollback workflow.
 2. **ML field extraction:** specify which field groups use ML in v1 and what evaluation threshold is required before enabling each extractor. Classification and deterministic validation must remain usable independently.
