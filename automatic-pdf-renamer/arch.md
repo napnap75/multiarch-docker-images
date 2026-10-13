@@ -104,9 +104,9 @@ flowchart TD
   tx --> empty{"Text empty?"}
   empty -- yes --> pending["Move to pending/ (reason: empty text)"]
   empty -- no --> cls["Classify using deterministic rules"]
-  cls --> conf{"Confidence >= threshold?"}
-  conf -- no --> pending
-  conf -- yes --> fill["Fill fields: regexes, companies list, additional fields from groups, period from emission date"]
+  cls --> unamb{"Exactly one unambiguous rule match?"}
+  unamb -- no --> pending
+  unamb -- yes --> fill["Fill fields: regexes, companies list, additional fields from groups, period from emission date"]
   fill --> valid{"Fields valid?"}
   valid -- no --> pending
   valid -- yes --> rename["Compute key, copy-then-delete, write sidecar + SQLite"]
@@ -348,7 +348,7 @@ Subprocesses report progress and metrics by writing a status JSON consumed by th
 ## 7. Configuration and Secrets
 
 - Templates: single JSONC file defining: document family, document types, period rules, optional field schema, extraction regexes, validation rules, key pattern, target prefix.
-- Environment: S3 endpoint, access key, secret key, bucket name, poll interval, confidence threshold, dashboard credentials, paths (SQLite file, model registry, template JSONC).
+- Environment: S3 endpoint, access key, secret key, bucket name, poll interval, optional post-v1 ML confidence threshold, dashboard credentials, paths (SQLite file, model registry, template JSONC).
 - No secrets in the JSONC; no secrets in sidecars.
 
 ## 8. Error Handling and Crash Safety
