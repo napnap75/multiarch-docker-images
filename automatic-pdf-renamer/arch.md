@@ -212,7 +212,7 @@ The only business statuses accepted by `validate_sidecar` are:
 - `processed` — processed by the pipeline.
 - `validated` — reviewed/confirmed by the owner.
 
-Technical progress and error details must not be invented as additional business statuses. Store retry state, attempt count, next retry time, and failure details in technical processing metadata/events, separate from the three business statuses. Use `pending` only when manual correction of document classification or fields is required.
+Technical progress and error details must not be invented as additional business statuses. Store retry state, attempt count, next retry time, and failure details in technical processing metadata/events, separate from the three business statuses. The retry schedule is fixed: 3 retries after the initial attempt, at 5 seconds, 30 seconds, and 2 minutes. Use `pending` only when manual correction of document classification or fields is required.
 
 The event names declared by `EventType` are:
 
@@ -353,7 +353,7 @@ Subprocesses report progress and metrics by writing a status JSON consumed by th
 
 ## 8. Error Handling and Crash Safety
 
-- Ingestion: classify errors as transient/retryable technical failures, permanent technical failures, or document/business validation failures. Retry transient failures with bounded backoff and idempotent recovery. Do not set business status `pending` solely because a technical operation failed. Record technical state and error details separately from business status, and continue processing other objects.
+- Ingestion: classify errors as transient/retryable technical failures, permanent technical failures, or document/business validation failures. Retry transient failures up to 3 times after the initial attempt, with delays of 5 seconds, 30 seconds, and 2 minutes, using idempotent recovery. Do not set business status `pending` solely because a technical operation failed. Record technical state and error details separately from business status, and continue processing other objects.
 - Rename: copy strictly before delete; a crash between the two leaves both keys, and the startup scan re-evaluates (the sidecar's current key is authoritative).
 - Sidecar/SQLite: sidecar first; drift repaired by the consistency job; rebuild is always possible from sidecars alone.
 - Retrain: trained models land in a new versioned directory; activation swaps an active-model pointer; a failed training run leaves the current model untouched.
