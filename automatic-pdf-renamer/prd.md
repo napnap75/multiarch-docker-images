@@ -122,8 +122,8 @@ The object key pattern of each template is composed from these common fields, pl
 
 ### Epic 8 — Template management
 
-- FR8.1 Templates are defined in YAML configuration files.
-- FR8.2 Adding a template = YAML entry (including the period granularity and offset) + example files; no code change.
+- FR8.1 Templates are defined in JSONC configuration files.
+- FR8.2 Adding a template = JASONC entry (including the period granularity and offset) + example files; no code change.
 - FR8.3 The dashboard lists configured templates with their slot definitions, period rules, target prefix, and the count of corpus files per template.
 
 ### Epic 9 — Retraining
@@ -144,7 +144,7 @@ The object key pattern of each template is composed from these common fields, pl
 - NFR3 Reliability: zero silent wrong renames. Every ambiguous case routes to not processed.
 - NFR4 Durability: bucket versioning enabled; SQLite with WAL. A crash at any point leaves no half-renamed state: the S3 copy is a non-destructive copy-then-delete, the sidecar is written atomically, and the consistency job repairs SQLite-sidecar drift.
 - NFR5 Language: documents in French; UI in English or French (single locale acceptable in v1).
-- NFR6 Deployment: runs as a container next to the Garage deployment and the Nextcloud server; configuration via a single YAML file (templates) and environment variables (S3 endpoint, credentials, bucket).
+- NFR6 Deployment: runs as a container next to the Garage deployment and the Nextcloud server; configuration via a single JSONC file (templates) and environment variables (S3 endpoint, credentials, bucket).
 - NFR7 Stack: Python (FastAPI, boto3 or minio S3 client, scikit-learn, pdfplumber/PyMuPDF, rapidfuzz, spaCy fr model optional), React (Vite, a lightweight PDF viewer such as react-pdf), SQLite, Garage for S3 storage, Nextcloud with External Storage (S3) as the user-facing file interface.
 - NFR9 No encryption at rest in v1: documents are not sensitive; this decision is recorded explicitly and can be revisited.
 
@@ -179,7 +179,7 @@ SQLite replica (rebuilt from sidecars):
 - AC5b Every file in every state carries the five common fields (template, emission date, emitting company, document type, period); a document whose fields cannot be recognized is routed to not processed rather than renamed.
 - AC5c Period computation per template rules: a document dated 2026-09-20 under a monthly template with offset current yields "September 2026"; under a quarterly template with offset next it yields "Q4 2026"; under a yearly template it yields "2026".
 - AC6 Retraining uses initial corpus + validated files, shows metrics, and activation swaps the model without service restart.
-- AC7 Adding a template via YAML (with example files) makes it available for classification and in the detail page dropdown, with no code change.
+- AC7 Adding a template via JSONC (with example files) makes it available for classification and in the detail page dropdown, with no code change.
 - AC8 Killing the service mid-processing leaves no half-renamed object: the copy-then-delete order and the sidecar-first write guarantee a consistent state on restart, and the consistency job repairs SQLite.
 - AC9 Deleting the SQLite database entirely and running the rebuild command restores a fully functional dashboard from the sidecars alone.
 - AC10 No network traffic other than the local Garage bucket, local Nextcloud, and local dashboard serving (verifiable with a firewall audit).
@@ -197,4 +197,4 @@ SQLite replica (rebuilt from sidecars):
 - S3 client library: boto3 vs minio-py against Garage — covered by the Week 1 Garage compatibility spike (listing, copy-object, multipart, versioning behavior).
 - Exact confidence threshold and per-template overrides — calibrate on the initial corpus.
 - Poll interval tradeoff between responsiveness and Garage listing load.
-- Exact human-readable period formats (French month names, quarter notation) and their rendering in the object key — to be fixed in the template YAML spec.
+- Exact human-readable period formats (French month names, quarter notation) and their rendering in the object key — to be fixed in the template JSONC spec.
