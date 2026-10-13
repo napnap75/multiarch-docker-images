@@ -13,7 +13,7 @@ PDFs arrive continuously in an inbox S3 prefix (dropped via Nextcloud by the use
 - Classify each incoming PDF against a known naming template, based on the full text content of every page (including headers and footers), not the current object name.
 - Fill the fields of the selected template (date, counterparty, reference, amount) from the content.
 - Rename and move the object within the bucket into an organized prefix structure depending on the document type.
-- High confidence: automatic processing. Low confidence or incomplete extraction: queued for human review in the dashboard.
+- High confidence: automatic processing. Rules that cannot determine a valid result or incomplete extraction: queued with status `pending` for human review in the dashboard.
 - Write metadata as JSON sidecar objects in the bucket (source of truth) and replicate every decision into SQLite for fast queries, with rollback capability and retraining from corrections.
 - Run fully offline on self-hosted infrastructure: no cloud APIs, no data ever leaves the server.
 
@@ -23,12 +23,12 @@ PDFs arrive continuously in an inbox S3 prefix (dropped via Nextcloud by the use
 
 - Ingestion by polling the `inbox/` prefix of a Garage S3 bucket for new objects only. Nextcloud (External Storage app) is the user-facing interface to upload, download, and share files.
 - Extract all available text from every page of each PDF. All files are text-based; OCR for scanned/image-only documents is out of scope for v1.
-- Template classification: TF-IDF + Logistic Regression (scikit-learn) on the extracted text, with a configurable confidence threshold.
+- Deterministic template classification in v1 using configured rules, extracted text, and reference data; uncertain or insufficient results are routed to `pending/` for manual correction. TF-IDF + Logistic Regression is a post-v1 enhancement, not a v1 dependency.
 - Per-template slot filling: regex + dateutil for dates, amounts, references; gazetteer + fuzzy matching (rapidfuzz) for counterparties, with spaCy/CamemBERT NER as fallback if needed.
 - Templates and extractors declared in configuration (JSONC format), not in code.
 - Storage: Garage (self-hosted S3-compatible, https://garagehq.deuxfleurs.fr/) with a single versioned bucket; objects addressed by S3 keys, no local filesystem for documents.
 - Metadata: one JSON sidecar object per PDF in the bucket, holding template, fields, confidence, status, and history — the source of truth. SQLite acts as a replicated index for dashboard queries, rebuildable from the sidecars.
-- Local web dashboard: all processed files with status (not processed / processed / validated), file detail page with PDF preview streamed from S3, template and field correction, validation, history, statistics, and full-text search across the entire extracted document in addition to metadata/field search.
+- Local web dashboard: all processed files with status (pending / processed / validated), file detail page with PDF preview streamed from S3, template and field correction, validation, history, statistics, and full-text search across the entire extracted document in addition to metadata/field search.
 - On-demand classifier retraining, using the existing corpus based on all the files with "validated" status.
 
 ### Out of scope (v1)
@@ -45,9 +45,9 @@ PDFs arrive continuously in an inbox S3 prefix (dropped via Nextcloud by the use
 Single user (personal use), technically proficient. Nominal flow:
 
 1. A PDF is uploaded into the `inbox/` prefix via Nextcloud (or any S3 client).
-2. The poller detects the new object, waits for write completion (stable ETag/content-length on repeated listing), downloads it, extracts text from every page, classifies, extracts the fields, validates.
+2. The poller detects the new object, waits for write completion (stable ETag/content-length on repeated listing), downloads it, extracts text from every page, applies deterministic classification and field-extraction rules, then validates.
 3. High confidence and valid fields: the object is copied to its renamed key in the target prefix and the inbox copy deleted; metadata is written to the sidecar and replicated to SQLite; the event is logged.
-4. Otherwise: the file appears in the dashboard review queue; the user corrects or validates; the correction feeds the training corpus.
+4. If deterministic rules cannot produce a valid result: the file is moved to `pending/` and appears in the dashboard review queue; the user corrects or validates it. Validated corrections may feed a future ML training corpus.
 
 ## 6. Functional Requirements
 
@@ -56,9 +56,9 @@ Single user (personal use), technically proficient. Nominal flow:
 - FR3: fill each template field according to its schema (type, format, validity range).
 - FR4: validate fields before renaming (parseable date, numeric amount, recognized or flagged counterparty); any failed validation routes to review.
 - FR5: rename and move within the bucket via S3 copy + delete to the template's target prefix, resolving key collisions (incremental suffix).
-- FR6: write a JSON sidecar per file (old key → new key → decision mapping, per-file status not processed / processed / validated) and replicate to SQLite, enabling rollback and selecting training data.
+- FR6: write a JSON sidecar per file (old key → new key → decision mapping, per-file status pending / processed / validated) and replicate to SQLite, enabling rollback and selecting training data.
 - FR7: local web dashboard (FastAPI + React): file list, detail page, review, correction, validation, history, retraining trigger. PDFs are streamed from the bucket for preview.
-- FR7a: the dashboard shows every processed file with its status: "not processed" (confidence was too low, rename pending), "processed" (automatically renamed and moved), or "validated" (the user confirmed or corrected the result — such files are eligible for future model retraining).
+- FR7a: the dashboard shows every processed file with its status: "pending" (deterministic classification or required-field validation needs manual correction), "processed" (automatically renamed and moved), or "validated" (the user confirmed or corrected the result — such files are eligible for future model retraining).
 - FR7b: clicking a file opens a detail page displaying the PDF, where the user can change the template if misclassified, correct the extracted field values, and validate the result. Validation sets the status to "validated" and feeds the corrected data into the training corpus.
 - FR8: adding a new template is done through a configuration entry (JSONC) plus example files, with no code changes.
 
@@ -82,7 +82,7 @@ Single user (personal use), technically proficient. Nominal flow:
 
 ## 9. Risks and Mitigations
 
-- Limited training corpus (~500 files): start simple (TF-IDF + LogReg), optionally sentence-transformers embeddings if accuracy is insufficient; the review loop continuously enriches the corpus.
+- Limited training corpus (~500 files): start with deterministic rules; evaluate TF-IDF + Logistic Regression as a post-v1 enhancement; the review loop continuously enriches the corpus.
 - Templates too weakly distinguished in the text: enrich features (header, issuer, business keywords per template).
 - Poorly extracted or empty text files: systematic detection and routing to review; extraction and search must cover all pages, not only page one.
 - Partial uploads (Nextcloud chunked uploads): poll-only keys with a stable size across two listing cycles and a `.part`/`.~lock` exclusion list.
