@@ -13,7 +13,7 @@ PDFs arrive continuously in an inbox S3 prefix (dropped via Nextcloud by the use
 - Classify each incoming PDF against a known naming template, based on the full text content of every page (including headers and footers), not the current object name.
 - Fill the fields of the selected template (date, counterparty, reference, amount) from the content.
 - Rename and move the object within the bucket into an organized prefix structure depending on the document type.
-- High confidence: automatic processing. Rules that cannot determine a valid result or incomplete extraction: queued with status `pending` for human review in the dashboard.
+- Unambiguous deterministic rules and valid fields: automatic processing. If rules cannot determine a valid result or extraction is incomplete, queue the file with status `pending` for human review in the dashboard.
 - Write metadata as JSON sidecar objects in the bucket (source of truth) and replicate every decision into SQLite for fast queries, with rollback capability and retraining from corrections.
 - Run fully offline on self-hosted infrastructure: no cloud APIs, no data ever leaves the server.
 
@@ -52,7 +52,7 @@ Single user (personal use), technically proficient. Nominal flow:
 ## 6. Functional Requirements
 
 - FR1: detect new PDFs in a configurable `inbox/` S3 prefix by polling the bucket listing at a configurable interval, ignoring non-PDF keys and temporary uploads (e.g. Nextcloud `.part` files).
-- FR2: classify the document into one of the configured templates, with a confidence score and an "unknown" class below the threshold.
+- FR2: classify the document using configured deterministic rules and reference data. If the evidence is insufficient or contradictory, do not guess; set status `pending` and queue the file for manual correction. Confidence scores and an "unknown" class belong to the post-v1 ML enhancement.
 - FR3: fill each template field according to its schema (type, format, validity range).
 - FR4: validate fields before renaming (parseable date, numeric amount, recognized or flagged counterparty); any failed validation routes to review.
 - FR5: rename and move within the bucket via S3 copy + delete to the template's target prefix, resolving key collisions (incremental suffix).
