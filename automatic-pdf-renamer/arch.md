@@ -156,7 +156,7 @@ The following is a JSONC-readable example. Comments explain the fields and are n
   "current_key": "files/acme/invoice-2026-01.pdf", // Required. Current S3 key for the PDF.
   "status": "processed", // Required. One of the three business statuses below.
   "template_name": "invoice", // Required. Template/document family selected for this PDF.
-  "period_format": "YYYY-MM", // Required. Format/rule identifier used for the period string.
+  "period_format": "monthly", // Required. Format/rule identifier used for the period string.
   "confidence": 0.97, // Serialized by the model; numeric classification confidence (0.0–1.0).
   "emission_date": "2026-01-15", // Required. Emission date; expected ISO YYYY-MM-DD.
   "period": "2026-01", // Required. Computed or validated period string.
@@ -193,7 +193,7 @@ The following is a JSONC-readable example. Comments explain the fields and are n
 | `current_key` | string | Required. S3 key currently associated with the PDF. |
 | `status` | string | Required. One of `not processed`, `processed`, or `validated`. |
 | `template_name` | string | Required. Name of the configured template/document family. |
-| `period_format` | string | Required. Period format/rule label, e.g. `YYYY-MM` or `YYYY-MM-DD`. |
+| `period_format` | string | Required. Period format/rule label, e.g. `monthly` or `yearly`. |
 | `confidence` | number | Emitted by the dataclass serializer, default `0.0`. Intended for a classification score between 0 and 1; the current validator checks only that it is numeric, not that it is within that range. |
 | `emission_date` | string | Required. Document emission date; `build_sidecar` documents ISO `YYYY-MM-DD`. |
 | `period` | string | Required. Period derived from the emission date and applicable rules. |
@@ -275,7 +275,7 @@ SQLite also creates an index for the `id` primary key and a unique index for `sh
 
 ## 4.6 Period computation
 
-A pure function of (emission date, template period rules): granularity in {day, month, quarter, year} and offset in {current, next}. Produces the human-readable period string (e.g. "Q3 2026", "September 2026", "2026"). Recomputed whenever the emission date or template changes on the detail page; the user can override the suggested value, and validation checks consistency between period, date, and template rules (FR4.2, FR4.3, AC5c).
+A pure function of (emission date, template period rules): granularity in {day, week, month, quarter, semester, year} and offset in {current, next}. Produces the human-readable period string (e.g. "Q3 2026", "September 2026", "2026"). Recomputed whenever the emission date or template changes on the detail page; the user can override the suggested value, and validation checks consistency between period, date, and template rules (FR4.2, FR4.3, AC5c).
 
 ### 4.7 Frontend
 
