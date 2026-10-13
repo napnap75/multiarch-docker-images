@@ -22,7 +22,7 @@ Single user: the owner. Technically proficient, wants minimal manual work but ze
 
 ### 3.2 Metadata: sidecars as source of truth, SQLite as replica
 
-- Each PDF has a sidecar JSON object holding: sha256, original key, current key, status, template, document type, emission date, period, emitting company, all optional fields, confidence, and the full event history (classified, renamed, validated, undone, corrected).
+- Each PDF has a sidecar JSON object holding: sha256, original key, current key, status, template, document type, emission date, period, emitting company, all optional fields, confidence, and the full event history (classified, renamed, validated, corrected).
 - Sidecar is updated atomically on every state change: write the new sidecar to a temp key, copy over the final sidecar key.
 - SQLite mirrors the sidecar content in queryable tables for the dashboard (lists, filters, statistics). It is a cache/replica, never authoritative. Any sidecar↔SQLite divergence is resolved in favor of the sidecar.
 - A rebuild command reconstructs the full SQLite database by scanning all sidecars; a consistency job detects PDFs without sidecars (orphaned) and sidecars without PDFs (missing object) and flags them in the dashboard.
