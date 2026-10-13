@@ -41,7 +41,7 @@ flowchart TD
 - Offline-first: no runtime downloads, no external services (NFR1, AC10).
 - Zero silent wrong renames: every ambiguous path routes to not processed (NFR3).
 - Crash safety: copy-then-delete renames, atomic sidecar writes, SQLite repairable from sidecars alone (NFR4, AC8, AC9).
-- Minimal operational surface: one container, one JSONC configuration file, env-var credentials (NFR6).
+- Minimal operational surface: one container, one YAML configuration file, env-var credentials (NFR6).
 - Single user, local network: performance targets are modest (NFR2) but correctness targets are strict.
 
 ## 3. Tech Stack and Key Decisions
@@ -80,13 +80,13 @@ On startup, the process runs the recovery scan (FR1.3, FR10.3): objects in `inbo
 ```
 app/
   main.py            # FastAPI app, lifespan: recovery scan + poller start
-  config.py          # env vars + JSONC configuration loading
+  config.py          # env vars + YAML configuration loading
   storage/           # S3 interface (boto3), key helpers, collision suffix
   sidecar.py         # atomic sidecar write (temp key + copy), schema
   replica/           # SQLAlchemy models, sync, rebuild
   pipeline/          # extract (PyMuPDF), classify, fill fields, validate
   period.py          # period computation from emission date + period format config
-  templates.py       # JSONC template registry (slots, period rules, key patterns)
+  templates.py       # YAML template registry (slots, period rules, key patterns)
   rename.py          # copy-then-delete move + event logging
   jobs/              # poller, consistency scan, retrain subprocess, rebuild
   api/               # routes: files, templates, retrain, consistency, auth
@@ -143,7 +143,6 @@ A sidecar key is derived from the PDF object key by replacing a terminal, lowerc
 - `files/invoice.pdf` → `files/invoice.meta.json`
 - `inbox/document.pdf` → `inbox/document.meta.json`
 
-Although the project configuration and this specification use JSONC, the current `app/sidecar.py` serializer uses Python `json.dumps` and therefore writes strict JSON without comments or trailing commas. Strict JSON is a valid subset of JSONC. Consumers must not require comments to be present in a sidecar; JSONC comments are for human-authored configuration/documentation, not generated metadata.
 
 #### Canonical schema example
 
@@ -234,31 +233,6 @@ Each event is an object with exactly the following required structure:
 - `timestamp`: ISO 8601 timestamp generated in UTC when `Sidecar.add_event` is called.
 
 The current validator checks that these three event properties have the correct broad types, but it does not enforce the event-name enum, timestamp parseability, or a per-event payload schema.
-
-#### Validation rules implemented by `app/sidecar.py`
-
-`validate_sidecar(data)` returns a pair `(is_valid, errors)`. It checks:
-
-1. Presence of the required keys: `schema_version`, `sha256`, `original_key`, `current_key`, `status`, `template_name`, `period_format`, `emission_date`, `emitting_company`, `document_type`, `period`, `created_at`, `updated_at`, and `events`.
-2. Presence of the six common fields: `template_name`, `period_format`, `emission_date`, `emitting_company`, `document_type`, and `period`. These are also included in the required-key set.
-3. `schema_version` and `sha256` are strings.
-4. `confidence`, if present, is numeric; `optional_fields`, if present, is an object/dictionary; and `events`, if present, is an array/list.
-5. Every event is an object with string `type`, string `timestamp`, and object `payload`.
-6. `schema_version` equals the supported version `"1.0"`.
-7. `status` is one of the three business status values.
-
-The current validator does **not** yet enforce the types of every required string field, validate the SHA-256 hexadecimal shape, parse date/timestamp strings, constrain confidence to 0–1, or validate `optional_fields` against a template-specific schema. These are potential hardening tasks rather than guarantees of the current implementation.
-
-#### Serialization, reads, and atomic writes
-
-- `serialize(sidecar, indent=2)` serializes all dataclass fields as UTF-8-friendly JSON (`ensure_ascii=False`), with sorted keys and two-space indentation by default.
-- `deserialize(json_str)` parses strict JSON and constructs a `Sidecar`; despite the JSONC terminology used for configuration, comments and trailing commas are not accepted by Python's standard `json.loads`.
-- `get_sidecar_key(pdf_key)` derives the sidecar key using the naming rule above.
-- `write_atomic(storage_client, sidecar, target_key)` writes serialized content to a unique temporary key under `tmp/`, copies it to the target key, and deletes the temporary object. On failure, it attempts best-effort cleanup and raises `RuntimeError`.
-- `read_sidecar(storage_client, pdf_key)` returns the deserialized sidecar, or `None` if the sidecar is missing or JSON/required-value parsing fails.
-- `matching_sha256(storage_client, pdf_key, expected_sha)` returns true only when a readable sidecar exists and its `sha256` matches the expected digest.
-
-The copy operation used to replace the final sidecar is atomic at the individual object operation level, but the complete sequence involving the temporary key, PDF rename, sidecar, and SQLite replica is not a cross-object transaction. Recovery and consistency checks must therefore handle intermediate states.
 
 ## 4.6 Period computation
 
