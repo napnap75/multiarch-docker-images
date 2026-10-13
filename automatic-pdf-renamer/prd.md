@@ -56,9 +56,9 @@ Transitions:
 
 - FR1.1 Poll the configurable `inbox/` prefix at a configurable interval; process only keys ending in `.pdf`. Ignore other extensions and temporary files (Nextcloud `.part`, `.~lock`, hidden files).
 - FR1.2 Wait for object stability: process a key only after its size and ETag are unchanged across two consecutive listings (handles chunked uploads and partial writes).
-- FR1.3 On service restart, detect objects present in `inbox/` (or `pending/`) with no sidecar record and process them.
+- FR1.3 On service restart, recover eligible objects in `inbox/` and resume interrupted technical operations. Do not automatically reprocess a `pending` document that is awaiting manual correction unless the user requests processing after correction.
 - FR1.4 Optionally reduce latency with bucket notification hooks if the Garage deployment supports them; polling is the v1 baseline.
-- FR1.5 After processing, the inbox copy is deleted (processed files) or the object is copied to `pending/` and the inbox copy deleted (pending files), so `inbox/` always converges to empty.
+- FR1.5 After successful processing, the inbox copy is deleted. Documents requiring manual correction are copied to `pending/` and removed from `inbox/`. Transient technical failures remain eligible for retry/recovery and must not be mislabeled as `pending`.
 
 ### Epic 2 — Text extraction
 
@@ -100,7 +100,7 @@ The object key pattern of each template is composed from these common fields, pl
 
 ### Epic 5 — Renaming, moving, logging
 
-- FR5.1 Rename and move the object within the bucket (S3 copy to the target key per the template pattern, then delete of the source key). Update the sidecar and SQLite in the same transaction boundary: sidecar first, then SQLite; a crash between the two is repaired by the consistency job.
+- FR5.1 Rename and move the object within the bucket (S3 copy to the target key per the template pattern, then delete of the source key). Write the sidecar first, then update SQLite; these stores do not share a transaction. A crash or replica failure is recovered by the consistency job. If a transient technical operation fails, retry it safely without assigning the business status `pending` solely because of the technical failure.
 - FR5.2 Every event is logged in the sidecar history: file hash, old key, new key, template, extracted fields, confidence, decision, status, timestamps.
 - FR5.3 Objects missing from the bucket while not in a terminal state are detected by the consistency job and the record is flagged as orphaned.
 
@@ -135,14 +135,14 @@ The object key pattern of each template is composed from these common fields, pl
 
 - FR10.1 A periodic consistency job verifies, for every sidecar: object exists at current key, sidecar in sync with SQLite; and for every PDF object: sidecar exists. Anomalies are listed in the dashboard with repair actions.
 - FR10.2 Full SQLite rebuild from sidecars is available as a dashboard action and a CLI command.
-- FR10.3 The pending prefix is re-scanned at startup to resume interrupted processing.
+- FR10.3 At startup, recover interrupted technical operations from recorded state. Re-scan `pending/` to reconcile metadata and detect anomalies, but do not automatically repeat classification or rename for documents awaiting manual correction.
 
 ## 6. Non-Functional Requirements
 
 - NFR1 Privacy: fully offline on self-hosted infrastructure. No network calls except the local Garage bucket, and serving the local dashboard. Dependencies must not require downloads at runtime.
 - NFR2 Performance: end-to-end processing of a standard PDF under 5 seconds on the target server, including the S3 download; dashboard file list loads under 1 s for 10,000 records (served from SQLite).
 - NFR3 Reliability: zero silent wrong renames. Every ambiguous case routes to `pending`.
-- NFR4 Durability: bucket versioning enabled; SQLite with WAL. A crash at any point leaves no half-renamed state: the S3 copy is a non-destructive copy-then-delete, the sidecar is written atomically, and the consistency job repairs SQLite-sidecar drift.
+- NFR4 Durability: bucket versioning enabled; SQLite with WAL. Operations must be recoverable after crashes using copy-then-delete, atomic sidecar writes, idempotent retries, and consistency repair for SQLite-sidecar drift. Technical failures must not be represented as business status `pending`.
 - NFR5 Language: documents in French; UI in English or French (single locale acceptable in v1).
 - NFR6 Deployment: runs as a container next to the Garage deployment and the Nextcloud server; configuration via a single JSONC file (templates) and environment variables (S3 endpoint, credentials, bucket).
 - NFR7 Stack: Python (FastAPI, boto3 or minio S3 client, scikit-learn, pdfplumber/PyMuPDF, rapidfuzz, spaCy fr model optional), React (Vite, a lightweight PDF viewer such as react-pdf), SQLite, Garage for S3 storage, Nextcloud with External Storage (S3) as the user-facing file interface.
@@ -180,7 +180,7 @@ SQLite replica (rebuilt from sidecars):
 - AC5c Period computation per template rules: a document dated 2026-09-20 under a monthly template with offset current yields "September 2026"; under a quarterly template with offset next it yields "Q4 2026"; under a yearly template it yields "2026".
 - AC6 Retraining uses initial corpus + validated files, shows metrics, and activation swaps the model without service restart.
 - AC7 Adding a template via JSONC (with example files) makes it available for classification and in the detail page dropdown, with no code change.
-- AC8 Killing the service mid-processing leaves no half-renamed object: the copy-then-delete order and the sidecar-first write guarantee a consistent state on restart, and the consistency job repairs SQLite.
+- AC8 Killing the service mid-processing leaves a recoverable state: startup recovery and the consistency job reconcile object keys, sidecars, and SQLite; retries do not duplicate renames or delete the only recoverable copy.
 - AC9 Deleting the SQLite database entirely and running the rebuild command restores a fully functional dashboard from the sidecars alone.
 - AC10 No network traffic other than the local Garage bucket, local Nextcloud, and local dashboard serving (verifiable with a firewall audit).
 - AC11 1,000-file list view renders with filters in under 1 second.
