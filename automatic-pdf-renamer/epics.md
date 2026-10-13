@@ -65,7 +65,7 @@ The following inventory consolidates the requirements from the project brief and
 - **FR-DASH-03 — Statistics:** show counts by status, automation and validation rates, and consistency indicators.
 - **FR-DASH-04 — PDF detail and preview:** stream the PDF from Garage through the backend and show it alongside extracted metadata.
 - **FR-DASH-05 — Correction and validation:** allow the owner to change the template and field values, preview the resulting target key, and validate the final result.
-- **FR-DASH-06 — Lifecycle:** support the business statuses `not processed`, `processed`, and `validated`; validated records are eligible for training.
+- **FR-DASH-06 — Lifecycle:** support the business statuses `pending`, `processed`, and `validated`; validated records are eligible for training.
 - **FR-TPL-01 — Template configuration:** define templates, fields, extraction and validation rules, period rules, destination prefixes, and key patterns in configuration.
 - **FR-TPL-02 — Template discoverability:** show configured templates, their fields/rules, and corpus counts in the dashboard.
 - **FR-ML-01 — Training corpus:** train from the initial labeled corpus and files validated by the owner.
@@ -220,7 +220,7 @@ So that newly uploaded documents enter the pipeline automatically.
 **When** its size and ETag are unchanged across two consecutive listings  
 **Then** it becomes eligible for processing  
 **And** non-PDF files, hidden files, `.part` files, and lock files are ignored  
-**And** a file that is still being uploaded is not processed prematurely  
+**And** a file that is still being uploaded is pending prematurely  
 **And** a poller error for one object does not stop discovery of other objects.
 
 ### Story 2.2: Extract and persist full PDF text
@@ -299,7 +299,7 @@ So that routine files are organized without risking silent data loss.
 **And** the sidecar records the original key, current key, extracted values, decision, status, and rename events  
 **And** the file receives status `processed` only after the required state updates have been persisted or recoverably recorded  
 **And** when confidence is not applicable in this rules-only release, the decision is based on explicit rule outcomes and field validation rather than a fabricated ML confidence score  
-**And** ambiguous, incomplete, or invalid files are moved to `pending/` and receive status `not processed` with a review reason  
+**And** ambiguous, incomplete, or invalid files are moved to `pending/` and receive status `pending` with a review reason  
 **And** the operation can be audited and safely reversed without overwriting another object.
 
 ### Story 2.7: Make ingestion idempotent and restart-safe
@@ -313,7 +313,7 @@ So that retries do not create duplicate processing or lose track of a file.
 **Given** the service restarts while files exist in `inbox/` or `pending/`  
 **When** the recovery scan runs  
 **Then** objects without a completed sidecar state are discovered and resumed or flagged for review  
-**And** objects already completed are not processed again in a way that creates duplicate renames or events  
+**And** objects already completed are pending again in a way that creates duplicate renames or events  
 **And** if a crash occurs between copy and delete, the recovery logic detects both keys and resolves the state from the sidecar and object hashes  
 **And** transient technical failures are distinguishable from the three business statuses.
 
@@ -425,7 +425,7 @@ So that I can find documents and understand their processing status.
 **Then** each row shows emission date, period, current object name/key, status, template, document type, emitting company, and confidence where available  
 **And** I can filter by status, template, document type, company, period, and date range  
 **And** I can sort by supported columns and search object names, metadata fields, and the full extracted text across all pages  
-**And** status badges distinguish `not processed`, `processed`, and `validated`  
+**And** status badges distinguish `pending`, `processed`, and `validated`  
 **And** the list is served from SQLite rather than performing a full S3 scan for every request.
 
 ### Story 4.2: Show useful statistics and consistency indicators
