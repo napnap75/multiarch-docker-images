@@ -4,7 +4,7 @@ Product Requirements Document. Derived from the project brief (BMAD). Personal t
 
 ## 1. Product Overview
 
-A server-side service with a local web dashboard that polls an `inbox/` prefix of a Garage S3 bucket for incoming PDFs, identifies the document type from its content, applies the matching naming template, fills the template fields, moves the object to an organized prefix tree within the bucket, and tracks every file through a three-state lifecycle (not processed / processed / validated). Metadata lives in per-file JSON sidecars (source of truth), replicated to SQLite for queries. Low-confidence or invalid files wait for human correction; validated files feed future model retraining. Users upload, download, and share documents through Nextcloud, which mounts the bucket as external storage.
+A server-side service with a local web dashboard that polls an `inbox/` prefix of a Garage S3 bucket for incoming PDFs, identifies the document type from its content, applies the matching naming template, fills the template fields, moves the object to an organized prefix tree within the bucket, and tracks every file through a three-state lifecycle (`pending` / `processed` / `validated`). Metadata lives in per-file JSON sidecars (source of truth), replicated to SQLite for queries. Low-confidence or invalid files wait for human correction; validated files feed future model retraining. Users upload, download, and share documents through Nextcloud, which mounts the bucket as external storage.
 
 ## 2. Personas
 
@@ -38,16 +38,16 @@ Single user: the owner. Technically proficient, wants minimal manual work but ze
 
 | Status        | Meaning                                                                                                                                                                     |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| not processed | Classification confidence below threshold, or field validation failed. Object moved to the `pending/` prefix, waiting for review.                                           |
+| pending | Deterministic rules cannot determine a valid classification or required field, or validation fails. Object moved to the `pending/` prefix, waiting for review.                                           |
 | processed     | Automatically classified, fields validated, renamed and moved.                                                                                                              |
 | validated     | The user reviewed the result (confirmed or corrected template/fields). Eligible for model retraining. Terminal state for the review flow; the object was renamed and moved. |
 
 
 Transitions:
 
-- new object in `inbox/` → not processed (low confidence or invalid fields; object copied to `pending/`)
+- new object in `inbox/` → pending (deterministic rules cannot determine a valid result; object copied to `pending/`)
 - new object in `inbox/` → processed (high confidence, valid fields)
-- not processed → validated (user corrects and validates in the detail page; rename then applied)
+- pending → validated (user corrects and validates in the detail page; rename then applied)
 - processed → validated (user confirms or corrects and validates in the detail page; rename only if the user maid some changes)
 
 ## 5. Functional Requirements
@@ -64,13 +64,13 @@ Transitions:
 
 - FR2.1 Download the object from S3 and extract text with pdfplumber or PyMuPDF (choice fixed at implementation, documented in config).
 - FR2.2 Extract all available text from every page of each PDF; extraction must not stop after the first page. OCR of scanned/image-only documents remains out of scope for v1.
-- FR2.3 If extracted text is empty or below a minimum length, route the file to not processed with reason "empty text".
+- FR2.3 If extracted text is empty or below a minimum length, route the file to `pending` with reason "empty text".
 - FR2.4 Store the complete extracted text from all pages in the sidecar and replicate it to SQLite for the file's lifetime, so search, the detail page, and retraining do not need to re-download and re-parse the object.
 
 ### Epic 3 — Template classification
 
-- FR3.1 Classify the document into one of the configured templates using TF-IDF + Logistic Regression on the extracted text.
-- FR3.2 Output a confidence score per template; the top score below a configurable threshold (default 0.8) yields "unknown" and routes the file to not processed with reason "low confidence".
+- FR3.1 Classify the document into one of the configured templates using configured deterministic rules, extracted text, and reference data in the initial release. TF-IDF + Logistic Regression is a post-v1 enhancement specified in Epic 3, not a dependency of the initial release.
+- FR3.2 Output a confidence score per template; the top score below a configurable threshold (default 0.8) yields "unknown" and routes the file to `pending` with reason "low confidence".
 - FR3.3 Display the top-N template candidates with scores on the detail page.
 - FR3.4 Retrain the classifier on demand from: the initial corpus + all files with validated status. Retraining is a manual action from the dashboard, with the training date and resulting evaluation metrics stored in the sidecar-adjacent model registry and displayed.
 
@@ -94,8 +94,8 @@ The object key pattern of each template is composed from these common fields, pl
 #### 4.2 Optional fields (template-specific)
 
 - FR4.1 Each template declares in JSONC its optional fields beyond the common five. Additional fields are organized in predefined field groups (e.g., `bank_accounts`, `properties`, `contract_references`, `customer_numbers`) with their possible values. The (company, document_type) mapping specifies which field groups to extract for each document. Examples: bank statements extract from `bank_accounts` group; rent receipts extract from `properties` group.
-- FR4.2 Fill common and optional fields using per-template regexes for dates and the companies list for company matching. Additional fields are extracted from their predefined field groups using ML from the possible values. The period is computed from the emission date using the period format's granularity, format template, and offset (current/previous/following); it is recomputed whenever the emission date or period format changes.
-- FR4.3 Validate fields before renaming: emission date parses and is within a plausible range, period is non-empty and consistent with the emission date and the template's granularity/offset, emitting company recognized, document type among the template's allowed values, each optional field matches its declared format (empty optional fields are allowed). Any failure routes to not processed with the failing fields identified.
+- FR4.2 Fill common and optional fields using per-template regexes for dates and the companies list for company matching. Additional fields are extracted in the initial release using configured deterministic rules and lookup lists. ML-assisted selection from predefined possible values is a post-v1 enhancement. The period is computed from the emission date using the period format's granularity, format template, and offset (current/previous/following); it is recomputed whenever the emission date or period format changes.
+- FR4.3 Validate fields before renaming: emission date parses and is within a plausible range, period is non-empty and consistent with the emission date and the template's granularity/offset, emitting company recognized, document type among the template's allowed values, each optional field matches its declared format (empty optional fields are allowed). Any failure routes to `pending` with the failing fields identified.
 - FR4.4 Collisions in the target prefix are resolved with an incremental suffix; the final key is always the one logged.
 
 ### Epic 5 — Renaming, moving, logging
@@ -108,7 +108,7 @@ The object key pattern of each template is composed from these common fields, pl
 
 - FR6.1 A single list shows every file the system has seen, with columns: emission date, period, current object name, status, template (document family), document type, emitting company, confidence. Served from SQLite.
 - FR6.2 Filter by status, template, document type, emitting company, period, and date range; sort by any column; free-text search on object name, metadata fields, and the complete extracted text from every page of the PDF.
-- FR6.3 Status is visually distinguishable (badge): not processed, processed, validated.
+- FR6.3 Status is visually distinguishable (badge): `pending`, `processed`, `validated`.
 - FR6.4 The list shows counters: files per status, automation rate (processed / total), validation rate, plus a consistency indicator (orphaned objects, missing sidecars).
 
 ### Epic 7 — Dashboard: file detail page
@@ -141,7 +141,7 @@ The object key pattern of each template is composed from these common fields, pl
 
 - NFR1 Privacy: fully offline on self-hosted infrastructure. No network calls except the local Garage bucket, and serving the local dashboard. Dependencies must not require downloads at runtime.
 - NFR2 Performance: end-to-end processing of a standard PDF under 5 seconds on the target server, including the S3 download; dashboard file list loads under 1 s for 10,000 records (served from SQLite).
-- NFR3 Reliability: zero silent wrong renames. Every ambiguous case routes to not processed.
+- NFR3 Reliability: zero silent wrong renames. Every ambiguous case routes to `pending`.
 - NFR4 Durability: bucket versioning enabled; SQLite with WAL. A crash at any point leaves no half-renamed state: the S3 copy is a non-destructive copy-then-delete, the sidecar is written atomically, and the consistency job repairs SQLite-sidecar drift.
 - NFR5 Language: documents in French; UI in English or French (single locale acceptable in v1).
 - NFR6 Deployment: runs as a container next to the Garage deployment and the Nextcloud server; configuration via a single JSONC file (templates) and environment variables (S3 endpoint, credentials, bucket).
@@ -172,11 +172,11 @@ SQLite replica (rebuilt from sidecars):
 ## 9. Acceptance Criteria (v1)
 
 - AC1 A new PDF dropped in `inbox/` via Nextcloud with high-confidence classification and valid fields appears as processed within the poll interval, renamed and moved in the bucket.
-- AC2 A PDF below the confidence threshold appears as not processed, is moved to `pending/`; correcting and validating it on the detail page renames it and sets validated.
+- AC2 A PDF below the confidence threshold appears as `pending`, is moved to `pending/`; correcting and validating it on the detail page renames it and sets validated.
 - AC3 Opening a processed file and validating without changes sets validated without re-renaming.
 - AC4 The file list filters by status, template, document type, emitting company, period, and date; counters match the data.
 - AC5 Changing the template on the detail page keeps the common fields, reloads the optional fields per the new template schema, recomputes the period per the new template's granularity and offset, and shows the live target key preview.
-- AC5b Every file in every state carries the five common fields (template, emission date, emitting company, document type, period); a document whose fields cannot be recognized is routed to not processed rather than renamed.
+- AC5b Every file in every state carries the five common fields (template, emission date, emitting company, document type, period); a document whose fields cannot be recognized is routed to `pending` rather than renamed.
 - AC5c Period computation per template rules: a document dated 2026-09-20 under a monthly template with offset current yields "September 2026"; under a quarterly template with offset next it yields "Q4 2026"; under a yearly template it yields "2026".
 - AC6 Retraining uses initial corpus + validated files, shows metrics, and activation swaps the model without service restart.
 - AC7 Adding a template via JSONC (with example files) makes it available for classification and in the detail page dropdown, with no code change.
