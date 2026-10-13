@@ -25,7 +25,7 @@ PDFs arrive continuously in an inbox S3 prefix (dropped via Nextcloud by the use
 - PDF text extraction. All files are text-based, no OCR in v1.
 - Template classification: TF-IDF + Logistic Regression (scikit-learn) on the extracted text, with a configurable confidence threshold.
 - Per-template slot filling: regex + dateutil for dates, amounts, references; gazetteer + fuzzy matching (rapidfuzz) for counterparties, with spaCy/CamemBERT NER as fallback if needed.
-- Templates and extractors declared in configuration (YAML/JSON), not in code.
+- Templates and extractors declared in configuration (YAML format), not in code.
 - Storage: Garage (self-hosted S3-compatible, https://garagehq.deuxfleurs.fr/) with a single versioned bucket; objects addressed by S3 keys, no local filesystem for documents.
 - Metadata: one JSON sidecar object per PDF in the bucket, holding template, fields, confidence, status, and history — the source of truth. SQLite acts as a replicated index for dashboard queries, rebuildable from the sidecars.
 - Local web dashboard: all processed files with status (not processed / processed / validated), file detail page with PDF preview streamed from S3, template and field correction, validation, history, statistics.
