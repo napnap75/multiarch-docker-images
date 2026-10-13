@@ -234,6 +234,62 @@ Each event is an object with exactly the following required structure:
 
 The current validator checks that these three event properties have the correct broad types, but it does not enforce the event-name enum, timestamp parseability, or a per-event payload schema.
 
+### 4.5.2 SQLite database schema
+
+This section describes the schema and indexes created by `app/db.py` (`SQLiteFileRepository.init_db`). SQLite is a local, rebuildable metadata index; sidecars in object storage remain the source of truth. The default database path is `./renamer.db`, overridden by the `SQLITE_PATH` environment variable or the constructor's `db_path` argument. The resolved parent directory is created automatically.
+
+#### Table: `files`
+
+The implementation creates one table, `files`, using `CREATE TABLE IF NOT EXISTS`. Columns are stored as follows:
+
+| Column | SQLite type | Constraints / default | Meaning |
+|---|---|---|---|
+| `id` | `TEXT` | Primary key | Application record identifier. `FileRecord.from_metadata` prefers `sha256`, then metadata `id`, then `current_key`, then `unknown`. |
+| `sha256` | `TEXT` | `NOT NULL UNIQUE` | PDF content digest; unique across rows. |
+| `original_key` | `TEXT` | Nullable | Original object key. |
+| `current_key` | `TEXT` | Nullable | Current object key. |
+| `status` | `TEXT` | Nullable | Processing/business status. |
+| `template_name` | `TEXT` | Nullable | Selected document template. |
+| `period_format` | `TEXT` | Nullable | Period-format rule used for the document. |
+| `document_type` | `TEXT` | Nullable | Document type. |
+| `emitting_company` | `TEXT` | Nullable | Issuing company. |
+| `period` | `TEXT` | Nullable | Computed or corrected accounting/document period. |
+| `emission_date` | `TEXT` | Nullable | Document emission date. |
+| `confidence` | `REAL` | Nullable | Classification confidence. |
+| `optional_fields` | `TEXT` | Nullable | JSON-serialized object of template-specific fields. |
+| `extracted_text` | `TEXT` | Nullable | Extracted document text, used by search. |
+| `created_at` | `TEXT` | Nullable | Creation timestamp, represented as text (normally ISO 8601). |
+| `updated_at` | `TEXT` | Nullable | Last-update timestamp, represented as text (normally ISO 8601). |
+
+SQLite does not declare SQL-level defaults for these columns beyond the constraints shown. Defaults and normalization are supplied by Python: `optional_fields` is serialized with `json.dumps(..., ensure_ascii=False)`; missing timestamps are filled with the current UTC ISO timestamp. On reading, malformed `optional_fields` JSON is replaced with an empty object.
+
+#### Indexes
+
+The code explicitly creates these named indexes with `CREATE INDEX IF NOT EXISTS`:
+
+| Index | Indexed column(s) | Purpose / usage |
+|---|---|---|
+| `idx_files_status` | `status` | Supports filtering by status and status-oriented listings. |
+| `idx_files_template` | `template_name` | Supports template filtering, although substring searches using `LOWER(template_name) LIKE '%…%'` may not use this ordinary index efficiently. |
+| `idx_files_period_format` | `period_format` | Supports period-format filtering; substring/case-folded searches may likewise limit index use. |
+
+SQLite also creates an index for the `id` primary key and a unique index for `sha256` (the exact internal names are SQLite-managed). There are no explicit indexes on `current_key`, `original_key`, `emitting_company`, `document_type`, `period`, `emission_date`, `confidence`, `created_at`, or `updated_at` in this module.
+
+#### Initialization and schema evolution
+
+- Initialization is idempotent: the table and named indexes are created only if absent.
+- For an existing database, the code inspects `PRAGMA table_info(files)` and adds `period_format TEXT` if that column is missing. No other migration is implemented in this module.
+- The repository uses Python's built-in `sqlite3` API and opens a connection per operation, with `sqlite3.Row` as the row factory.
+- This module does not enable WAL mode or configure explicit foreign keys, busy timeouts, or other SQLite pragmas. Although WAL is mentioned in the architecture overview, it is not configured by `app/db.py` itself.
+
+#### Repository behavior and consistency notes
+
+- `upsert` inserts a row and updates it on conflict with `id`. Updates refresh the metadata columns and `updated_at`, but preserve the existing `created_at`. A conflict on the unique `sha256` constraint for a *different* `id` is not handled by the `ON CONFLICT(id)` clause and can fail.
+- `get_by_id` matches either `id` or `sha256`.
+- `list_files` supports filtering and pagination; the sortable columns are allow-listed in code, and unknown sort keys fall back to `updated_at`. `count_files` reuses the same filters.
+- `get_status_counts` reports total rows plus counts for `processed`, `validated`, and `not processed` (returned as `pending`).
+- `rebuild_from_sidecars` deletes all rows, scans object storage for keys ending in `.meta.json`, parses strict JSON, and repopulates the table. Invalid JSON and empty metadata are skipped. This is a destructive full rebuild, not an incremental merge; the sidecars remain the recovery source of truth.
+
 ## 4.6 Period computation
 
 A pure function of (emission date, template period rules): granularity in {day, month, quarter, year} and offset in {current, next}. Produces the human-readable period string (e.g. "Q3 2026", "September 2026", "2026"). Recomputed whenever the emission date or template changes on the detail page; the user can override the suggested value, and validation checks consistency between period, date, and template rules (FR4.2, FR4.3, AC5c).
