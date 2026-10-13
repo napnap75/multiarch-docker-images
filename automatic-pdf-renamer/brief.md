@@ -25,7 +25,7 @@ PDFs arrive continuously in an inbox S3 prefix (dropped via Nextcloud by the use
 - PDF text extraction. All files are text-based, no OCR in v1.
 - Template classification: TF-IDF + Logistic Regression (scikit-learn) on the extracted text, with a configurable confidence threshold.
 - Per-template slot filling: regex + dateutil for dates, amounts, references; gazetteer + fuzzy matching (rapidfuzz) for counterparties, with spaCy/CamemBERT NER as fallback if needed.
-- Templates and extractors declared in configuration (YAML format), not in code.
+- Templates and extractors declared in configuration (JSONC format), not in code.
 - Storage: Garage (self-hosted S3-compatible, https://garagehq.deuxfleurs.fr/) with a single versioned bucket; objects addressed by S3 keys, no local filesystem for documents.
 - Metadata: one JSON sidecar object per PDF in the bucket, holding template, fields, confidence, status, and history — the source of truth. SQLite acts as a replicated index for dashboard queries, rebuildable from the sidecars.
 - Local web dashboard: all processed files with status (not processed / processed / validated), file detail page with PDF preview streamed from S3, template and field correction, validation, history, statistics.
@@ -60,7 +60,7 @@ Single user (personal use), technically proficient. Nominal flow:
 - FR7: local web dashboard (FastAPI + React): file list, detail page, review, correction, validation, history, retraining trigger. PDFs are streamed from the bucket for preview.
 - FR7a: the dashboard shows every processed file with its status: "not processed" (confidence was too low, rename pending), "processed" (automatically renamed and moved), or "validated" (the user confirmed or corrected the result — such files are eligible for future model retraining).
 - FR7b: clicking a file opens a detail page displaying the PDF, where the user can change the template if misclassified, correct the extracted field values, and validate the result. Validation sets the status to "validated" and feeds the corrected data into the training corpus.
-- FR8: adding a new template is done through a configuration entry (YAML) plus example files, with no code changes.
+- FR8: adding a new template is done through a configuration entry (JSONC) plus example files, with no code changes.
 
 ## 7. Non-Functional Requirements
 
