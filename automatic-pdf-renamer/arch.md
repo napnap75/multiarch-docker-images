@@ -30,8 +30,7 @@ flowchart TD
   worker --> db
   worker --> model
   worker --> s3
-  poll --> s3
-  poll --> db
+  poll --> api
   nc --> s3
   user --> nc
 ```
