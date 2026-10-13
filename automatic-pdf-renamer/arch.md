@@ -41,7 +41,7 @@ flowchart TD
 - Offline-first: no runtime downloads, no external services (NFR1, AC10).
 - Zero silent wrong renames: every ambiguous path routes to not processed (NFR3).
 - Crash safety: copy-then-delete renames, atomic sidecar writes, SQLite repairable from sidecars alone (NFR4, AC8, AC9).
-- Minimal operational surface: one container, one YAML configuration file, env-var credentials (NFR6).
+- Minimal operational surface: one container, one JSONC configuration file, env-var credentials (NFR6).
 - Single user, local network: performance targets are modest (NFR2) but correctness targets are strict.
 
 ## 3. Tech Stack and Key Decisions
@@ -80,13 +80,13 @@ On startup, the process runs the recovery scan (FR1.3, FR10.3): objects in `inbo
 ```
 app/
   main.py            # FastAPI app, lifespan: recovery scan + poller start
-  config.py          # env vars + YAML configuration loading
+  config.py          # env vars + JSONC configuration loading
   storage/           # S3 interface (boto3), key helpers, collision suffix
   sidecar.py         # atomic sidecar write (temp key + copy), schema
   replica/           # SQLAlchemy models, sync, rebuild
   pipeline/          # extract (PyMuPDF), classify, fill fields, validate
   period.py          # period computation from emission date + period format config
-  templates.py       # YAML template registry (slots, period rules, key patterns)
+  templates.py       # JSONC template registry (slots, period rules, key patterns)
   rename.py          # copy-then-delete move + event logging
   jobs/              # poller, consistency scan, retrain subprocess, rebuild
   api/               # routes: files, templates, retrain, consistency, auth
@@ -276,8 +276,8 @@ Subprocesses report progress and metrics by writing a status JSON consumed by th
 ## 7. Configuration and Secrets
 
 - Templates: single JSONC file defining: document family, document types, period rules, optional field schema, extraction regexes, validation rules, key pattern, target prefix.
-- Environment: S3 endpoint, access key, secret key, bucket name, poll interval, confidence threshold, dashboard credentials, paths (SQLite file, model registry, template YAML).
-- No secrets in the YAML; no secrets in sidecars.
+- Environment: S3 endpoint, access key, secret key, bucket name, poll interval, confidence threshold, dashboard credentials, paths (SQLite file, model registry, template JSONC).
+- No secrets in the JSONC; no secrets in sidecars.
 
 ## 8. Error Handling and Crash Safety
 
