@@ -43,7 +43,7 @@ The following inventory consolidates the requirements from the project brief and
 
 - **FR-ING-01 — Polling and discovery:** poll a configurable Garage S3 `inbox/` prefix at a configurable interval; consider only PDFs and ignore temporary, hidden, and lock files.
 - **FR-ING-02 — Upload stability:** process a PDF only after its size and ETag remain stable across consecutive listings.
-- **FR-ING-03 — Restart recovery:** on startup, discover eligible inbox or pending objects that have not completed processing.
+- **FR-ING-03 — Restart recovery:** on startup, recover interrupted technical operations and discover eligible inbox objects that have not completed processing; reconcile `pending/` without automatically reprocessing documents awaiting manual correction.
 - **FR-TXT-01 — Text extraction:** extract all available text from every page of a PDF using a local library; no OCR in v1.
 - **FR-TXT-02 — Empty text handling:** route PDFs with empty or insufficient extracted text to human review with an explicit reason.
 - **FR-TXT-03 — Text persistence:** persist extracted text in the sidecar and SQLite replica so normal review and training workflows do not need to re-parse the PDF.
@@ -82,7 +82,7 @@ The following inventory consolidates the requirements from the project brief and
 - **NFR-01 Privacy:** no network calls except the local Garage bucket, local dashboard, and required local infrastructure. No runtime downloads or telemetry.
 - **NFR-02 Performance:** process a standard PDF in under 5 seconds on the target server, including the S3 download. Dashboard list loads in under 1 second for 10,000 records; the PRD also calls out a 1,000-file acceptance check.
 - **NFR-03 Reliability:** no silent invalid renames; ambiguous or invalid results are routed to review.
-- **NFR-04 Durability:** bucket versioning is enabled; SQLite uses WAL; sidecar writes are atomic; crash recovery repairs replica drift.
+- **NFR-04 Durability:** bucket versioning is enabled; SQLite uses WAL; sidecar writes are atomic; crash recovery repairs replica drift; retries are idempotent and technical failures remain distinct from business statuses.
 - **NFR-05 Language:** French documents in v1; the UI may use one locale, English or French.
 - **NFR-06 Deployment/configuration:** containerized deployment, environment variables for secrets and endpoints, and a single documented template configuration format.
 - **NFR-07 Maintainability:** Python/FastAPI, Garage-compatible S3 client, SQLite, React dashboard, local PDF text extraction, and scikit-learn for ML.
@@ -93,7 +93,7 @@ The following inventory consolidates the requirements from the project brief and
 
 - Existing correctly named documents provide the initial labeled corpus; v1 processes new incoming files only, not the historical backlog.
 - OCR, scanned PDFs, multilingual documents, cloud services, and automatic periodic retraining are out of scope for v1.
-- The three business statuses must not be overloaded with transient technical states. Processing failures and recovery steps need separate technical flags/reasons.
+- The three business statuses must not be overloaded with technical states. Transient technical failures use a separate retry/error state, with attempt count, next retry time, and error details; only document/business issues requiring manual correction use `pending`.
 - S3 object operations, sidecar updates, and SQLite writes do not form one distributed transaction. Each state transition must be recoverable and verifiable rather than relying on a claim of cross-system atomicity.
 
 ## 3. Functional Requirements Coverage Map
@@ -221,7 +221,9 @@ So that newly uploaded documents enter the pipeline automatically.
 **Then** it becomes eligible for processing  
 **And** non-PDF files, hidden files, `.part` files, and lock files are ignored  
 **And** a file that is still being uploaded is not eligible for processing prematurely  
-**And** a poller error for one object does not stop discovery of other objects.
+**And** a poller error for one object does not stop discovery of other objects
+**And** transient technical failures are retried with bounded backoff and recorded separately from business status
+**And** a technical failure alone never moves a document to `pending/`..
 
 ### Story 2.2: Extract and persist full PDF text
 
@@ -315,7 +317,9 @@ So that retries do not create duplicate processing or lose track of a file.
 **Then** objects without a completed sidecar state are discovered and resumed or flagged for review  
 **And** objects already completed are not processed again in a way that creates duplicate renames or events  
 **And** if a crash occurs between copy and delete, the recovery logic detects both keys and resolves the state from the sidecar and object hashes  
-**And** transient technical failures are distinguishable from the three business statuses.
+**And** transient technical failures are recorded separately from the three business statuses
+**And** retryable failures are retried safely with bounded backoff
+**And** exhausted retries remain visible as technical errors for recovery/operations, not as `pending` unless manual correction is independently required.
 
 ---
 
@@ -561,7 +565,7 @@ So that files are not stranded in an unknown state.
 A story is complete only when all applicable items below are satisfied:
 
 - Acceptance criteria are implemented and verified with automated tests where practical.
-- Errors and ambiguous outcomes are explicit; no invalid document is silently renamed.
+- Errors and ambiguous outcomes are explicit; no invalid document is silently renamed. Transient technical failures are retried separately and never mislabeled as `pending`.
 - Metadata changes follow the sidecar-first, SQLite-replica model and can be recovered.
 - No external network dependency is introduced.
 - Configuration, logs, and documentation are updated where behavior changes.
