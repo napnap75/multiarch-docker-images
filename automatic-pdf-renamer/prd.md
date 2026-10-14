@@ -150,14 +150,14 @@ The object key pattern of each template is composed from these common fields, pl
 
 ## 7. Data Model
 
-Sidecar JSON (source of truth), one per PDF at `{key}.meta.json`:
+Sidecar JSON (source of truth), one per PDF at `{key}.meta.json`. The `sha256` field is the unique document identifier and must match the digest of the exact PDF bytes. Any byte-level change creates a new document record; a rename/move without content changes preserves the identifier.
 
 - schema_version, sha256, original_key, current_key, status, template_name, confidence, emission_date, period, emitting_company, document_type, optional_fields (dict of additional field values), extracted_text (full text from all pages), created_at, updated_at, events[] (type: classified / renamed / validated / corrected, payload, timestamp).
 
 SQLite replica (rebuilt from sidecars):
 
-- files: id, sha256, original_key, current_key, status, template_id, confidence, emission_date, period, emitting_company, document_type, optional_fields (JSON), created_at, updated_at, extracted_text, created_at, updated_at.
-- consistency_flags: id, file_id, kind (orphaned_object, missing_sidecar, drift).
+- files: sha256 (primary key), original_key, current_key, status, template_id, confidence, emission_date, period, emitting_company, document_type, optional_fields (JSON), created_at, updated_at, extracted_text.
+- consistency_flags: id, sha256 (nullable reference to the affected PDF digest), kind (orphaned_object, missing_sidecar, drift).
 
 ## 8. API Surface (indicative)
 
