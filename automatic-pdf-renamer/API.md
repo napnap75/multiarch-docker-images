@@ -66,13 +66,13 @@ All JSON errors use the same shape:
 | GET | `/health` | Liveness check |
 | GET | `/ready` | Dependency/readiness check |
 | GET | `/files` | Browse, filter, sort, and search documents |
-| GET | `/files/{file_id}` | Document detail and metadata |
-| GET | `/files/{file_id}/pdf` | Stream the current PDF for the embedded viewer |
-| GET | `/files/{file_id}/text` | Retrieve complete extracted text |
-| POST | `/files/{file_id}/preview` | Validate proposed fields and calculate the target key without mutation |
-| PATCH | `/files/{file_id}` | Save a draft correction to metadata, without finalizing the rename |
-| POST | `/files/{file_id}/validate` | Validate metadata and apply the final move/rename if required |
-| POST | `/files/{file_id}/reprocess` | Explicitly request reprocessing of a document after user correction |
+| GET | `/files/{sha256}` | Document detail and metadata |
+| GET | `/files/{sha256}/pdf` | Stream the current PDF for the embedded viewer |
+| GET | `/files/{sha256}/text` | Retrieve complete extracted text |
+| POST | `/files/{sha256}/preview` | Validate proposed fields and calculate the target key without mutation |
+| PATCH | `/files/{sha256}` | Save a draft correction to metadata, without finalizing the rename |
+| POST | `/files/{sha256}/validate` | Validate metadata and apply the final move/rename if required |
+| POST | `/files/{sha256}/reprocess` | Explicitly request reprocessing of a document after user correction |
 | GET | `/templates` | List configured templates and their schemas |
 | GET | `/templates/{template_name}` | Get one template's schema and rules summary |
 | GET | `/stats` | Dashboard counts and rates |
@@ -217,7 +217,7 @@ The response must not claim ML confidence for a rules-only decision. `confidence
 
 ## 6. Document detail and PDF content
 
-### GET `/files/{file_id}`
+### GET `/files/{sha256}`
 
 Returns the latest sidecar-backed record, including fields needed by the detail page. SQLite may be used to locate the record, but authoritative metadata must be reconciled from the sidecar where needed.
 
@@ -261,7 +261,7 @@ Example response:
 
 The event history is read-only through this endpoint. Do not expose internal credentials or unnecessary infrastructure details.
 
-### GET `/files/{file_id}/pdf`
+### GET `/files/{sha256}/pdf`
 
 Streams the current PDF from Garage through the backend for the embedded viewer. It must not return a public or signed URL that bypasses the local service.
 
@@ -271,13 +271,13 @@ Requirements:
 - Return `404` if the object is genuinely missing and create/retain a consistency anomaly for diagnosis.
 - Never return the extracted text in place of the PDF bytes.
 
-### GET `/files/{file_id}/text`
+### GET `/files/{sha256}/text`
 
 Returns the complete extracted text stored in the sidecar/replica, including all pages. Useful for a separate text panel or troubleshooting; the UI may instead use the detail response if the payload size is acceptable.
 
 ```json
 {
-  "file_id": "file_123",
+  "sha256": "0123456789abcdef...",
   "text": "Complete text from page 1...\n\nComplete text from page 2...",
   "page_count": 8,
   "extraction_method": "pymupdf"
@@ -311,7 +311,7 @@ All mutation endpoints must validate the requested state, recompute the period f
 - `optional_fields` may contain only fields declared by the selected template. Empty optional fields are allowed where the schema permits them.
 - The server must never trust a target key supplied by the browser; it calculates the target key itself.
 
-### POST `/files/{file_id}/preview`
+### POST `/files/{sha256}/preview`
 
 Validates a proposed set of values and returns the computed period, field issues, and target key without changing the sidecar, status, or S3 objects. The UI calls this as values change (debounced by the frontend).
 
@@ -347,7 +347,7 @@ Response when invalid is still a normal validation result (`200`), not an infras
 
 The preview may report whether a collision currently exists, but the final operation must re-check for collisions immediately before copying.
 
-### PATCH `/files/{file_id}`
+### PATCH `/files/{sha256}`
 
 Saves a draft correction (template and extracted fields) without applying a final rename and without setting the status to `validated`. This is useful when the user edits a document but has not yet selected Validate. A draft save updates the sidecar first and SQLite second and records a `corrected` event. It must preserve the current S3 key until validation applies the destination.
 
@@ -360,7 +360,7 @@ State rules:
 - `processed`: remains processed while edits are draft; successful validation changes it to validated.
 - `validated`: a later correction must be explicitly supported by the implementation; if supported, it must be audited and must not silently overwrite the previous history.
 
-### POST `/files/{file_id}/validate`
+### POST `/files/{sha256}/validate`
 
 Finalizes a document after the user confirms or corrects its metadata.
 
@@ -403,7 +403,7 @@ Behavior:
 
 If required values are invalid, return `422` with field-level details and do not rename. If a storage operation is interrupted, leave a recoverable state and reconcile from the sidecar; never delete the only recoverable copy. The operation must be idempotent.
 
-### POST `/files/{file_id}/reprocess`
+### POST `/files/{sha256}/reprocess`
 
 Explicitly requests a new deterministic processing pass after a user correction or configuration change. This is not a general-purpose retry endpoint for exhausted technical failures.
 
@@ -500,7 +500,7 @@ Anomaly kinds include:
 - `sqlite_drift`: SQLite differs from the sidecar.
 - `interrupted_operation`: state suggests a copy/delete operation was interrupted.
 
-Response items should include `id`, `kind`, `file_id` when known, affected key, detection timestamp, concise details, and whether a safe repair is available. Listing anomalies must not mutate storage.
+Response items should include `id`, `kind`, `sha256` when known, affected key, detection timestamp, concise details, and whether a safe repair is available. Listing anomalies must not mutate storage.
 
 ### POST `/consistency/scan`
 
@@ -566,6 +566,6 @@ The following are implementation details, not reasons to block the API contract:
 - Exact stable ID strategy and revision token format.
 - Exact SQLite full-text search tokenizer and phrase/prefix matching semantics.
 - Whether PDF byte-range requests are supported by the chosen S3 client/viewer.
-- Whether `POST /files/{file_id}/reprocess` runs synchronously or returns a job.
+- Whether `POST /files/{sha256}/reprocess` runs synchronously or returns a job.
 - Exact representation of technical processing diagnostics after retries are exhausted.
-- Whether the dashboard consumes the full text through `GET /files/{file_id}` or the dedicated `/text` endpoint.
+- Whether the dashboard consumes the full text through `GET /files/{sha256}` or the dedicated `/text` endpoint.
