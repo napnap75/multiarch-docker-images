@@ -150,7 +150,7 @@ The object key pattern of each template is composed from these common fields, pl
 
 ## 7. Data Model
 
-Sidecar JSON (source of truth), one per PDF at `{key}.meta.json`. The `sha256` field is the unique document identifier and must match the digest of the exact PDF bytes. Any byte-level change creates a new document record; a rename/move without content changes preserves the identifier.
+Sidecar JSON (source of truth), one per PDF at `{key}.meta.json`. The `sha256` field is the unique document identifier and must match the digest of the exact PDF bytes. Any byte-level change creates a new document record; a rename/move without content changes preserves the identifier. Identical PDF bytes map to the same record, so ingestion must detect an existing SHA-256 and handle it as a duplicate rather than create a second row.
 
 - schema_version, sha256, original_key, current_key, status, template_name, confidence, emission_date, period, emitting_company, document_type, optional_fields (dict of additional field values), extracted_text (full text from all pages), created_at, updated_at, events[] (type: classified / renamed / validated / corrected, payload, timestamp).
 
