@@ -162,9 +162,9 @@ SQLite replica (rebuilt from sidecars):
 ## 8. API Surface (indicative)
 
 - GET /files?status=&template=&q=&page= — list with filters (from SQLite).
-- GET /files/{id} — detail: text, fields, candidates, current key.
-- GET /files/{id}/pdf — stream the PDF from the bucket for the viewer.
-- POST /files/{id}/validate — body: template_id, fields; applies rename if needed, sets validated.
+- GET /files/{sha256} — detail: text, fields, candidates, current key.
+- GET /files/{sha256}/pdf — stream the PDF from the bucket for the viewer.
+- POST /files/{sha256}/validate — body: template_id, fields; applies rename if needed, sets validated.
 - GET /templates — configured templates.
 - POST /retrain — starts training; GET /retrain/status; POST /retrain/{id}/activate.
 - GET /consistency — list anomalies; POST /consistency/rebuild — rebuild SQLite from sidecars.
