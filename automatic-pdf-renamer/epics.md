@@ -56,7 +56,7 @@ The following inventory consolidates the requirements from the project brief and
 - **FR-FLD-05 — Period computation:** derive period from emission date and template/company/document-type rules, including granularity, formatting, and offset.
 - **FR-FLD-06 — Validation:** validate dates, companies, document types, periods, and optional field formats before applying a rename. Invalid or missing required values must be reviewed.
 - **FR-STO-01 — Garage storage:** use a versioned Garage S3 bucket and the `inbox/`, `pending/`, and `files/` key areas.
-- **FR-STO-02 — Sidecar source of truth:** store a JSON sidecar for each PDF with identifiers, current and original keys, status, extracted fields/text, confidence where applicable, timestamps, and event history.
+- **FR-STO-02 — Sidecar source of truth:** store a JSON sidecar for each PDF with SHA-256 as its unique document identifier, current and original keys, status, extracted fields/text, confidence where applicable, timestamps, and event history. Any byte-level PDF content change creates a new identity; a rename/move preserving bytes does not.
 - **FR-STO-03 — SQLite replica:** mirror sidecar data into SQLite for fast listing, filtering, search, and statistics.
 - **FR-STO-04 — Safe moves:** move objects using copy-before-delete, resolve destination collisions with an incremental suffix, and record the actual final key.
 - **FR-STO-05 — Operation audit trail:** preserve sufficient history and key information to trace file moves and renames. A user-facing undo/rollback feature for file renames is out of scope.
