@@ -202,7 +202,6 @@ Response:
       "emitting_company": "EDF",
       "document_type": "invoice",
       "confidence": null,
-      "review_reason": "insufficient deterministic evidence",
       "updated_at": "2026-10-14T07:00:00Z"
     }
   ],
