@@ -185,7 +185,7 @@ The following is a JSONC-readable example. Comments explain the fields and are n
 | Field | Type | Presence and meaning |
 |---|---|---|
 | `schema_version` | string | Required. Must equal `"1.0"` in the current implementation. |
-| `sha256` | string | Required. SHA-256 digest of the PDF content; used to identify content and support safe resume checks. |
+| `sha256` | string | Required. SHA-256 digest of the exact PDF bytes and canonical document identifier. Any byte-level content change creates a new identifier; renames/moves that preserve bytes do not. |
 | `original_key` | string | Required. S3 key where the PDF was first registered, retained across renames. |
 | `current_key` | string | Required. S3 key currently associated with the PDF. |
 | `status` | string | Required. One of `pending`, `processed`, or `validated`. |
@@ -241,8 +241,7 @@ The implementation should create one table, `files`. Columns are stored as follo
 
 | Column | SQLite type | Constraints / default | Meaning |
 |---|---|---|---|
-| `id` | `TEXT` | Primary key | Application record identifier. |
-| `sha256` | `TEXT` | `NOT NULL UNIQUE` | PDF content digest; unique across rows. |
+| `sha256` | `TEXT` | `PRIMARY KEY` | SHA-256 digest of exact PDF bytes; canonical document identifier. |
 | `original_key` | `TEXT` | Nullable | Original object key. |
 | `current_key` | `TEXT` | Nullable | Current object key. |
 | `status` | `TEXT` | Nullable | Processing/business status. |
@@ -268,7 +267,7 @@ The code should creates these named indexes :
 |---|---|---|
 | `idx_files_status` | `status` | Supports filtering by status and status-oriented listings. |
 
-SQLite also creates an index for the `id` primary key and a unique index for `sha256` (the exact internal names are SQLite-managed).
+SQLite creates the primary-key index for `sha256`.
 
 ## 4.6 Period computation
 
