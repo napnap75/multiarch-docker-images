@@ -198,7 +198,7 @@ Response:
       "status": "pending",
       "template_name": "invoice",
       "emission_date": "2026-09-20",
-      "period": "September 2026",
+      "period_format": "monthly",
       "emitting_company": "EDF",
       "document_type": "invoice",
       "confidence": null,
@@ -233,7 +233,7 @@ Example response:
   "template_name": "invoice",
   "period_format": "monthly",
   "emission_date": "2026-09-20",
-  "period": "September 2026",
+  "period_format": "monthly",
   "emitting_company": "EDF",
   "document_type": "invoice",
   "optional_fields": {"invoice_number": null, "amount": 125.5},
@@ -293,7 +293,7 @@ All mutation endpoints must validate the requested state, recompute the period f
   "emission_date": "2026-09-20",
   "emitting_company": "EDF",
   "document_type": "invoice",
-  "period": "September 2026",
+  "period_format": "monthly",
   "optional_fields": {
     "invoice_number": "INV-2026-001",
     "amount": 125.5
@@ -302,7 +302,7 @@ All mutation endpoints must validate the requested state, recompute the period f
 ```
 
 - `template_name`, `emission_date`, `emitting_company`, and `document_type` must conform to the selected template's schema.
-- `period` is calculated from `emission_date` and the selected template's period rules. The UI may send a user-edited period, but the server must validate it against the configured rule and reject inconsistent values.
+- `period_format` specifies how the period is derived from `emission_date` under the selected template's rules. The server calculates `period`; clients do not supply it.
 - `optional_fields` may contain only fields declared by the selected template. Empty optional fields are allowed where the schema permits them.
 - The server must never trust a target key supplied by the browser; it calculates the target key itself.
 
@@ -319,9 +319,7 @@ Response when valid:
   "valid": true,
   "computed_period": "September 2026",
   "target_key": "files/edf/2026/09/invoice-INV-2026-001.pdf",
-  "destination_prefix": "files/edf/2026/09/",
-  "collision": false,
-  "field_issues": []
+  "error": null
 }
 ```
 
@@ -333,14 +331,11 @@ Response when invalid is still a normal validation result (`200`), not an infras
   "computed_period": "September 2026",
   "target_key": null,
   "destination_prefix": null,
-  "collision": false,
-  "field_issues": [
-    {"field": "emitting_company", "code": "unknown_company", "message": "Select a configured company."}
-  ]
+  "error": "Select a configured company."
 }
 ```
 
-The preview may report whether a collision currently exists, but the final operation must re-check for collisions immediately before copying.
+The preview response contains the computed target key. The final operation must check for destination-key collisions immediately before copying.
 
 ### PATCH `/files/{sha256}`
 
@@ -367,7 +362,7 @@ Request:
   "emission_date": "2026-09-20",
   "emitting_company": "EDF",
   "document_type": "invoice",
-  "period": "September 2026",
+  "period_format": "monthly",
   "optional_fields": {"invoice_number": "INV-2026-001", "amount": 125.5},
   "expected_revision": "optional-sidecar-revision"
 }
