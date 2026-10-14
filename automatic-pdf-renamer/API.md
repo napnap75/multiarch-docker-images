@@ -37,27 +37,23 @@ Unknown filters or unsupported sort fields return `422 Unprocessable Entity`. Se
 
 ### 2.3 Standard error response
 
-All JSON errors use the same shape:
+HTTP errors return a simple human-readable text message in the response body, with `Content-Type: text/plain; charset=utf-8`. Error responses do not use a JSON envelope or include field-level details.
 
-```json
-{
-  "error": {
-    "code": "validation_error",
-    "message": "One or more fields are invalid.",
-    "details": [
-      {"field": "emission_date", "code": "invalid_date", "message": "Expected YYYY-MM-DD."}
-    ],
-    "request_id": "optional-correlation-id"
-  }
-}
+Example response body:
+
+```text
+The emission date must use YYYY-MM-DD format.
 ```
 
+HTTP status codes distinguish error categories:
 - `400`: malformed request or invalid operation for the current state.
 - `404`: unknown file, template, job, or resource.
 - `409`: state conflict, such as attempting to start a job of the same kind while one is running, or validating a stale edit.
-- `422`: request schema or field validation failure; response may identify individual fields.
-- `503`: required local dependency unavailable (Garage or SQLite).
-- `500`: unexpected server error. Do not return credentials, stack traces, or secrets to the browser.
+- `422`: request schema or field validation failure. Return a concise plain-text explanation.
+- `503`: required local dependency unavailable (Garage or SQLite). Return a concise plain-text message without infrastructure details.
+- `500`: unexpected server error. Return a generic plain-text message; do not expose credentials, stack traces, or secrets to the browser.
+
+This convention applies to HTTP error responses from every endpoint. Successful responses retain the format specified by each endpoint (JSON or PDF bytes).
 
 ## 3. Endpoint overview
 
@@ -119,7 +115,7 @@ Example response:
 }
 ```
 
-Return `503` with `status: "not_ready"` if a required dependency is unavailable.
+Return `503` with a plain-text error message if a required dependency is unavailable.
 
 ### GET `/ingestion/status`
 
@@ -390,7 +386,7 @@ Behavior:
 5. Persist the authoritative sidecar, including corrected values and a `validated` event, then synchronize SQLite.
 6. Return the final key and status.
 
-If required values are invalid, return `422` with field-level details and do not rename. If a storage operation is interrupted, leave a recoverable state and reconcile from the sidecar; never delete the only recoverable copy. The operation must be idempotent.
+If required values are invalid, return `422` with a concise plain-text error message and do not rename. If a storage operation is interrupted, leave a recoverable state and reconcile from the sidecar; never delete the only recoverable copy. The operation must be idempotent.
 
 ### POST `/files/{sha256}/reprocess`
 
