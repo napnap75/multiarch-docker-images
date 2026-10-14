@@ -233,7 +233,7 @@ Example response:
   "template_name": "invoice",
   "period_format": "monthly",
   "emission_date": "2026-09-20",
-  "period_format": "monthly",
+  "period": "September 2026",
   "emitting_company": "EDF",
   "document_type": "invoice",
   "optional_fields": {"invoice_number": null, "amount": 125.5},
@@ -308,7 +308,7 @@ All mutation endpoints must validate the requested state, recompute the period f
 
 ### POST `/files/{sha256}/preview`
 
-Validates a proposed set of values and returns the computed period, field issues, and target key without changing the sidecar, status, or S3 objects. The UI calls this as values change (debounced by the frontend).
+Validates a proposed set of values and returns the computed period, target key, and a simple error message if validation fails without changing the sidecar, status, or S3 objects. The UI calls this as values change (debounced by the frontend).
 
 Request: shared request fields above.
 
@@ -330,7 +330,6 @@ Response when invalid is still a normal validation result (`200`), not an infras
   "valid": false,
   "computed_period": "September 2026",
   "target_key": null,
-  "destination_prefix": null,
   "error": "Select a configured company."
 }
 ```
