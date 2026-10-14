@@ -2,6 +2,8 @@
 
 ## 1. Vision
 
+**Document identity:** the SHA-256 digest of the exact PDF bytes is the unique identifier. Any byte-level change to a PDF creates a new document identity; moving or renaming an unchanged PDF does not.
+
 A personal, 100% offline tool that watches an S3 bucket hosted on a self-hosted Garage storage cluster, automatically identifies the type of each incoming PDF (invoice, purchase order, contract, etc.) from its content, applies the corresponding naming template by extracting the fields (date, counterparty, reference, amount), and moves the object into an organized S3 prefix structure. Users upload, download, and share files through Nextcloud, which mounts the bucket as external storage. Uncertain or incomplete results go through human review in a local web dashboard. Every operation is logged in JSON sidecar files (source of truth) and replicated to SQLite.
 
 ## 2. Problem and Context
