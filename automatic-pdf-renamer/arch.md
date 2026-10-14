@@ -322,7 +322,7 @@ sequenceDiagram
   participant API as FastAPI
   participant S3 as Garage
   participant DB as SQLite
-  U->>API: POST /files/{id}/validate (template, fields)
+  U->>API: POST /files/{sha256}/validate (template, fields)
   API->>API: Validate fields, compute target key
   alt key changed
     API->>S3: Copy object to target key
