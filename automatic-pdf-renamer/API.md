@@ -22,7 +22,7 @@ This document defines the HTTP API consumed by the local web dashboard and the o
 
 Requests and responses use UTF-8 JSON unless an endpoint streams a PDF or returns an HTTP error. Timestamps are ISO 8601 UTC strings. Dates use `YYYY-MM-DD`. S3 object keys are opaque strings, not filesystem paths.
 
-`sha256` is the canonical unique identifier for a managed PDF, computed from the exact PDF bytes. All document endpoints use this digest instead of a separate `file_id` or database `id`. Renaming/moving a PDF without changing its bytes preserves the identifier. Any byte-level content change creates a new document record with a new SHA-256; references to the previous digest must not be silently rewritten. Compute and verify the digest during ingestion and consistency checks.
+`sha256` is the canonical unique identifier for a managed PDF, computed from the exact PDF bytes. All document endpoints use this digest instead of a separate `file_id` or database `id`. Renaming/moving a PDF without changing its bytes preserves the identifier. Any byte-level content change creates a new document record with a new SHA-256; references to the previous digest must not be silently rewritten. If identical bytes are imported again, ingestion must detect the existing digest and treat the import as a duplicate rather than create a second document record. Compute and verify the digest during ingestion and consistency checks.
 
 ### 2.2 Pagination, sorting, filtering
 
