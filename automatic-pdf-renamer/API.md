@@ -239,10 +239,6 @@ Example response:
   "optional_fields": {"invoice_number": null, "amount": 125.5},
   "extracted_text_available": true,
   "extracted_text_length": 12345,
-  "review_reason": "insufficient deterministic evidence",
-  "field_issues": [
-    {"field": "document_type", "code": "ambiguous_value", "message": "Choose the correct document type."}
-  ],
   "target_key_preview": null,
   "confidence": null,
   "events": [
