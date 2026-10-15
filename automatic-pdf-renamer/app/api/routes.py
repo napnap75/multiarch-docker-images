@@ -368,7 +368,7 @@ async def edit_file(
 
     source_sidecar_key = ""
     sidecar_metadata: dict[str, Any] = {}
-    known_sidecar_key = f"{record.current_key}.meta.json" if record.current_key else ""
+    known_sidecar_key = f"{record.current_key.split('.')[0]}.meta.json" if record.current_key.endswith(".pdf") else f"{record.current_key}.meta.json"
     if known_sidecar_key:
         candidate = _parse_file_metadata(storage.get_object(known_sidecar_key))
         if candidate and candidate.get("sha256") in {record.sha256, record.id}:
