@@ -24,7 +24,7 @@ Single user: the owner. Technically proficient, wants minimal manual work but ze
 
 - Each PDF has a sidecar JSON object holding: sha256, original key, current key, status, template, document type, emission date, period, emitting company, all optional fields, confidence, and the full event history (classified, renamed, validated, corrected).
 - Sidecar is updated atomically on every state change: write the new sidecar to a temp key, copy over the final sidecar key.
-- SQLite mirrors the sidecar content in queryable tables for the dashboard (lists, filters, statistics). It is a cache/replica, never authoritative. Any sidecar↔SQLite divergence is resolved in favor of the sidecar.
+- SQLite mirrors the sidecar content in queryable tables for the dashboard (lists, filters, search, and consistency diagnostics). It is a cache/replica, never authoritative. Any sidecar↔SQLite divergence is resolved in favor of the sidecar.
 - A rebuild command reconstructs the full SQLite database by scanning all sidecars; a consistency job detects PDFs without sidecars (orphaned) and sidecars without PDFs (missing object) and flags them in the dashboard.
 
 ### 3.3 Nextcloud integration
@@ -94,7 +94,7 @@ The object key pattern of each template is composed from these common fields, pl
 #### 4.2 Optional fields (template-specific)
 
 - FR4.1 Each template declares in JSONC its optional fields beyond the common five. Additional fields are organized in predefined field groups (e.g., `bank_accounts`, `properties`, `contract_references`, `customer_numbers`) with their possible values. The (company, document_type) mapping specifies which field groups to extract for each document. Examples: bank statements extract from `bank_accounts` group; rent receipts extract from `properties` group.
-- FR4.2 Fill common and optional fields using per-template regexes for dates and the companies list for company matching. Additional fields are extracted in the initial release using configured deterministic rules and lookup lists. ML-assisted selection from predefined possible values is a post-v1 enhancement. The period is computed from the emission date using the period format's granularity, format template, and offset (current/previous/following); it is recomputed whenever the emission date or period format changes.
+- FR4.2 Fill common and optional fields using per-template regexes for dates and the companies list for company matching. Additional fields are extracted in the initial release using configured deterministic rules and lookup lists. ML-assisted selection from predefined possible values is a post-v1 enhancement. The period is computed server-side from the emission date using the configured granularity, format template, and offset (current/previous/following); it is recomputed whenever the emission date or applicable template rules change and cannot be edited or submitted by the user.
 - FR4.3 Validate fields before renaming: emission date parses and is within a plausible range, period is non-empty and consistent with the emission date and the template's granularity/offset, emitting company recognized, document type among the template's allowed values, each optional field matches its declared format (empty optional fields are allowed). Any failure routes to `pending` with the failing fields identified.
 - FR4.4 Collisions in the target prefix are resolved with an incremental suffix; the final key is always the one logged.
 
@@ -106,25 +106,25 @@ The object key pattern of each template is composed from these common fields, pl
 
 ### Epic 6 — Dashboard: file list
 
-- FR6.1 A single list shows every file the system has seen, with columns: emission date, period, current object name, status, template (document family), document type, emitting company, confidence. Served from SQLite.
+- FR6.1 A single list shows every file the system has seen, with columns: emission date, period, current object name, status, template (document family), document type, emitting company, and confidence where applicable. Served from SQLite.
 - FR6.2 Filter by status, template, document type, emitting company, period, and date range; sort by any column; free-text search on object name, metadata fields, and the complete extracted text from every page of the PDF.
 - FR6.3 Status is visually distinguishable (badge): `pending`, `processed`, `validated`.
-- FR6.4 The list shows counters: files per status, automation rate (processed / total), validation rate, plus a consistency indicator (orphaned objects, missing sidecars).
+- FR6.4 The list exposes a consistency indicator for known anomalies (orphaned objects, missing sidecars), without a separate statistics dashboard or aggregate KPI counters.
 
 ### Epic 7 — Dashboard: file detail page
 
 - FR7.1 Clicking a file in the list opens a detail page.
 - FR7.2 The detail page displays the PDF (embedded viewer), streamed from the bucket by the backend, alongside the extracted data.
 - FR7.3 The user can change the template (dropdown of configured templates, showing the classifier's top candidates and scores).
-- FR7.4 The detail page always shows the five common fields (template, emission date, emitting company, document type, period) plus the current template's optional fields; the user can correct each value inline; changing the template reloads the optional fields with the new template's schema and best-effort re-extraction, keeping the common field values, and recomputes the period from the new template's granularity and offset. The period is editable and displayed as a free-text field with a suggested value derived from the emission date.
+- FR7.4 The detail page always shows the five common fields (template, emission date, emitting company, document type, period) plus the current template's optional fields; the user can correct editable values inline. Changing the template reloads the optional fields with the new template's schema and best-effort re-extraction, keeps the other common field values, and recomputes the period from the emission date and the selected rules. The period is read-only, calculated by the server, and never accepted as user input.
 - FR7.5 A preview shows the target object key and destination prefix resulting from the current values, updating live as fields change.
 - FR7.6 A validate action applies the rename/move (if not already done), sets the status to validated, and records the corrected values as training data.
 
-### Epic 8 — Template management
+### Epic 8 — Configuration file management
 
-- FR8.1 Templates are defined in JSONC configuration files.
-- FR8.2 Adding a template = JASONC entry (including the period granularity and offset) + example files; no code change.
-- FR8.3 The dashboard lists configured templates with their slot definitions, period rules, target prefix, and the count of corpus files per template.
+- FR8.1 Templates and extraction rules are defined in a JSONC configuration file; there is no separate template-management API or template registry endpoint.
+- FR8.2 Adding or changing a template means editing the JSONC configuration file (including period granularity and offset) plus example files; no code change is required.
+- FR8.3 The dashboard configuration editor retrieves the current JSONC file and uploads a modified version through dedicated configuration endpoints. The server validates the file before replacing the active configuration and reloading the in-memory template registry.
 
 ### Epic 9 — Retraining
 
@@ -165,8 +165,9 @@ SQLite replica (rebuilt from sidecars):
 - GET /files/{sha256} — detail: text, fields, candidates, current key.
 - GET /files/{sha256}/pdf — stream the PDF from the bucket for the viewer.
 - POST /files/{sha256}/validate — body: template_id, fields; applies rename if needed, sets validated.
-- GET /templates — configured templates.
-- POST /retrain — starts training; GET /retrain/status; POST /retrain/{id}/activate.
+- GET /config — retrieve the current JSONC configuration file.
+- PUT /config — validate and save a replacement JSONC configuration file, then reload the configuration.
+- POST /retrain — starts training and returns a generic job ID; GET /jobs/{job_id} reports status and result.
 - GET /consistency — list anomalies; POST /consistency/rebuild — rebuild SQLite from sidecars.
 
 ## 9. Acceptance Criteria (v1)
@@ -174,12 +175,12 @@ SQLite replica (rebuilt from sidecars):
 - AC1 A new PDF dropped in `inbox/` via Nextcloud whose deterministic rules yield an unambiguous template and valid fields appears as processed within the poll interval, renamed and moved in the bucket.
 - AC2 A PDF that cannot be classified unambiguously by deterministic rules, or has missing/invalid required fields, appears as `pending` and is moved to `pending/`; correcting and validating it on the detail page renames it and sets validated.
 - AC3 Opening a processed file and validating without changes sets validated without re-renaming.
-- AC4 The file list filters by status, template, document type, emitting company, period, and date; counters match the data.
-- AC5 Changing the template on the detail page keeps the common fields, reloads the optional fields per the new template schema, recomputes the period per the new template's granularity and offset, and shows the live target key preview.
+- AC4 The file list filters by status, template, document type, emitting company, period, and date; the consistency indicator matches the known anomalies.
+- AC5 Changing the template on the detail page keeps the other common fields, reloads the optional fields per the new template schema, recomputes the read-only period per the new template's granularity and offset, and shows the live target key preview.
 - AC5b Every file in every state carries the five common fields (template, emission date, emitting company, document type, period); a document whose fields cannot be recognized is routed to `pending` rather than renamed.
 - AC5c Period computation per template rules: a document dated 2026-09-20 under a monthly template with offset current yields "September 2026"; under a quarterly template with offset next it yields "Q4 2026"; under a yearly template it yields "2026".
-- AC6 Retraining uses initial corpus + validated files, shows metrics, and activation swaps the model without service restart.
-- AC7 Adding a template via JSONC (with example files) makes it available for classification and in the detail page dropdown, with no code change.
+- AC6 Retraining uses the initial corpus + validated files, runs as a generic asynchronous job queried through `GET /jobs/{job_id}`, shows metrics when complete, and activation swaps the model without service restart.
+- AC7 Editing and uploading the JSONC configuration (with example files) makes a new template available for classification and correction; the server validates the replacement before activating it, with no code change.
 - AC8 Killing the service mid-processing leaves a recoverable state: startup recovery and the consistency job reconcile object keys, sidecars, and SQLite; retries do not duplicate renames or delete the only recoverable copy.
 - AC9 Deleting the SQLite database entirely and running the rebuild command restores a fully functional dashboard from the sidecars alone.
 - AC10 No network traffic other than the local Garage bucket, local Nextcloud, and local dashboard serving (verifiable with a firewall audit).
