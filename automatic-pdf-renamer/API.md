@@ -66,12 +66,7 @@ This convention applies to HTTP error responses from every endpoint. Successful 
 | GET | `/files/{sha256}/pdf` | Stream the current PDF for the embedded viewer |
 | GET | `/files/{sha256}/text` | Retrieve complete extracted text |
 | POST | `/files/{sha256}/preview` | Validate proposed fields and calculate the target key without mutation |
-| PATCH | `/files/{sha256}` | Save a draft correction to metadata, without finalizing the rename |
 | POST | `/files/{sha256}/validate` | Validate metadata and apply the final move/rename if required |
-| POST | `/files/{sha256}/reprocess` | Explicitly request reprocessing of a document after user correction |
-| GET | `/templates` | List configured templates and their schemas |
-| GET | `/templates/{template_name}` | Get one template's schema and rules summary |
-| GET | `/stats` | Dashboard counts and rates |
 | GET | `/consistency` | List known storage/index anomalies |
 | POST | `/consistency/scan` | Start a consistency scan |
 | POST | `/consistency/rebuild` | Rebuild SQLite from authoritative sidecars |
@@ -233,8 +228,6 @@ Example response:
   "emitting_company": "EDF",
   "document_type": "invoice",
   "optional_fields": {"invoice_number": null, "amount": 125.5},
-  "extracted_text_available": true,
-  "extracted_text_length": 12345,
   "target_key_preview": null,
   "confidence": null,
   "events": [
@@ -246,7 +239,6 @@ Example response:
   ],
   "created_at": "2026-10-14T07:00:00Z",
   "updated_at": "2026-10-14T07:00:00Z",
-  "revision": "optional-sidecar-revision"
 }
 ```
 
@@ -270,12 +262,8 @@ Returns the complete extracted text stored in the sidecar/replica, including all
 {
   "sha256": "0123456789abcdef...",
   "text": "Complete text from page 1...\n\nComplete text from page 2...",
-  "page_count": 8,
-  "extraction_method": "pymupdf"
 }
 ```
-
-`page_count` and `extraction_method` may be null if not recorded. OCR is not performed.
 
 ## 7. Preview, correction, and validation
 
@@ -330,20 +318,7 @@ Response when invalid is still a normal validation result (`200`), not an infras
 }
 ```
 
-The preview response contains the computed target key. The final operation must check for destination-key collisions immediately before copying.
-
-### PATCH `/files/{sha256}`
-
-Saves a draft correction (template and extracted fields) without applying a final rename and without setting the status to `validated`. This is useful when the user edits a document but has not yet selected Validate. A draft save updates the sidecar first and SQLite second and records a `corrected` event. It must preserve the current S3 key until validation applies the destination.
-
-Request: shared request fields, plus optional `expected_revision` to reject stale edits.
-
-Response: updated document detail with a new `revision`, current key, and updated fields.
-
-State rules:
-- `pending`: remains pending while being edited; it is moved to its final target only on successful validation.
-- `processed`: remains processed while edits are draft; successful validation changes it to validated.
-- `validated`: a later correction must be explicitly supported by the implementation; if supported, it must be audited and must not silently overwrite the previous history.
+The preview response contains the computed target key.
 
 ### POST `/files/{sha256}/validate`
 
@@ -359,7 +334,6 @@ Request:
   "document_type": "invoice",
   "period_format": "monthly",
   "optional_fields": {"invoice_number": "INV-2026-001", "amount": 125.5},
-  "expected_revision": "optional-sidecar-revision"
 }
 ```
 
@@ -387,90 +361,6 @@ Behavior:
 6. Return the final key and status.
 
 If required values are invalid, return `422` with a concise plain-text error message and do not rename. If a storage operation is interrupted, leave a recoverable state and reconcile from the sidecar; never delete the only recoverable copy. The operation must be idempotent.
-
-### POST `/files/{sha256}/reprocess`
-
-Explicitly requests a new deterministic processing pass after a user correction or configuration change. This is not a general-purpose retry endpoint for exhausted technical failures.
-
-Request:
-
-```json
-{"reason": "user_corrected_metadata"}
-```
-
-Response: `202 Accepted` with a job/operation identifier, or `200` if the implementation runs it synchronously.
-
-Rules:
-- Intended for documents awaiting manual correction, especially `pending`.
-- Does not automatically re-run on every dashboard load or service restart.
-- The pipeline remains deterministic in the initial release.
-- If the document still requires correction, it remains `pending`; if valid and successfully renamed by the pipeline, it becomes `processed`.
-- The endpoint must be idempotent and must not create duplicate rename events for the same completed operation.
-
-## 8. Templates
-
-### GET `/templates`
-
-Lists configured templates and enough schema to build the detail editor.
-
-Example:
-
-```json
-{
-  "items": [
-    {
-      "name": "invoice",
-      "label": "Invoice",
-      "document_types": ["invoice", "credit_note"],
-      "common_fields": ["template_name", "emission_date", "emitting_company", "document_type", "period"],
-      "optional_fields": [
-        {"name": "invoice_number", "type": "string", "required": false},
-        {"name": "amount", "type": "number", "required": false}
-      ],
-      "period_rules": {
-        "granularity": "month",
-        "format": "{month_name} {year}",
-        "offset": "current"
-      },
-      "target_prefix": "files/",
-      "key_pattern": "{emitting_company}/{year}/{month}/{document_type}-{invoice_number}.pdf",
-      "corpus_count": 42
-    }
-  ],
-  "source": "configured_jsonc",
-  "loaded_at": "2026-10-14T07:00:00Z"
-}
-```
-
-### GET `/templates/{template_name}`
-
-Returns one template's full editor-facing schema, document types, optional fields, period rules, destination prefix, key pattern, and human-readable summaries of configured extraction/validation rules. Do not return raw secrets; template configuration must not contain them.
-
-Templates are configuration-driven. Adding/editing template definitions is not an API write operation in v1; configuration is managed on the server and loaded on startup/reload according to implementation. Invalid configuration must not partially replace the active registry.
-
-## 9. Dashboard statistics
-
-### GET `/stats`
-
-Example response:
-
-```json
-{
-  "generated_at": "2026-10-14T07:00:00Z",
-  "total_files": 500,
-  "by_status": {"pending": 12, "processed": 420, "validated": 68},
-  "automation_rate": 0.84,
-  "validation_rate": 0.136,
-  "consistency": {
-    "orphaned_objects": 1,
-    "missing_sidecars": 0,
-    "sqlite_drift": 2,
-    "last_scan_at": "2026-10-14T06:50:00Z"
-  }
-}
-```
-
-Define rate denominators in the implementation and keep them consistent across the UI; for example, automation rate is `processed / total_files`. If a statistic is stale or unavailable, include a freshness indicator or null rather than presenting it as current. Counts should be derived from the same indexed dataset as the file list.
 
 ## 10. Consistency and maintenance jobs
 
@@ -551,6 +441,4 @@ The following are implementation details, not reasons to block the API contract:
 - Exact stable ID strategy and revision token format.
 - Exact SQLite full-text search tokenizer and phrase/prefix matching semantics.
 - Whether PDF byte-range requests are supported by the chosen S3 client/viewer.
-- Whether `POST /files/{sha256}/reprocess` runs synchronously or returns a job.
 - Exact representation of technical processing diagnostics after retries are exhausted.
-- Whether the dashboard consumes the full text through `GET /files/{sha256}` or the dedicated `/text` endpoint.
