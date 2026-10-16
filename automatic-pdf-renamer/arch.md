@@ -109,7 +109,10 @@ flowchart TD
   unamb -- yes --> fill["Fill fields: regexes, companies list, additional fields from groups, period from emission date"]
   fill --> valid{"Fields valid?"}
   valid -- no --> pending
-  valid -- yes --> rename["Compute key, copy-then-delete, write sidecar + SQLite"]
+  valid -- yes --> rename["Compute key and copy object to target"]
+  rename --> sidecar["Persist sidecar with target key and event"]
+  sidecar --> delete["Delete source only after sidecar is durable"]
+  delete --> sqlite["Synchronize SQLite replica"]
   rename --> done["Status: processed"]
   pending --> wait["Status: pending (sidecar with failing fields)"]
 ```
