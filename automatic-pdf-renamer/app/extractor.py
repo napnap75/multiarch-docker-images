@@ -19,17 +19,16 @@ class TextExtractionError(Exception):
     pass
 
 
-def extract_first_page_text(pdf_bytes: bytes) -> str:
-    """Extract text from the first page of a PDF.
+def extract_document_text(pdf_bytes: bytes) -> str:
+    """Extract text from every page of a PDF.
 
     Uses PyMuPDF for fast text extraction (PRD stack decision).
-    Extracts only the first page as per FR2.2.
 
     Args:
         pdf_bytes: The PDF file content as bytes.
 
     Returns:
-        The extracted text from the first page.
+        The extracted text from the complete document, in page order.
 
     Raises:
         TextExtractionError: If extraction fails or PDF is invalid.
@@ -42,33 +41,34 @@ def extract_first_page_text(pdf_bytes: bytes) -> str:
         )
 
     try:
-        # Open PDF from bytes
         doc = fitz.open(stream=pdf_bytes)
+        try:
+            if len(doc) == 0:
+                logger.warning("PDF has no pages")
+                return ""
 
-        if len(doc) == 0:
-            logger.warning("PDF has no pages")
-            return ""
-
-        # Extract text from first page only (FR2.2)
-        first_page = doc[0]
-        text = first_page.get_text()
-
-        doc.close()
-        return text
+            return "\n".join(page.get_text() for page in doc)
+        finally:
+            doc.close()
 
     except Exception as e:
         logger.error(f"Failed to extract text from PDF: {e}")
         raise TextExtractionError(f"Text extraction failed: {e}") from e
 
 
-def extract_first_page_text_from_file(filepath: str) -> str:
-    """Extract text from the first page of a PDF file.
+def extract_first_page_text(pdf_bytes: bytes) -> str:
+    """Compatibility wrapper for extract_document_text."""
+    return extract_document_text(pdf_bytes)
+
+
+def extract_document_text_from_file(filepath: str) -> str:
+    """Extract text from every page of a PDF file.
 
     Args:
         filepath: Path to the PDF file.
 
     Returns:
-        The extracted text from the first page.
+        The extracted text from the complete document.
 
     Raises:
         TextExtractionError: If extraction fails or PDF is invalid.
@@ -80,7 +80,12 @@ def extract_first_page_text_from_file(filepath: str) -> str:
     except FileNotFoundError:
         raise FileNotFoundError(f"PDF file not found: {filepath}")
 
-    return extract_first_page_text(pdf_bytes)
+    return extract_document_text(pdf_bytes)
+
+
+def extract_first_page_text_from_file(filepath: str) -> str:
+    """Compatibility wrapper for extract_document_text_from_file."""
+    return extract_document_text_from_file(filepath)
 
 
 def is_text_empty(text: str, min_length: int = MIN_TEXT_LENGTH) -> bool:
@@ -108,7 +113,7 @@ def is_text_empty(text: str, min_length: int = MIN_TEXT_LENGTH) -> bool:
 
 
 def extract_and_validate(pdf_bytes: bytes, min_length: int = MIN_TEXT_LENGTH) -> tuple[str, bool]:
-    """Extract first page text and check if it's valid.
+    """Extract document text and check if it's valid.
 
     Args:
         pdf_bytes: The PDF file content as bytes.
@@ -121,7 +126,7 @@ def extract_and_validate(pdf_bytes: bytes, min_length: int = MIN_TEXT_LENGTH) ->
     Raises:
         TextExtractionError: If extraction fails.
     """
-    text = extract_first_page_text(pdf_bytes)
+    text = extract_document_text(pdf_bytes)
     is_valid = not is_text_empty(text, min_length)
     return (text, is_valid)
 
@@ -142,7 +147,7 @@ class TextExtractor:
         self.min_length = min_length
 
     def extract(self, pdf_bytes: bytes) -> str:
-        """Extract first page text from PDF bytes.
+        """Extract text from every page of a PDF.
 
         Args:
             pdf_bytes: The PDF file content as bytes.
@@ -150,7 +155,7 @@ class TextExtractor:
         Returns:
             The extracted text.
         """
-        return extract_first_page_text(pdf_bytes)
+        return extract_document_text(pdf_bytes)
 
     def extract_and_validate(self, pdf_bytes: bytes) -> tuple[str, bool]:
         """Extract and validate text.

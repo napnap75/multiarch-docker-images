@@ -16,13 +16,13 @@ inputDocuments:
 
 ### Product vision
 
-Build a personal, fully offline application that watches a self-hosted Garage S3 bucket for new French text-based PDFs, extracts document data, classifies documents, applies configurable naming rules, and moves files into an organized bucket structure. This bucket is accessible through Nextcloud when the user wants to consult one file. A local dashboard lets the owner review and correct uncertain results. JSON sidecars are the source of truth; SQLite is a rebuildable query index.
+Build a personal, fully offline application that watches a self-hosted Garage S3 bucket for new French text-based PDFs, extracts document data, classifies documents, applies configurable naming rules, and moves files into an organized bucket structure. A local dashboard lets the owner review and correct uncertain results. JSON sidecars are the source of truth; SQLite is a rebuildable query index.
 
 ### Product principles
 
 - **Offline by design:** no cloud APIs, telemetry, or runtime downloads. Documents remain on self-hosted infrastructure.
 - **No silent wrong renames:** ambiguous, incomplete, or invalid results must be routed for human review.
-- **Recoverability:** file operations are traceable; sidecars are authoritative and SQLite can be rebuilt from them. User-facing undo of file renames is out of scope.
+- **Recoverability:** renames are traceable and reversible; sidecars are authoritative and SQLite can be rebuilt from them.
 - **Incremental delivery:** first deliver deterministic extraction with regular expressions and configured lookup lists; add ML as a separate capability without replacing the stable ingestion pipeline.
 - **Configuration over code:** adding a document template should not require changing application code.
 - **Single-user v1:** Nextcloud handles user-facing file access and sharing. Dashboard authentication and multi-user management are outside the v1 scope unless explicitly re-approved.

@@ -2,8 +2,6 @@ const searchFilter = document.getElementById('search-filter');
 const body = document.getElementById('documents-body');
 const summaryCards = document.getElementById('summary-cards');
 const refreshButton = document.getElementById('refresh-btn');
-const rebuildButton = document.getElementById('rebuild-btn');
-const rebuildStatus = document.getElementById('rebuild-status');
 const listStatus = document.getElementById('list-status');
 const loadMoreButton = document.getElementById('load-more-btn');
 const loadSentinel = document.getElementById('load-sentinel');
@@ -183,32 +181,9 @@ const updateSortIndicators = () => {
   });
 };
 
-const rebuildDatabase = async () => {
-  if (!window.confirm('Rebuild the database from sidecar files? Existing database records will be replaced.')) return;
-
-  rebuildButton.disabled = true;
-  rebuildStatus.textContent = 'Rebuilding database from sidecar files…';
-  try {
-    const response = await fetch('/api/consistency/rebuild', { method: 'POST' });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const result = await response.json();
-    rebuildStatus.textContent = `Database rebuilt from ${result.count} sidecar file${result.count === 1 ? '' : 's'}.`;
-    await loadDocuments();
-  } catch (error) {
-    rebuildStatus.textContent = 'Unable to rebuild the database. Check the API server and storage backend.';
-    console.error(error);
-  } finally {
-    rebuildButton.disabled = false;
-  }
-};
-
 columnFilters.forEach((filter) => filter.addEventListener('input', loadDocuments));
 searchFilter.addEventListener('input', loadDocuments);
 refreshButton.addEventListener('click', loadDocuments);
-rebuildButton.addEventListener('click', rebuildDatabase);
 loadMoreButton.addEventListener('click', () => loadDocuments({ append: true }));
 sortButtons.forEach((button) => {
   button.addEventListener('click', () => {

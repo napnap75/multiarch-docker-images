@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from datetime import datetime, timezone
@@ -26,6 +27,8 @@ from .models import (
 )
 
 router = APIRouter(tags=["files"])
+
+logger = logging.getLogger('uvicorn.error')
 
 
 def _storage(request: Request) -> StorageBackend:
@@ -129,6 +132,7 @@ async def list_files(
     }
 
     if db.count_files() == 0:
+        logger.debug("SQLite is empty, rebuilding from sidecar metadata")
         for key in sorted(storage.list_objects(prefix="")):
             if not key.endswith(".meta.json"):
                 continue
@@ -177,6 +181,7 @@ async def get_file(
     record = db.get_by_id(file_id)
 
     if record is None:
+        logger.debug(f"File '{file_id}' not found in SQLite, searching storage sidecars")
         keys = storage.list_objects(prefix="")
         for key in keys:
             if not key.endswith(".meta.json"):
@@ -193,8 +198,9 @@ async def get_file(
 
     sidecar_metadata: dict[str, Any] = {}
     if record.current_key:
+        metadata_key = f"{record.current_key.split('.')[0]}.meta.json" if record.current_key.endswith(".pdf") else f"{record.current_key}.meta.json"
         sidecar_metadata = _parse_file_metadata(
-            storage.get_object(f"{record.current_key}.meta.json")
+            storage.get_object(metadata_key)
         )
     if not sidecar_metadata or sidecar_metadata.get("sha256") not in {
         record.sha256,
@@ -257,8 +263,19 @@ async def get_file_pdf(
 ) -> Response:
     """Stream a PDF by key from storage when present."""
     storage = _storage(request)
-    keys = storage.list_objects(prefix="")
+    db = _db(request)
+    record = db.get_by_id(file_id)
 
+    key = record.current_key if record else None
+    if key and storage.object_exists(key):
+        payload = storage.get_object(key)
+        if payload is not None:
+            logger.debug(f"Streaming PDF for file_id={file_id} from key={key}")
+            return Response(content=payload, media_type="application/pdf")
+        raise HTTPException(status_code=404, detail="PDF bytes not found for the file")
+
+    logger.debug(f"PDF for file_id={file_id} not found in SQLite, searching storage sidecars")
+    keys = storage.list_objects(prefix="")
     for key in keys:
         if key.endswith(".meta.json"):
             metadata = _parse_file_metadata(storage.get_object(key))
@@ -351,7 +368,7 @@ async def edit_file(
 
     source_sidecar_key = ""
     sidecar_metadata: dict[str, Any] = {}
-    known_sidecar_key = f"{record.current_key}.meta.json" if record.current_key else ""
+    known_sidecar_key = f"{record.current_key.split('.')[0]}.meta.json" if record.current_key.endswith(".pdf") else f"{record.current_key}.meta.json"
     if known_sidecar_key:
         candidate = _parse_file_metadata(storage.get_object(known_sidecar_key))
         if candidate and candidate.get("sha256") in {record.sha256, record.id}:
@@ -476,6 +493,7 @@ async def validate_file(
     record = db.get_by_id(file_id)
 
     if record is None:
+        logger.debug(f"File '{file_id}' not found in SQLite, searching storage sidecars")
         keys = storage.list_objects(prefix="")
         for key in keys:
             if key.endswith(".meta.json"):
