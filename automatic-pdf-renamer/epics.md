@@ -57,17 +57,16 @@ The following inventory consolidates the requirements from the project brief and
 - **FR-FLD-06 — Validation:** validate dates, companies, document types, periods, and optional field formats before applying a rename. Invalid or missing required values must be reviewed.
 - **FR-STO-01 — Garage storage:** use a versioned Garage S3 bucket and the `inbox/`, `pending/`, and `files/` key areas.
 - **FR-STO-02 — Sidecar source of truth:** store a JSON sidecar for each PDF with SHA-256 as its unique document identifier, current and original keys, status, extracted fields/text, confidence where applicable, timestamps, and event history. Any byte-level PDF content change creates a new identity; a rename/move preserving bytes does not.
-- **FR-STO-03 — SQLite replica:** mirror sidecar data into SQLite for fast listing, filtering, search, and statistics.
+- **FR-STO-03 — SQLite replica:** mirror sidecar data into SQLite for fast listing, filtering, search, and consistency diagnostics.
 - **FR-STO-04 — Safe moves:** move objects using copy-before-delete, resolve destination collisions with an incremental suffix, and record the actual final key.
 - **FR-STO-05 — Operation audit trail:** preserve sufficient history and key information to trace file moves and renames. A user-facing undo/rollback feature for file renames is out of scope.
 - **FR-DASH-01 — File list:** list all known files and show emission date, period, current key/name, status, template, document type, company, and confidence where available.
 - **FR-DASH-02 — Search and filters:** filter by status, template, document type, company, period, and date range; sort columns and search object names and metadata, and full extracted text across every PDF page.
-- **FR-DASH-03 — Statistics:** show counts by status, automation and validation rates, and consistency indicators.
 - **FR-DASH-04 — PDF detail and preview:** stream the PDF from Garage through the backend and show it alongside extracted metadata.
 - **FR-DASH-05 — Correction and validation:** allow the owner to change the template and field values, preview the resulting target key, and validate the final result.
 - **FR-DASH-06 — Lifecycle:** support the business statuses `pending`, `processed`, and `validated`; validated records are eligible for training.
 - **FR-TPL-01 — Template configuration:** define templates, fields, extraction and validation rules, period rules, destination prefixes, and key patterns in configuration.
-- **FR-TPL-02 — Template discoverability:** show configured templates, their fields/rules, and corpus counts in the dashboard.
+- **FR-TPL-02 — Configuration file editing:** retrieve and update the JSONC configuration through dedicated endpoints; validate changes before activating them.
 - **FR-ML-01 — Training corpus:** train from the initial labeled corpus and files validated by the owner.
 - **FR-ML-02 — Evaluation:** show evaluation metrics, including accuracy and confusion matrix, before model activation.
 - **FR-ML-03 — Model lifecycle:** version model artifacts, allow activation or discard, keep one active model, and activate without restarting the service.
@@ -176,7 +175,7 @@ So that processing decisions and file history survive restarts and can be audite
 
 As the owner,
 I want sidecar metadata indexed in SQLite,
-So that dashboard queries and statistics remain fast without making SQLite authoritative.
+So that dashboard queries remain fast without making SQLite authoritative.
 
 **Acceptance Criteria:**
 
@@ -411,7 +410,7 @@ So that model improvements can be adopted safely and reversed if quality regress
 
 ---
 
-## Epic 4: Dashboard, Human Review, and Template Management
+## Epic 4: Dashboard, Human Review, and Configuration Editing
 
 **Goal:** Give the owner a local interface to find documents, understand automated decisions, correct metadata, validate files, and inspect template configuration. The dashboard is the human safety net for both the rules-only and ML-enabled ingestion paths.
 
@@ -433,21 +432,7 @@ So that I can find documents and understand their processing status.
 **And** status badges distinguish `pending`, `processed`, and `validated`  
 **And** the list is served from SQLite rather than performing a full S3 scan for every request.
 
-### Story 4.2: Show useful statistics and consistency indicators
-
-As the owner,
-I want summary counts and automation statistics,
-So that I can monitor whether the system is working as expected.
-
-**Acceptance Criteria:**
-
-**Given** the indexed file records and known consistency flags are available  
-**When** I view the dashboard summary  
-**Then** it shows counts by business status, automation rate, validation rate, and known consistency anomalies  
-**And** the displayed counts are derived from the same indexed records as the file list  
-**And** unavailable or stale statistics are indicated rather than presented as current.
-
-### Story 4.3: Inspect a PDF and its processing decision
+### Story 4.2: Inspect a PDF and its processing decision
 
 As the owner,
 I want to open a file's detail page with its PDF and extracted metadata,
@@ -461,7 +446,7 @@ So that I can understand and correct the system's decision.
 **And** it displays the current status, metadata, extracted text, decision/review reason, and ML candidates/scores when available  
 **And** a missing or unavailable PDF is reported clearly without breaking the rest of the dashboard.
 
-### Story 4.4: Correct metadata and preview the target key
+### Story 4.3: Correct metadata and preview the target key
 
 As the owner,
 I want to change a template and edit extracted fields before validation,
@@ -472,11 +457,11 @@ So that the final file name and destination reflect the correct document data.
 **Given** I am viewing a document detail page  
 **When** I change the template  
 **Then** the page keeps the five common fields, reloads the optional fields for the selected template, and performs best-effort re-extraction without silently overwriting user edits  
-**And** the period is recomputed from the emission date and the new template rules but remains editable  
+**And** the period is recomputed from the emission date and the new template rules and is read-only  
 **And** the target key and destination prefix update as I edit fields  
 **And** invalid or missing required fields are highlighted and prevent final validation until corrected or explicitly handled by a defined rule.
 
-### Story 4.5: Validate a file and preserve the correction history
+### Story 4.4: Validate a file and preserve the correction history
 
 As the owner,
 I want to confirm or correct a file's metadata and validate the result,
@@ -492,20 +477,20 @@ So that the file is moved to its final location and my correction can improve fu
 **And** the validated record becomes eligible for the ML training corpus  
 **And** the operation is idempotent and its history remains auditable.
 
-### Story 4.6: Inspect configured templates and their corpus coverage
+### Story 4.5: Retrieve and update the JSONC configuration file
 
 As the owner,
-I want to see the configured templates, their rules, and the number of associated examples,
-So that I can understand and maintain the document taxonomy.
+I want to retrieve and edit the JSONC configuration file from the dashboard,
+So that I can change templates and extraction rules without editing application code.
 
 **Acceptance Criteria:**
 
-**Given** a valid template registry is loaded  
-**When** I open the template view  
-**Then** I can see each template's fields, period rules, target prefix, key pattern, and extraction/validation configuration  
-**And** the view shows the number of corpus files associated with each template  
-**And** configuration errors are surfaced with actionable messages  
-**And** a new template becomes available to classification and the detail-page selector after valid configuration is loaded, without code changes.
+**Given** the current configuration file is available  
+**When** I open the configuration editor  
+**Then** the dashboard retrieves the complete JSONC file through `GET /config`  
+**And** I can submit the complete modified file through `PUT /config`  
+**And** invalid JSONC or schema errors are reported without replacing the active configuration  
+**And** a valid file is saved atomically and the in-memory configuration is reloaded.
 
 ---
 
