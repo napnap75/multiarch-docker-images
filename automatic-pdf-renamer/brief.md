@@ -30,7 +30,7 @@ PDFs arrive continuously in an inbox S3 prefix (dropped via Nextcloud by the use
 - Templates and extractors declared in configuration (JSONC format), not in code.
 - Storage: Garage (self-hosted S3-compatible, https://garagehq.deuxfleurs.fr/) with a single versioned bucket; objects addressed by S3 keys, no local filesystem for documents.
 - Metadata: one JSON sidecar object per PDF in the bucket, holding template, fields, confidence, status, and history — the source of truth. SQLite acts as a replicated index for dashboard queries, rebuildable from the sidecars.
-- Local web dashboard: all processed files with status (pending / processed / validated), file detail page with PDF preview streamed from S3, template and field correction, validation, history, statistics, and full-text search across the entire extracted document in addition to metadata/field search.
+- Local web dashboard: all processed files with status (pending / processed / validated), file detail page with PDF preview streamed from S3, template and field correction, validation, history, and full-text search across the entire extracted document in addition to metadata/field search.
 - On-demand classifier retraining, using the existing corpus based on all the files with "validated" status.
 
 ### Out of scope (v1)
@@ -48,7 +48,7 @@ Single user (personal use), technically proficient. Nominal flow:
 
 1. A PDF is uploaded into the `inbox/` prefix via Nextcloud (or any S3 client).
 2. The poller detects the new object, waits for write completion (stable ETag/content-length on repeated listing), downloads it, extracts text from every page, applies deterministic classification and field-extraction rules, then validates.
-3. High confidence and valid fields: the object is copied to its renamed key in the target prefix and the inbox copy deleted; metadata is written to the sidecar and replicated to SQLite; the event is logged.
+3. A deterministic result with valid fields: the object is copied to its renamed key in the target prefix; the sidecar is updated, then SQLite is synchronized, and the inbox copy is deleted only after the sidecar records the new key.
 4. If deterministic rules cannot produce a valid result: the file is moved to `pending/` and appears in the dashboard review queue; the user corrects or validates it. Validated corrections may feed a future ML training corpus.
 
 ## 6. Functional Requirements
@@ -62,7 +62,7 @@ Single user (personal use), technically proficient. Nominal flow:
 - FR7: local web dashboard (FastAPI + React): file list, detail page, review, correction, validation, history, retraining trigger. PDFs are streamed from the bucket for preview.
 - FR7a: the dashboard shows each document's status: `pending` (deterministic classification or required-field validation needs manual correction), `processed` (automatically renamed and moved), or `validated` (the user confirmed or corrected the result — eligible for future model retraining).
 - FR7b: clicking a file opens a detail page displaying the PDF, where the user can change the template if misclassified, correct the extracted field values, and validate the result. Validation sets the status to "validated" and feeds the corrected data into the training corpus.
-- FR8: adding a new template is done through a configuration entry (JSONC) plus example files, with no code changes.
+- FR8: adding a new template is done by editing the JSONC configuration file plus example files, with no code changes. Dedicated endpoints retrieve the current configuration file and upload a validated modified version.
 
 ## 7. Non-Functional Requirements
 
