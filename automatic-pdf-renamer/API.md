@@ -81,6 +81,22 @@ This convention applies to HTTP error responses from every endpoint. Successful 
 
 The endpoints in the models/retraining section are post-v1 capabilities. They may be omitted from the first deterministic release without affecting the core API.
 
+## 4. Configuration file
+
+### GET `/config`
+
+Returns the complete current JSONC configuration as UTF-8 text. Use `Content-Type: application/jsonc; charset=utf-8` (or `text/plain; charset=utf-8`). This endpoint retrieves the configuration file itself; it does not expose a separate template-list or template-editing API.
+
+### PUT `/config`
+
+Accepts the complete replacement JSONC configuration as a UTF-8 text body. Validate its syntax and schema before writing. If invalid, return `422` with a concise plain-text error and leave the active file unchanged. If valid, atomically replace the configured file, reload the in-memory template registry, and return `200` JSON:
+
+```json
+{"saved": true, "reloaded": true}
+```
+
+The implementation must avoid exposing secrets in the configuration file. Only one complete configuration replacement is supported; individual templates are changed by editing this file.
+
 ## 5. Health and ingestion workflow
 
 ### GET `/health`
