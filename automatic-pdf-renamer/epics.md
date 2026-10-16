@@ -117,7 +117,7 @@ The following inventory consolidates the requirements from the project brief and
 1. **Technical Foundation, Storage, and Metadata** — establish the offline service, Garage access, sidecar schema, and rebuildable SQLite index.
 2. **Rules-Based PDF Ingestion and Classification (Light Release)** — deliver a complete deterministic pipeline using text extraction, regular expressions, configured lookup data, validation, and safe renaming; no ML.
 3. **Machine Learning for PDF Ingestion** — add local model training and inference for document classification and configured-value extraction, integrated with the existing pipeline.
-4. **Dashboard, Human Review, and Template Management** — make results searchable and correctable, support PDF preview and validation, and expose configured templates.
+4. **Dashboard, Human Review, and Configuration Editing** — make results searchable and correctable, support PDF preview and validation, and retrieve/update the JSONC configuration file.
 5. **Consistency, Recovery, and Operational Readiness** — detect and repair drift, recover safely from interruptions, verify offline behavior and performance, and document deployment/operations.
 
 ---
