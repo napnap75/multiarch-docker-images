@@ -100,7 +100,7 @@ The object key pattern of each template is composed from these common fields, pl
 
 ### Epic 5 — Renaming, moving, logging
 
-- FR5.1 Rename and move the object within the bucket (S3 copy to the target key per the template pattern, then delete of the source key). Write the sidecar first, then update SQLite; these stores do not share a transaction. A crash or replica failure is recovered by the consistency job. If a transient technical operation fails, retry it safely for up to 3 times after the initial attempt, with delays of 5 seconds, 30 seconds, and 2 minutes. Do not assign business status `pending` solely because of technical failure.
+- FR5.1 Rename and move the object within the bucket using a recoverable sequence: copy to the target key, persist the sidecar with the new current key and event, delete the source key only after the sidecar is durable, then synchronize SQLite. These stores do not share a transaction. A crash or replica failure is recovered by the consistency job. If a transient technical operation fails, retry it safely for up to 3 times after the initial attempt, with delays of 5 seconds, 30 seconds, and 2 minutes. Do not assign business status `pending` solely because of technical failure.
 - FR5.2 Every event is logged in the sidecar history: file hash, old key, new key, template, extracted fields, confidence, decision, status, timestamps.
 - FR5.3 Objects missing from the bucket while not in a terminal state are detected by the consistency job and the record is flagged as orphaned.
 
