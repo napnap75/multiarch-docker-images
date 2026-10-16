@@ -10,7 +10,7 @@ This document defines the HTTP API consumed by the local web dashboard and the o
 
 - **Nextcloud/S3 remains the upload interface.** A user uploads a PDF to the configured `inbox/` prefix through Nextcloud or an S3 client. The API does not accept PDF uploads in v1.
 - **Ingestion is server-side and automatic.** The poller discovers stable PDF objects in `inbox/`, extracts text from every page, applies deterministic rules, validates fields, and either renames the file or moves it to `pending/`.
-- **Sidecars are authoritative.** For a mutation, persist the sidecar first, then synchronize SQLite. SQLite is used for list/search/statistics and can be rebuilt from sidecars.
+- **Sidecars are authoritative.** For a mutation, persist the sidecar first, then synchronize SQLite. SQLite is used for list/search and consistency diagnostics, and can be rebuilt from sidecars.
 - **Business statuses are exactly** `pending`, `processed`, and `validated`. Technical job state is separate and must not be represented as a business status.
 - **The initial release is deterministic.** API responses may include a nullable confidence/model section for forward compatibility, but the rules-only release must not fabricate ML scores.
 - **No rename undo endpoint exists.** Renames are recorded for audit, not reversed by a user-facing API.
@@ -70,17 +70,18 @@ This convention applies to HTTP error responses from every endpoint. Successful 
 | GET | `/consistency` | List known storage/index anomalies |
 | POST | `/consistency/scan` | Start a consistency scan |
 | POST | `/consistency/rebuild` | Rebuild SQLite from authoritative sidecars |
-| GET | `/jobs/{job_id}` | Get maintenance job status and result |
+| GET | `/jobs/{job_id}` | Get asynchronous job status and result (maintenance or retraining) |
 | GET | `/ingestion/status` | Inspect poller status and recent activity |
+| GET | `/config` | Retrieve the current JSONC configuration file |
+| PUT | `/config` | Validate and save a modified JSONC configuration file |
 | GET | `/models` | Post-v1: list model versions |
 | POST | `/retrain` | Post-v1: start local model training |
-| GET | `/retrain/{job_id}` | Post-v1: training progress and metrics |
 | POST | `/retrain/{job_id}/activate` | Post-v1: activate a trained model |
 | POST | `/retrain/{job_id}/discard` | Post-v1: discard a candidate model |
 
 The endpoints in the models/retraining section are post-v1 capabilities. They may be omitted from the first deterministic release without affecting the core API.
 
-## 4. Health and ingestion workflow
+## 5. Health and ingestion workflow
 
 ### GET `/health`
 
@@ -154,7 +155,7 @@ The values above are illustrative. The configured polling interval is implementa
 
 Technical failures are not business statuses and must not automatically set a document to `pending`. For a transient technical failure, the service makes the initial attempt and up to three retries after 5 seconds, 30 seconds, and 2 minutes. Once these retries are exhausted, processing of that item stops; no additional retry or manual-review workflow is launched. Other objects continue to be discovered and processed. The API may expose the last technical failure in operational diagnostics, separate from the document's business status.
 
-## 5. File list and search
+## 6. File list and search
 
 ### GET `/files`
 
@@ -183,13 +184,13 @@ Response:
 {
   "items": [
     {
-      "id": "file_123",
+      "sha256": "0123456789abcdef...",
       "current_key": "pending/edf/document.pdf",
       "original_key": "inbox/document.pdf",
       "status": "pending",
       "template_name": "invoice",
       "emission_date": "2026-09-20",
-      "period_format": "monthly",
+      "period": "September 2026",
       "emitting_company": "EDF",
       "document_type": "invoice",
       "confidence": null,
@@ -203,9 +204,9 @@ Response:
 }
 ```
 
-The response must not claim ML confidence for a rules-only decision. `confidence` is nullable and may be omitted if not applicable. Search must include the full extracted text from every page, not only the first page. Matching semantics (substring/token behavior) should be documented by the implementation and tested; use SQLite indexes/FTS rather than loading every record into application memory.
+The response must not claim ML confidence for a rules-only decision. `confidence` is nullable and may be omitted if not applicable. List items use `sha256` as the canonical identifier and return the computed `period`. Search must include the full extracted text from every page, not only the first page. Matching semantics (substring/token behavior) should be documented by the implementation and tested; use SQLite indexes/FTS rather than loading every record into application memory.
 
-## 6. Document detail and PDF content
+## 7. Document detail and PDF content
 
 ### GET `/files/{sha256}`
 
@@ -215,14 +216,11 @@ Example response:
 
 ```json
 {
-  "id": "file_123",
-  "schema_version": "1.0",
   "sha256": "0123456789abcdef...",
   "original_key": "inbox/document.pdf",
   "current_key": "pending/document.pdf",
   "status": "pending",
   "template_name": "invoice",
-  "period_format": "monthly",
   "emission_date": "2026-09-20",
   "period": "September 2026",
   "emitting_company": "EDF",
@@ -238,7 +236,7 @@ Example response:
     }
   ],
   "created_at": "2026-10-14T07:00:00Z",
-  "updated_at": "2026-10-14T07:00:00Z",
+  "updated_at": "2026-10-14T07:00:00Z"
 }
 ```
 
@@ -261,11 +259,11 @@ Returns the complete extracted text stored in the sidecar/replica, including all
 ```json
 {
   "sha256": "0123456789abcdef...",
-  "text": "Complete text from page 1...\n\nComplete text from page 2...",
+  "text": "Complete text from page 1...\n\nComplete text from page 2..."
 }
 ```
 
-## 7. Preview, correction, and validation
+## 8. Preview and validation
 
 All mutation endpoints must validate the requested state, recompute the period from `emission_date` and the applicable template period rules, calculate the destination key from the template's key pattern, and prevent an invalid document from being renamed. Filename parsing must never be used as a source for the period.
 
@@ -277,7 +275,6 @@ All mutation endpoints must validate the requested state, recompute the period f
   "emission_date": "2026-09-20",
   "emitting_company": "EDF",
   "document_type": "invoice",
-  "period_format": "monthly",
   "optional_fields": {
     "invoice_number": "INV-2026-001",
     "amount": 125.5
@@ -286,7 +283,7 @@ All mutation endpoints must validate the requested state, recompute the period f
 ```
 
 - `template_name`, `emission_date`, `emitting_company`, and `document_type` must conform to the selected template's schema.
-- `period_format` specifies how the period is derived from `emission_date` under the selected template's rules. The server calculates `period`; clients do not supply it.
+- The server selects the applicable period rules from the configured mapping for the company and document type, calculates `period` from `emission_date`, and never accepts a client-supplied period or period format.
 - `optional_fields` may contain only fields declared by the selected template. Empty optional fields are allowed where the schema permits them.
 - The server must never trust a target key supplied by the browser; it calculates the target key itself.
 
@@ -332,8 +329,7 @@ Request:
   "emission_date": "2026-09-20",
   "emitting_company": "EDF",
   "document_type": "invoice",
-  "period_format": "monthly",
-  "optional_fields": {"invoice_number": "INV-2026-001", "amount": 125.5},
+  "optional_fields": {"invoice_number": "INV-2026-001", "amount": 125.5}
 }
 ```
 
@@ -341,7 +337,7 @@ Success response:
 
 ```json
 {
-  "id": "file_123",
+  "sha256": "0123456789abcdef...",
   "status": "validated",
   "previous_key": "pending/document.pdf",
   "current_key": "files/edf/2026/09/invoice-INV-2026-001.pdf",
@@ -362,7 +358,7 @@ Behavior:
 
 If required values are invalid, return `422` with a concise plain-text error message and do not rename. If a storage operation is interrupted, leave a recoverable state and reconcile from the sidecar; never delete the only recoverable copy. The operation must be idempotent.
 
-## 10. Consistency and maintenance jobs
+## 9. Consistency and maintenance jobs
 
 ### GET `/consistency`
 
@@ -408,21 +404,21 @@ Returns job status for consistency scan, SQLite rebuild, or other asynchronous m
 }
 ```
 
-Allowed job statuses are technical job states such as `queued`, `running`, `succeeded`, and `failed`; these are not document business statuses. If the process restarts and in-memory job state is lost, the API should report the job as interrupted/unknown and use persisted status files or database state where available.
+Allowed job statuses are technical job states such as `queued`, `running`, `succeeded`, and `failed`; these are not document business statuses. This generic endpoint reports maintenance and retraining jobs. If the process restarts and in-memory job state is lost, the API should report the job as interrupted/unknown and use persisted status files or database state where available.
 
-## 11. Post-v1 model endpoints
+## 10. Post-v1 model endpoints
 
 These routes are future extensions; they are not required for the deterministic initial release.
 
 - `GET /models`: list locally stored model versions and identify the active model.
 - `POST /retrain`: start training using the initial corpus plus eligible `validated` documents. Returns `202` and a job ID.
-- `GET /retrain/{job_id}`: show training state, dataset/model version, accuracy, confusion matrix, warnings, and output artifact.
+- `GET /jobs/{job_id}`: show training state, dataset/model version, accuracy, confusion matrix, warnings, and output artifact.
 - `POST /retrain/{job_id}/activate`: atomically activate a successfully evaluated candidate.
 - `POST /retrain/{job_id}/discard`: discard a candidate without changing the active model.
 
 Training and activation must remain local. Failed training must not replace the active model. ML confidence and candidate scores are absent or null when no model was used.
 
-## 12. Consistency and implementation rules
+## 11. Consistency and implementation rules
 
 1. Sidecar is the source of truth; SQLite is a rebuildable query replica.
 2. Every mutation writes an auditable sidecar event and updates `updated_at`; event types include `imported`, `classified`, `renamed`, `corrected`, `validated`, and `reprocessed` where applicable.
@@ -435,7 +431,7 @@ Training and activation must remain local. Failed training must not replace the 
 9. The API does not expose an endpoint to undo or reverse a file rename.
 10. No endpoint uploads a PDF directly; the Nextcloud/S3 inbox remains the ingestion boundary.
 
-## 13. Open implementation choices
+## 12. Open implementation choices
 
 The following are implementation details, not reasons to block the API contract:
 - Exact stable ID strategy and revision token format.
