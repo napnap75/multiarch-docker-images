@@ -5,9 +5,9 @@ version: "1.0"
 status: "draft"
 date: "2026-10-13"
 inputDocuments:
-  - "automatic-pdf-renamer/brief.md"
-  - "automatic-pdf-renamer/prd.md"
-  - "automatic-pdf-renamer/arch.md"
+  - "brief.md"
+  - "prd.md"
+  - "arch.md"
 ---
 
 # Automatic PDF Renamer — Epics and Stories
@@ -43,12 +43,12 @@ The following inventory consolidates the requirements from the project brief and
 
 - **FR-ING-01 — Polling and discovery:** poll a configurable Garage S3 `inbox/` prefix at a configurable interval; consider only PDFs and ignore temporary, hidden, and lock files.
 - **FR-ING-02 — Upload stability:** process a PDF only after its size and ETag remain stable across consecutive listings.
-- **FR-ING-03 — Restart recovery:** on startup, discover eligible inbox or pending objects that have not completed processing.
-- **FR-TXT-01 — Text extraction:** extract text from the first page of a PDF using a local library; no OCR in v1.
+- **FR-ING-03 — Restart recovery:** on startup, recover interrupted technical operations and discover eligible inbox objects that have not completed processing; reconcile `pending/` without automatically reprocessing documents awaiting manual correction.
+- **FR-TXT-01 — Text extraction:** extract all available text from every page of a PDF using a local library; no OCR in v1.
 - **FR-TXT-02 — Empty text handling:** route PDFs with empty or insufficient extracted text to human review with an explicit reason.
 - **FR-TXT-03 — Text persistence:** persist extracted text in the sidecar and SQLite replica so normal review and training workflows do not need to re-parse the PDF.
 - **FR-CLS-01 — Classification:** classify documents against configured templates. The initial light release uses deterministic rules; the ML epic adds TF-IDF and Logistic Regression classification.
-- **FR-CLS-02 — Confidence and unknown class:** ML classification exposes confidence and routes results below a configurable threshold to review.
+- **FR-CLS-02 — Confidence and unknown class (post-v1):** ML classification exposes confidence and routes results below a configurable threshold to review. The deterministic initial release uses explicit rule outcomes and does not generate artificial confidence scores.
 - **FR-FLD-01 — Common fields:** every document has template, emission date, emitting company, document type, and period.
 - **FR-FLD-02 — Optional fields:** templates define optional fields and reusable field groups with formats, allowed values, and extraction rules.
 - **FR-FLD-03 — Deterministic extraction:** the light release uses configured regular expressions, date parsing, company gazetteers, and fuzzy matching where useful.
@@ -56,18 +56,17 @@ The following inventory consolidates the requirements from the project brief and
 - **FR-FLD-05 — Period computation:** derive period from emission date and template/company/document-type rules, including granularity, formatting, and offset.
 - **FR-FLD-06 — Validation:** validate dates, companies, document types, periods, and optional field formats before applying a rename. Invalid or missing required values must be reviewed.
 - **FR-STO-01 — Garage storage:** use a versioned Garage S3 bucket and the `inbox/`, `pending/`, and `files/` key areas.
-- **FR-STO-02 — Sidecar source of truth:** store a JSON sidecar for each PDF with identifiers, current and original keys, status, extracted fields/text, confidence where applicable, timestamps, and event history.
-- **FR-STO-03 — SQLite replica:** mirror sidecar data into SQLite for fast listing, filtering, search, and statistics.
+- **FR-STO-02 — Sidecar source of truth:** store a JSON sidecar for each PDF with SHA-256 as its unique document identifier, current and original keys, status, extracted fields/text, confidence where applicable, timestamps, and event history. Any byte-level PDF content change creates a new identity; a rename/move preserving bytes does not.
+- **FR-STO-03 — SQLite replica:** mirror sidecar data into SQLite for fast listing, filtering, search, and consistency diagnostics.
 - **FR-STO-04 — Safe moves:** move objects using copy-before-delete, resolve destination collisions with an incremental suffix, and record the actual final key.
-- **FR-STO-05 — Reversible operations:** preserve sufficient history and key information to trace and reverse a rename without silently overwriting another object.
+- **FR-STO-05 — Operation audit trail:** preserve sufficient history and key information to trace file moves and renames. A user-facing undo/rollback feature for file renames is out of scope.
 - **FR-DASH-01 — File list:** list all known files and show emission date, period, current key/name, status, template, document type, company, and confidence where available.
-- **FR-DASH-02 — Search and filters:** filter by status, template, document type, company, period, and date range; sort columns and search object names and metadata, with extracted-text search where feasible.
-- **FR-DASH-03 — Statistics:** show counts by status, automation and validation rates, and consistency indicators.
+- **FR-DASH-02 — Search and filters:** filter by status, template, document type, company, period, and date range; sort columns and search object names and metadata, and full extracted text across every PDF page.
 - **FR-DASH-04 — PDF detail and preview:** stream the PDF from Garage through the backend and show it alongside extracted metadata.
 - **FR-DASH-05 — Correction and validation:** allow the owner to change the template and field values, preview the resulting target key, and validate the final result.
-- **FR-DASH-06 — Lifecycle:** support the business statuses `not processed`, `processed`, and `validated`; validated records are eligible for training.
+- **FR-DASH-06 — Lifecycle:** support the business statuses `pending`, `processed`, and `validated`; validated records are eligible for training.
 - **FR-TPL-01 — Template configuration:** define templates, fields, extraction and validation rules, period rules, destination prefixes, and key patterns in configuration.
-- **FR-TPL-02 — Template discoverability:** show configured templates, their fields/rules, and corpus counts in the dashboard.
+- **FR-TPL-02 — Configuration file editing:** retrieve and update the JSONC configuration through dedicated endpoints; validate changes before activating them.
 - **FR-ML-01 — Training corpus:** train from the initial labeled corpus and files validated by the owner.
 - **FR-ML-02 — Evaluation:** show evaluation metrics, including accuracy and confusion matrix, before model activation.
 - **FR-ML-03 — Model lifecycle:** version model artifacts, allow activation or discard, keep one active model, and activate without restarting the service.
@@ -82,7 +81,7 @@ The following inventory consolidates the requirements from the project brief and
 - **NFR-01 Privacy:** no network calls except the local Garage bucket, local dashboard, and required local infrastructure. No runtime downloads or telemetry.
 - **NFR-02 Performance:** process a standard PDF in under 5 seconds on the target server, including the S3 download. Dashboard list loads in under 1 second for 10,000 records; the PRD also calls out a 1,000-file acceptance check.
 - **NFR-03 Reliability:** no silent invalid renames; ambiguous or invalid results are routed to review.
-- **NFR-04 Durability:** bucket versioning is enabled; SQLite uses WAL; sidecar writes are atomic; crash recovery repairs replica drift.
+- **NFR-04 Durability:** bucket versioning is enabled; SQLite uses WAL; sidecar writes are atomic; crash recovery repairs replica drift; retries are idempotent and technical failures remain distinct from business statuses.
 - **NFR-05 Language:** French documents in v1; the UI may use one locale, English or French.
 - **NFR-06 Deployment/configuration:** containerized deployment, environment variables for secrets and endpoints, and a single documented template configuration format.
 - **NFR-07 Maintainability:** Python/FastAPI, Garage-compatible S3 client, SQLite, React dashboard, local PDF text extraction, and scikit-learn for ML.
@@ -93,10 +92,7 @@ The following inventory consolidates the requirements from the project brief and
 
 - Existing correctly named documents provide the initial labeled corpus; v1 processes new incoming files only, not the historical backlog.
 - OCR, scanned PDFs, multilingual documents, cloud services, and automatic periodic retraining are out of scope for v1.
-- The three business statuses must not be overloaded with transient technical states. Processing failures and recovery steps need separate technical flags/reasons.
-- **Configuration format must be reconciled:** the brief and PRD refer to YAML, while the architecture specifies JSONC. For this backlog, JSONC is the planning baseline because it is the architecture's stated decision. Update the brief/PRD or explicitly reverse this decision before implementation.
-- **Period rules must be reconciled:** the PRD requires day/week/month/quarter/semester/year and current/previous/following offsets; the architecture currently describes a narrower set. The implementation must support the full PRD set unless the product owner approves a reduced scope.
-- **Authentication scope must be reconciled:** the brief and PRD exclude dashboard authentication for the single-user v1, while the architecture describes a password-protected dashboard. This backlog follows the brief/PRD: no application-level authentication in v1; revisit before exposing the dashboard beyond the trusted local network.
+- The three business statuses must not be overloaded with technical states. Transient technical failures use a separate retry/error state, with attempt count, next retry time, and error details. Retry up to 3 times after the initial attempt, with delays of 5 seconds, 30 seconds, and 2 minutes. After the final failed retry, stop processing that item without another retry or review workflow; only document/business issues requiring manual correction use `pending`.
 - S3 object operations, sidecar updates, and SQLite writes do not form one distributed transaction. Each state transition must be recoverable and verifiable rather than relying on a claim of cross-system atomicity.
 
 ## 3. Functional Requirements Coverage Map
@@ -107,7 +103,7 @@ The following inventory consolidates the requirements from the project brief and
 | FR-TXT-01 to FR-TXT-03: text extraction and persistence | Epic 2 |
 | FR-CLS-01 to FR-CLS-02: rules-first classification and ML confidence | Epics 2 and 3 |
 | FR-FLD-01 to FR-FLD-06: fields, deterministic/ML extraction, periods, validation | Epics 2 and 3; review overrides in Epic 4 |
-| FR-STO-01 to FR-STO-05: S3, sidecars, SQLite, safe and reversible moves | Epics 1 and 2; recovery in Epic 5 |
+| FR-STO-01 to FR-STO-05: S3, sidecars, SQLite, safe and traceable moves | Epics 1 and 2; recovery in Epic 5 |
 | FR-DASH-01 to FR-DASH-06: list, search, preview, correction, validation, lifecycle | Epic 4 |
 | FR-TPL-01 to FR-TPL-02: templates and template visibility | Epics 2 and 4 |
 | FR-ML-01 to FR-ML-03: training, evaluation, model lifecycle | Epic 3 |
@@ -121,7 +117,7 @@ The following inventory consolidates the requirements from the project brief and
 1. **Technical Foundation, Storage, and Metadata** — establish the offline service, Garage access, sidecar schema, and rebuildable SQLite index.
 2. **Rules-Based PDF Ingestion and Classification (Light Release)** — deliver a complete deterministic pipeline using text extraction, regular expressions, configured lookup data, validation, and safe renaming; no ML.
 3. **Machine Learning for PDF Ingestion** — add local model training and inference for document classification and configured-value extraction, integrated with the existing pipeline.
-4. **Dashboard, Human Review, and Template Management** — make results searchable and correctable, support PDF preview and validation, and expose configured templates.
+4. **Dashboard, Human Review, and Configuration Editing** — make results searchable and correctable, support PDF preview and validation, and retrieve/update the JSONC configuration file.
 5. **Consistency, Recovery, and Operational Readiness** — detect and repair drift, recover safely from interruptions, verify offline behavior and performance, and document deployment/operations.
 
 ---
@@ -179,7 +175,7 @@ So that processing decisions and file history survive restarts and can be audite
 
 As the owner,
 I want sidecar metadata indexed in SQLite,
-So that dashboard queries and statistics remain fast without making SQLite authoritative.
+So that dashboard queries remain fast without making SQLite authoritative.
 
 **Acceptance Criteria:**
 
@@ -207,7 +203,7 @@ So that a damaged or deleted local database does not require reprocessing the PD
 
 ## Epic 2: Rules-Based PDF Ingestion and Classification (Light Release)
 
-**Goal:** Deliver a complete end-to-end workflow for new PDFs using deterministic rules only. The application polls Garage, extracts first-page text, fills fields with regexes and configured lookup data, validates the result, and safely renames or routes the file for review. This epic must not depend on a machine-learning model.
+**Goal:** Deliver a complete end-to-end workflow for new PDFs using deterministic rules only. The application polls Garage, extracts text from every PDF page, fills fields with regexes and configured lookup data, validates the result, and safely renames or routes the file for review. This epic must not depend on a machine-learning model.
 
 **Requirements covered:** FR-ING-01 to FR-ING-03, FR-TXT-01 to FR-TXT-03, deterministic part of FR-CLS-01, FR-FLD-01 to FR-FLD-03 and FR-FLD-05 to FR-FLD-06, FR-STO-04 to FR-STO-05, FR-TPL-01, FR-OPS-02, NFR-02 to NFR-04.
 
@@ -223,20 +219,22 @@ So that newly uploaded documents enter the pipeline automatically.
 **When** its size and ETag are unchanged across two consecutive listings  
 **Then** it becomes eligible for processing  
 **And** non-PDF files, hidden files, `.part` files, and lock files are ignored  
-**And** a file that is still being uploaded is not processed prematurely  
-**And** a poller error for one object does not stop discovery of other objects.
+**And** a file that is still being uploaded is not eligible for processing prematurely  
+**And** a poller error for one object does not stop discovery of other objects
+**And** transient technical failures are retried up to 3 times after the initial attempt, with delays of 5 seconds, 30 seconds, and 2 minutes, and recorded separately from business status
+**And** a technical failure alone never moves a document to `pending/`.
 
-### Story 2.2: Extract and persist first-page PDF text
+### Story 2.2: Extract and persist full PDF text
 
 As the application,
-I want to extract first-page text from each eligible PDF,
+I want to extract and persist all available text from every page of each eligible PDF,
 So that downstream classification and field extraction use the document's content.
 
 **Acceptance Criteria:**
 
 **Given** an eligible PDF contains extractable text  
 **When** the extraction step runs  
-**Then** the configured local PDF library extracts the first page's text  
+**Then** the configured local PDF library extracts text from every page of the PDF  
 **And** the text is saved in the sidecar and mirrored to SQLite  
 **And** the application does not call an external OCR or document-processing service  
 **And** if the text is empty or below the configured minimum length, the file is routed to review with reason `empty text`.
@@ -264,7 +262,7 @@ So that the light release can classify and name common document types without ML
 
 **Acceptance Criteria:**
 
-**Given** first-page text and a configured set of templates are available  
+**Given** full-document extracted text and a configured set of templates are available  
 **When** deterministic extraction runs  
 **Then** it extracts candidate values for emission date, emitting company, document type, and configured optional fields using the applicable regexes and lookup lists  
 **And** date parsing uses a local date parser and company matching uses the configured gazetteer, with fuzzy matching only where configured  
@@ -302,8 +300,8 @@ So that routine files are organized without risking silent data loss.
 **And** the sidecar records the original key, current key, extracted values, decision, status, and rename events  
 **And** the file receives status `processed` only after the required state updates have been persisted or recoverably recorded  
 **And** when confidence is not applicable in this rules-only release, the decision is based on explicit rule outcomes and field validation rather than a fabricated ML confidence score  
-**And** ambiguous, incomplete, or invalid files are moved to `pending/` and receive status `not processed` with a review reason  
-**And** the operation can be audited and safely reversed without overwriting another object.
+**And** ambiguous, incomplete, or invalid files are moved to `pending/` and receive status `pending` with a review reason  
+**And** the operation can be audited from its recorded history; no user-facing rename reversal is required.
 
 ### Story 2.7: Make ingestion idempotent and restart-safe
 
@@ -318,7 +316,10 @@ So that retries do not create duplicate processing or lose track of a file.
 **Then** objects without a completed sidecar state are discovered and resumed or flagged for review  
 **And** objects already completed are not processed again in a way that creates duplicate renames or events  
 **And** if a crash occurs between copy and delete, the recovery logic detects both keys and resolves the state from the sidecar and object hashes  
-**And** transient technical failures are distinguishable from the three business statuses.
+**And** transient technical failures are recorded separately from the three business statuses
+**And** retryable failures are retried safely up to 3 times after the initial attempt, with delays of 5 seconds, 30 seconds, and 2 minutes
+**And** after retries are exhausted, processing of that item stops without launching another retry or manual-review workflow
+**And** a technical failure alone does not move the document to `pending/`.
 
 ---
 
@@ -383,7 +384,7 @@ So that the application can resolve more document-specific values without hard-c
 
 **Acceptance Criteria:**
 
-**Given** a template maps a company/document type to a predefined field group with allowed values  
+**Given** a template maps a period format/emitting company/document type/additional fields to a predefined field group with allowed values  
 **When** ML-assisted extraction is enabled for that field  
 **Then** the extractor proposes a value from the configured candidate set and records the method and score where available  
 **And** regex and deterministic lookup results remain available as inputs or fallback paths  
@@ -409,7 +410,7 @@ So that model improvements can be adopted safely and reversed if quality regress
 
 ---
 
-## Epic 4: Dashboard, Human Review, and Template Management
+## Epic 4: Dashboard, Human Review, and Configuration Editing
 
 **Goal:** Give the owner a local interface to find documents, understand automated decisions, correct metadata, validate files, and inspect template configuration. The dashboard is the human safety net for both the rules-only and ML-enabled ingestion paths.
 
@@ -427,25 +428,11 @@ So that I can find documents and understand their processing status.
 **When** I open the dashboard file list  
 **Then** each row shows emission date, period, current object name/key, status, template, document type, emitting company, and confidence where available  
 **And** I can filter by status, template, document type, company, period, and date range  
-**And** I can sort by supported columns and search object names and metadata  
-**And** status badges distinguish `not processed`, `processed`, and `validated`  
+**And** I can sort by supported columns and search object names, metadata fields, and the full extracted text across all pages  
+**And** status badges distinguish `pending`, `processed`, and `validated`  
 **And** the list is served from SQLite rather than performing a full S3 scan for every request.
 
-### Story 4.2: Show useful statistics and consistency indicators
-
-As the owner,
-I want summary counts and automation statistics,
-So that I can monitor whether the system is working as expected.
-
-**Acceptance Criteria:**
-
-**Given** the indexed file records and known consistency flags are available  
-**When** I view the dashboard summary  
-**Then** it shows counts by business status, automation rate, validation rate, and known consistency anomalies  
-**And** the displayed counts are derived from the same indexed records as the file list  
-**And** unavailable or stale statistics are indicated rather than presented as current.
-
-### Story 4.3: Inspect a PDF and its processing decision
+### Story 4.2: Inspect a PDF and its processing decision
 
 As the owner,
 I want to open a file's detail page with its PDF and extracted metadata,
@@ -456,10 +443,10 @@ So that I can understand and correct the system's decision.
 **Given** a file appears in the list  
 **When** I open its detail page  
 **Then** the page displays the PDF streamed from Garage through the backend alongside its extracted fields  
-**And** it displays the current status, template, extracted text, decision/review reason, and ML candidates/scores when available  
+**And** it displays the current status, metadata, extracted text, decision/review reason, and ML candidates/scores when available  
 **And** a missing or unavailable PDF is reported clearly without breaking the rest of the dashboard.
 
-### Story 4.4: Correct metadata and preview the target key
+### Story 4.3: Correct metadata and preview the target key
 
 As the owner,
 I want to change a template and edit extracted fields before validation,
@@ -470,11 +457,11 @@ So that the final file name and destination reflect the correct document data.
 **Given** I am viewing a document detail page  
 **When** I change the template  
 **Then** the page keeps the five common fields, reloads the optional fields for the selected template, and performs best-effort re-extraction without silently overwriting user edits  
-**And** the period is recomputed from the emission date and the new template rules but remains editable  
+**And** the period is recomputed from the emission date and the new template rules and is read-only  
 **And** the target key and destination prefix update as I edit fields  
 **And** invalid or missing required fields are highlighted and prevent final validation until corrected or explicitly handled by a defined rule.
 
-### Story 4.5: Validate a file and preserve the correction history
+### Story 4.4: Validate a file and preserve the correction history
 
 As the owner,
 I want to confirm or correct a file's metadata and validate the result,
@@ -490,20 +477,20 @@ So that the file is moved to its final location and my correction can improve fu
 **And** the validated record becomes eligible for the ML training corpus  
 **And** the operation is idempotent and its history remains auditable.
 
-### Story 4.6: Inspect configured templates and their corpus coverage
+### Story 4.5: Retrieve and update the JSONC configuration file
 
 As the owner,
-I want to see the configured templates, their rules, and the number of associated examples,
-So that I can understand and maintain the document taxonomy.
+I want to retrieve and edit the JSONC configuration file from the dashboard,
+So that I can change templates and extraction rules without editing application code.
 
 **Acceptance Criteria:**
 
-**Given** a valid template registry is loaded  
-**When** I open the template view  
-**Then** I can see each template's fields, period rules, target prefix, key pattern, and extraction/validation configuration  
-**And** the view shows the number of corpus files associated with each template  
-**And** configuration errors are surfaced with actionable messages  
-**And** a new template becomes available to classification and the detail-page selector after valid configuration is loaded, without code changes.
+**Given** the current configuration file is available  
+**When** I open the configuration editor  
+**Then** the dashboard retrieves the complete JSONC file through `GET /config`  
+**And** I can submit the complete modified file through `PUT /config`  
+**And** invalid JSONC or schema errors are reported without replacing the active configuration  
+**And** a valid file is saved atomically and the in-memory configuration is reloaded.
 
 ---
 
@@ -557,37 +544,6 @@ So that files are not stranded in an unknown state.
 **And** it repairs SQLite drift from authoritative sidecars  
 **And** it never deletes the only known copy of a PDF as an unverified recovery shortcut.
 
-### Story 5.4: Verify offline operation and Garage compatibility
-
-As the owner,
-I want the deployment and critical storage operations tested against the actual local environment,
-So that the system meets its privacy and reliability requirements in practice.
-
-**Acceptance Criteria:**
-
-**Given** the application is deployed with a pinned Garage version  
-**When** the integration test suite runs  
-**Then** listing, HEAD/GET, PUT, copy, delete, versioning, and collision handling are tested against Garage  
-**And** a network audit confirms that runtime traffic is limited to approved local services and no cloud API or telemetry endpoint is contacted  
-**And** tests cover interruptions during rename, sidecar update, SQLite synchronization, and rebuild  
-**And** the critical ingestion-to-review and ingestion-to-rename journeys are exercised end to end.
-
-### Story 5.5: Verify performance and document operations
-
-As the owner,
-I want measurable performance checks and clear operating instructions,
-So that I can deploy, monitor, and troubleshoot the application confidently.
-
-**Acceptance Criteria:**
-
-**Given** a representative test dataset and target server are available  
-**When** performance checks run  
-**Then** standard-PDF processing is measured against the under-5-second target  
-**And** the dashboard list is measured against the under-1-second target for 10,000 records, with the PRD's 1,000-file check retained as an additional acceptance test  
-**And** failures and slow operations produce actionable local logs without exposing credentials  
-**And** deployment documentation covers configuration, Garage bucket/versioning prerequisites, Nextcloud visibility, backup/rebuild, consistency checks, model registry backup, and troubleshooting  
-**And** the v1 decision to omit at-rest encryption and application-level dashboard authentication is explicitly documented, including the trusted-network assumption.
-
 ---
 
 ## 5. Cross-Epic Definition of Done
@@ -595,7 +551,7 @@ So that I can deploy, monitor, and troubleshoot the application confidently.
 A story is complete only when all applicable items below are satisfied:
 
 - Acceptance criteria are implemented and verified with automated tests where practical.
-- Errors and ambiguous outcomes are explicit; no invalid document is silently renamed.
+- Errors and ambiguous outcomes are explicit; no invalid document is silently renamed. Transient technical failures are retried separately and never mislabeled as `pending`.
 - Metadata changes follow the sidecar-first, SQLite-replica model and can be recovered.
 - No external network dependency is introduced.
 - Configuration, logs, and documentation are updated where behavior changes.
@@ -614,12 +570,8 @@ Adds Epic 3 and its integration with the review workflow. ML is an enhancement, 
 
 ### Release C — Operationally complete v1
 
-Completes the remaining Epic 4 capabilities and Epic 5, including consistency repair, rebuild, recovery, offline verification, performance checks, and deployment documentation.
+Completes the remaining Epic 4 capabilities and Epic 5, including consistency repair, rebuild, recovery, offline verification, and deployment documentation.
 
 ## 7. Open Decisions to Resolve Before the Affected Stories
 
-1. **Template format:** select YAML or JSONC as the single supported format and align brief, PRD, and architecture. This backlog currently assumes JSONC.
-2. **Period configuration:** confirm that all PRD granularities and offsets are required in v1 and update the architecture accordingly.
-3. **Dashboard authentication:** confirm the brief/PRD decision to omit application-level authentication for the single-user v1, despite the architecture's proposed password-based login.
-4. **Reversibility semantics:** define the user-facing undo operation, collision behavior, and exact state transitions before implementing the final rollback workflow.
-5. **ML field extraction:** specify which field groups use ML in v1 and what evaluation threshold is required before enabling each extractor. Classification and deterministic validation must remain usable independently.
+2. **ML field extraction:** specify which field groups use ML in v1 and what evaluation threshold is required before enabling each extractor. Classification and deterministic validation must remain usable independently.
