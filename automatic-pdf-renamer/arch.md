@@ -154,7 +154,7 @@ The following is a JSONC-readable example. Comments explain the fields and are n
   "status": "processed", // Required. One of the three business statuses below.
   "template_name": "invoice", // Required. Template/document family selected for this PDF.
   "period_format": "monthly", // Required. Format/rule identifier used for the period string.
-  "confidence": 0.97, // Serialized by the model; numeric classification confidence (0.0–1.0).
+  "confidence": null, // Null when no ML model produced a score; never fabricate a rules-only confidence.
   "emission_date": "2026-01-15", // Required. Emission date; expected ISO YYYY-MM-DD.
   "period": "2026-01", // Required. Computed or validated period string.
   "emitting_company": "ACME", // Required. Normalized name of the issuing company.
@@ -172,7 +172,7 @@ The following is a JSONC-readable example. Comments explain the fields and are n
       "type": "classified", // Event name; see supported event names below.
       "payload": {
         "template_name": "invoice",
-        "confidence": 0.97
+        "confidence": null
       }, // Required object; event-specific data, intentionally extensible.
       "timestamp": "2026-01-15T10:20:45+00:00" // Required ISO 8601 timestamp.
     }
@@ -191,7 +191,7 @@ The following is a JSONC-readable example. Comments explain the fields and are n
 | `status` | string | Required. One of `pending`, `processed`, or `validated`. |
 | `template_name` | string | Required. Name of the configured template/document family. |
 | `period_format` | string | Required. Period format/rule label, e.g. `monthly` or `yearly`. |
-| `confidence` | number | Emitted by the dataclass serializer, default `0.0`. Intended for a classification score between 0 and 1; the current validator checks only that it is numeric, not that it is within that range. |
+| `confidence` | number or null | Nullable; absent/null when no ML model produced a score. Never default to `0.0` for deterministic rules. |
 | `emission_date` | string | Required. Document emission date; `build_sidecar` documents ISO `YYYY-MM-DD`. |
 | `period` | string | Required. Period derived from the emission date and applicable rules. |
 | `emitting_company` | string | Required. Issuing company name. |
@@ -311,7 +311,7 @@ When no custom format is provided, the system shall use a deterministic standard
 
 ### 4.7 Frontend
 
-The dashboard is served as static assets by FastAPI. Views: file list (filters, counters, badges), detail page (PDF preview and editable metadata), and a Config page for editing JSONC configuration. Saving validates the content before updating the configured file and reloading the in-memory template registry. Auth: API routes use the configured dashboard credentials.
+The dashboard is served as static assets by FastAPI. Views: file list (filters, status badges, consistency indicator), detail page (PDF preview and editable metadata), and a Config page for editing the JSONC configuration file. The editor retrieves the current file through `GET /config` and saves the modified file through `PUT /config`; the server validates it before replacing the configured file and reloading the in-memory template registry. Auth: API routes use the configured dashboard credentials.
 
 ## 5. Data Flow: Renaming and Validation
 
@@ -325,9 +325,11 @@ sequenceDiagram
   API->>API: Validate fields, compute target key
   alt key changed
     API->>S3: Copy object to target key
-    API->>S3: Delete old key
+    API->>S3: Atomic sidecar update with new current_key and validated event
+    API->>S3: Delete old key only after sidecar is durable
+  else key unchanged
+    API->>S3: Atomic sidecar update (status: validated, event)
   end
-  API->>S3: Atomic sidecar update (status: validated, event)
   API->>DB: Mirror update
   API-->>U: 200, new key
 ```
