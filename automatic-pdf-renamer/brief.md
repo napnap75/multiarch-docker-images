@@ -13,7 +13,7 @@ PDFs arrive continuously in an inbox S3 prefix (dropped via Nextcloud by the use
 ## 3. Objectives
 
 - Extract the emitting company, document type, additional-field values, and emission date from the full text content of every page (including headers and footers), not from the current object name.
-- Use ML to select additional-field groups from emitting company and document type, then use ML to extract their values. Independently use ML to predict template and period format; do not use predefined mappings for these decisions.
+- Use ML to select additional-field groups from emitting company and document type, then use one shared token-level extraction model to identify all requested field values in the text. Independently use ML to predict template and period format; do not use predefined mappings for these decisions.
 - Calculate the period and storage key only after the required extracted fields and configured mapping have been validated.
 - Rename and move the object within the bucket into an organized prefix structure depending on the document type.
 - Unambiguous deterministic rules and valid fields: automatic processing. If rules cannot determine a valid result or extraction is incomplete, queue the file with status `pending` for human review in the dashboard.
