@@ -106,7 +106,11 @@ def activate_model(model_name: str, version: str) -> dict[str, Any]:
 
 def train_model(model_name: str, records: list[Any]) -> dict[str, Any]:
     """Train one requested model from validated records and save a versioned artifact."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", model_name):
+        raise ValueError("Model names may contain only letters, numbers, underscores, and hyphens.")
     is_additional_value = model_name.startswith("additional_value_")
+    if is_additional_value and not model_name.removeprefix("additional_value_"):
+        raise ValueError("An additional-field group name is required.")
     if model_name not in SINGLE_LABEL_MODELS and model_name != "additional_field_groups" and not is_additional_value:
         raise ValueError(f"Unsupported model type: {model_name}")
 
