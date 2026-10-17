@@ -160,7 +160,7 @@ class DocumentProcessor:
             # Step 5: Resolve the template and period format only after the
             # first-stage fields have been extracted. Configuration remains
             # authoritative; candidate suggestions cannot bypass its mappings.
-            resolved = self.registry.resolve_mapping(company, doc_type)
+            resolved = self.registry.resolve_mapping(company, doc_type, optional_fields)
             if not resolved:
                 result.errors.append(
                     f"No mapping found for company='{company}', "
