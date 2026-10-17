@@ -112,7 +112,7 @@ class DocumentProcessor:
             emission_date, date_error = self._extract_emission_date(extracted_text)
             if date_error:
                 result.errors.append(date_error)
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
 
             result.emission_date = emission_date
