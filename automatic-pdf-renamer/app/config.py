@@ -534,20 +534,6 @@ class TemplateRegistry:
         """
         return self._mappings
 
-    def get_additional_field_groups(self, company: str, document_type: str) -> list[str]:
-        """Resolve applicable additional-field groups without selecting a template.
-
-        Matching rules are evaluated in configuration order, consistent with
-        resolve_mapping(); the latest non-empty additional_fields declaration
-        wins. This lets ingestion extract first-stage fields before consuming
-        template and period-format decisions.
-        """
-        groups: list[str] = []
-        for rule in self._mappings:
-            if rule.match.matches_identity(company, document_type) and rule.set.additional_fields:
-                groups = rule.set.additional_fields.copy()
-        return groups
-
     def resolve_mapping(
         self,
         company: str,
