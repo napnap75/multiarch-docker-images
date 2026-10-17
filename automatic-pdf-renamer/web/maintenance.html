@@ -46,8 +46,6 @@
               <option value="period_format">Period format prediction</option>
               <option value="additional_field_values">Shared additional-field value extraction</option>
             </select>
-            <label for="additional-group-name" id="additional-group-label" hidden>Additional-field group name</label>
-            <input id="additional-group-name" type="text" placeholder="e.g. account_number" hidden pattern="[A-Za-z0-9_-]+" />
             <button id="train-model-button" class="primary-btn" type="submit">Train new version</button>
           </form>
           <p class="model-help">Training uses records with status <code>validated</code>. The shared additional-field model learns all eligible fields in one versioned artifact; each field needs at least two validated examples with distinct values. A newly trained version is not activated automatically.</p>
