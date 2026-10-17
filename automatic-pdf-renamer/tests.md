@@ -6,7 +6,7 @@ The end-to-end (E2E) test harness is intended to verify the Automatic PDF Rename
 
 The harness is designed to test the backend without depending on the web dashboard or a real S3 service. It uses a local filesystem-backed test storage area and disposable test data.
 
-> **Implementation status:** A first Docker-based pytest harness is implemented under `tests/e2e/`. It reuses the existing filesystem storage backend and includes representative rebuild, read-only, missing-document, and PDF-streaming scenarios. The broader scenarios below remain future coverage.
+> **Implementation status:** A first Docker-based pytest harness is implemented under `tests/e2e/`. It reuses the existing filesystem storage backend and includes representative rebuild, read-only, missing-document, and PDF-streaming scenarios. The suite now also covers representative Epic 4 dashboard workflows: list filtering/search, template options, metadata correction and safe PDF movement, plus configuration retrieval and valid/invalid updates.
 
 ## Test design at a glance
 
@@ -157,7 +157,7 @@ Start with a small set of high-value scenarios:
 9. **Collision handling:** a rename to an occupied destination follows the documented collision policy without overwriting another document.
 10. **Interrupted operations:** simulated failures do not delete the only recoverable copy of a document.
 
-Not every scenario needs to be implemented in the first iteration. The initial goal is a reliable isolation mechanism, a deterministic local storage adapter, and a few representative end-to-end scenarios.
+Not every scenario needs to be implemented in the first iteration. The initial goal is a reliable isolation mechanism, a deterministic local storage adapter, and representative end-to-end scenarios. The Epic 4 tests currently exercise the implemented HTTP endpoints and persisted sidecar/SQLite/filesystem state; they do not automate browser interactions in the React dashboard.
 
 ## Running and troubleshooting
 
