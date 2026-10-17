@@ -6,7 +6,7 @@ The end-to-end (E2E) test harness is intended to verify the Automatic PDF Rename
 
 The harness is designed to test the backend without depending on the web dashboard or a real S3 service. It uses a local filesystem-backed test storage area and disposable test data.
 
-> **Implementation status:** This document describes the intended test workflow and requirements. It does not imply that the harness or local test-storage adapter is already implemented.
+ > **Implementation status:** A first Docker-based pytest harness is implemented under `tests/e2e/`. It reuses the existing filesystem storage backend and includes representative rebuild, read-only, missing-document, and PDF-streaming scenarios. The broader scenarios below remain future coverage.
 
 ## Test design at a glance
 
