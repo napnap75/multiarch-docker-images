@@ -425,6 +425,29 @@ Training runs locally and stores versioned joblib artifacts under `MODEL_DIR/ver
 
 The first implementation trains synchronously in the API request and reports training errors directly. A future implementation may move long-running training to a persistent background-job queue and add held-out evaluation metrics before activation.
 
+
+### POST `/files/{sha256}/suggestions`
+
+Returns asynchronous, confidence-gated proposals for the document detail page. The browser first renders the saved document, then requests suggestions in the background and refreshes them after edits to template, period format, company, document type, emission date, or additional fields. Model-backed proposals are omitted when the model is unavailable or its confidence is below `CONFIDENCE_THRESHOLD`. The response includes `template_name`, `period_format`, `emitting_company`, and `document_type` when confident, plus derived `period` and `current_key` values when the corresponding inputs can be calculated. Derived values are recalculated from the current form values and are not independent ML predictions.
+
+Example response:
+
+```json
+{
+  "suggestions": {
+    "template_name": {"value": "invoice", "confidence": 0.94, "source": "model"},
+    "period_format": {"value": "monthly", "confidence": 0.91, "source": "model"},
+    "emitting_company": {"value": "Example Energy", "confidence": 0.97, "source": "model"},
+    "document_type": {"value": "invoice", "confidence": 0.96, "source": "model"},
+    "period": {"value": "2026-09", "confidence": 0.91, "source": "derived"},
+    "current_key": {"value": "files/example/2026-09/invoice.pdf", "confidence": 0.91, "source": "derived"}
+  },
+  "confidence_threshold": 0.8
+}
+```
+
+The frontend debounces changes and cancels stale requests. A suggestion is shown only when the corresponding prediction meets the confidence threshold. Users can apply model-backed suggestions to editable controls; calculated period and key previews remain derived from the current values and are recalculated on save.
+
 ## 11. Consistency and implementation rules
 
 1. Sidecar is the source of truth; SQLite is a rebuildable query replica.
