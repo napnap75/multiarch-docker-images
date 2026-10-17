@@ -14,7 +14,7 @@ from app.config import TemplateRegistry, load_templates
 from app.db import FileRecord, SQLiteFileRepository
 from app.period import format_period_from_emission_date
 from app.storage import StorageBackend
-from app.model_manager import activate_model, list_models, train_model
+from app.model_manager import activate_model as activate_model_artifact, list_models, train_model
 from app.ml import AmbiguousPredictionError, LocalMLPipeline, ModelUnavailableError
 
 from .deps import get_current_user
@@ -800,7 +800,7 @@ async def activate_model_version(
 ) -> dict[str, Any]:
     """Select a trained model version for runtime inference."""
     try:
-        return activate_model(model_name, version)
+        return activate_model_artifact(model_name, version)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except FileNotFoundError as error:
