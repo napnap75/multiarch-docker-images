@@ -47,7 +47,7 @@ The following inventory consolidates the requirements from the project brief and
 - **FR-TXT-01 — Text extraction:** extract all available text from every page of a PDF using a local library; no OCR in v1.
 - **FR-TXT-02 — Empty text handling:** route PDFs with empty or insufficient extracted text to human review with an explicit reason.
 - **FR-TXT-03 — Text persistence:** persist extracted text in the sidecar and SQLite replica so normal review and training workflows do not need to re-parse the PDF.
-- **FR-CLS-01 — Ordered ML-assisted extraction:** use local ML to extract emitting company, document type, and emission date; use another ML model to select additional-field groups from company and document type, then ML to extract their values; independently predict template and period format from company and document type; finally calculate period and storage key deterministically. No predefined mapping selects these outcomes.
+- **FR-CLS-01 — Ordered ML-assisted extraction:** use local ML to extract emitting company, document type, and emission date; use another ML model to select additional-field groups from company and document type, then one shared token-level ML model to extract their values; independently predict template and period format from company and document type; finally calculate period and storage key deterministically. No predefined mapping selects these outcomes.
 - **FR-CLS-02 — Confidence and unknown class (post-v1):** ML classification exposes confidence and routes results below a configurable threshold to review. The deterministic initial release uses explicit rule outcomes and does not generate artificial confidence scores.
 - **FR-FLD-01 — Common fields:** every document has template, emission date, emitting company, document type, and period.
 - **FR-FLD-02 — Optional fields:** templates define optional fields and reusable field groups with formats, allowed values, and extraction rules.
@@ -574,4 +574,4 @@ Completes the remaining Epic 4 capabilities and Epic 5, including consistency re
 
 ## 7. Open Decisions to Resolve Before the Affected Stories
 
-2. **ML field extraction:** specify which field groups use ML in v1 and what evaluation threshold is required before enabling each extractor. Classification and deterministic validation must remain usable independently.
+2. **ML field extraction:** specify which field groups use ML in v1 and what evaluation threshold is required before enabling the shared extractor. Classification and deterministic validation must remain usable independently.
