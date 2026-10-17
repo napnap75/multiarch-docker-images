@@ -911,3 +911,33 @@ body {
     flex-direction: column;
   }
 }
+
+
+/* Compact, asynchronously loaded model proposals under editable document fields. */
+.model-suggestion {
+  margin-top: 0.25rem;
+  color: var(--muted, #667085);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.model-suggestion[hidden] {
+  display: none;
+}
+
+.model-suggestion button {
+  margin: 0 0 0 0.25rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent, #3157a4);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.model-suggestion button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
