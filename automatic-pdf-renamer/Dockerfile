@@ -18,7 +18,8 @@ RUN python -m pip install --upgrade pip && \
         pymupdf \
         python-dateutil \
         PyYAML \
-        joblib
+        joblib \
+        scikit-learn
 
 EXPOSE 8000
 
