@@ -144,10 +144,31 @@ class LocalMLPipeline:
         except Exception as exc:
             raise ModelUnavailableError(f"ML inference failed for additional_field_groups: {exc}") from exc
 
-    def predict_additional_value(self, group_name: str, text: str) -> tuple[str, float]:
-        """Predict a field value from document text without a configured allow-list."""
-        safe_name = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in group_name)
-        return self._predict_label(f"additional_value_{safe_name}", text)
+    def predict_additional_values(self, field_names: list[str], text: str) -> dict[str, tuple[str, float]]:
+        """Extract all requested additional fields using one shared model artifact."""
+        model = self._load("additional_field_values")
+        if not hasattr(model, "predict_values"):
+            raise ModelUnavailableError(
+                "The active additional_field_values artifact does not support shared extraction; retrain it."
+            )
+        try:
+            predictions = model.predict_values(text, field_names)
+            results: dict[str, tuple[str, float]] = {}
+            for field_name in field_names:
+                value, confidence = predictions[field_name]
+                if not value or confidence < self.confidence_threshold:
+                    raise AmbiguousPredictionError(
+                        f"Additional field '{field_name}' confidence {confidence:.3f} is below "
+                        f"threshold {self.confidence_threshold:.3f}"
+                    )
+                results[field_name] = (str(value), float(confidence))
+            return results
+        except (ModelUnavailableError, AmbiguousPredictionError):
+            raise
+        except ValueError as exc:
+            raise ModelUnavailableError(str(exc)) from exc
+        except Exception as exc:
+            raise ModelUnavailableError(f"ML inference failed for additional_field_values: {exc}") from exc
 
     def predict_template_and_period_format(
         self, company: str, document_type: str
