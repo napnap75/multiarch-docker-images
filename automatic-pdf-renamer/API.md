@@ -225,7 +225,7 @@ The response must not claim ML confidence for a rules-only decision. `confidence
 
 ### GET `/files/{sha256}`
 
-Returns the complete document detail in a single request, including metadata and the full extracted text from every PDF page. The sidecar is the source of truth for both metadata and extracted file content, including text; SQLite is only a rebuildable replica/index for listing and search. Use the SHA-256 to locate the record if helpful, but build this response from the authoritative sidecar rather than treating SQLite as the canonical source.
+Returns the complete document detail in a single request, including metadata and the full extracted text from the PDF.
 
 Example response:
 
