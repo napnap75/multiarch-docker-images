@@ -64,7 +64,7 @@ class AdditionalValuesModel:
 
     @staticmethod
     def _tokens(text: str) -> list[tuple[str, int, int]]:
-        return [(match.group(), match.start(), match.end()) for match in re.finditer(r"\\S+", text)]
+        return [(match.group(), match.start(), match.end()) for match in re.finditer(r"\S+", text)]
 
     @staticmethod
     def _features(tokens: list[tuple[str, int, int]], index: int) -> dict[str, Any]:
