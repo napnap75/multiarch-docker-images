@@ -190,6 +190,7 @@ const buildAdditionalFieldRow = (label = '', value = '', suggestions = {}) => {
   removeButton.textContent = 'Remove';
   removeButton.addEventListener('click', () => {
     row.remove();
+    scheduleModelSuggestions();
     if (!additionalFields.querySelector('.additional-field-row')) {
       const empty = document.createElement('p');
       empty.className = 'additional-field-empty';
@@ -499,6 +500,7 @@ const saveDocument = async (event) => {
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
     renderDocument(result, currentFileId);
+    scheduleModelSuggestions();
     editStatus.textContent = 'Changes saved. The document is validated.';
     updateSaveButtonState();
     await loadDocumentNavigation(currentFileId);
@@ -516,6 +518,7 @@ if (addAdditionalFieldButton) {
     if (emptyState) emptyState.remove();
     additionalFields.append(buildAdditionalFieldRow('', '', fieldSuggestionState));
     updateSaveButtonState();
+    scheduleModelSuggestions();
   });
 }
 
