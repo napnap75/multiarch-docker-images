@@ -40,9 +40,17 @@ class LocalMLPipeline:
     def _load(self, name: str) -> Any:
         if name in self._models:
             return self._models[name]
-        path = self.model_dir / f"{name}.joblib"
+        active_path = self.model_dir / "active_models.json"
+        try:
+            active = __import__("json").loads(active_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            active = {}
+        version = active.get(name)
+        path = (self.model_dir / "versions" / name / f"{version}.joblib") if version else (self.model_dir / f"{name}.joblib")
         if not path.is_file():
-            raise ModelUnavailableError(f"Required ML model is missing: {path.name}")
+            raise ModelUnavailableError(
+                f"No active model artifact for {name}; train a version and activate it in Maintenance."
+            )
         try:
             import joblib
             model = joblib.load(path)
