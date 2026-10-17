@@ -69,6 +69,7 @@ class LocalMLPipeline:
         model = self._load(name)
         try:
             predictions = model.predict([sample])
+            logger.debug("ML model %s predicted %s for sample=%r", name, predictions, sample)
             if len(predictions) != 1:
                 raise ValueError("Expected exactly one prediction")
             label = predictions[0]
@@ -94,7 +95,8 @@ class LocalMLPipeline:
                     f"threshold {self.confidence_threshold:.3f}"
                 )
             return label.strip(), confidence
-        except (ModelUnavailableError, AmbiguousPredictionError):
+        except (ModelUnavailableError, AmbiguousPredictionError) as exc:
+            logger.debug("ML model %s failed for sample=%r: %s", name, sample, exc)
             raise
         except Exception as exc:
             raise ModelUnavailableError(f"ML inference failed for {name}: {exc}") from exc

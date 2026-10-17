@@ -292,7 +292,11 @@ async def get_document_model_suggestions(
         try:
             value, confidence = ml._predict_label(model_name, sample)
             suggestions[field] = {"value": value, "confidence": confidence, "source": "model"}
-        except (ModelUnavailableError, AmbiguousPredictionError):
+        except (ModelUnavailableError) as exc:
+            logger.debug("Model '%s' is unavailable for file_id=%s with error: %s", model_name, file_id, exc)
+            return
+        except (AmbiguousPredictionError) as exc:
+            logger.debug("Model '%s' is ambiguous for file_id=%s with error: %s", model_name, file_id, exc)
             return
 
     add_prediction("emitting_company", "field_emitting_company", text)
@@ -303,6 +307,8 @@ async def get_document_model_suggestions(
         sample = f"{company}\n{document_type}"
         add_prediction("template_name", "template_name", sample)
         add_prediction("period_format", "period_format", sample)
+
+    logger.debug("API POST /files/%s/suggestions: model predictions=%s", file_id, {k: v for k, v in suggestions.items() if v.get("source") == "model"})
 
     suggested_company = suggestions.get("emitting_company", {}).get("value", company)
     suggested_type = suggestions.get("document_type", {}).get("value", document_type)
