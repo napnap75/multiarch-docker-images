@@ -128,7 +128,7 @@ class AdditionalValuesModel:
                 output[field_name] = ("", 0.0)
                 continue
             span_start, span_end, confidence = max(spans, key=lambda span: span[2])
-            output[field_name] = (text[span_start:span_end].strip(" :;,.\\t\\r\\n"), confidence)
+            output[field_name] = (text[span_start:span_end].strip(" :;,. \t\r\n"), confidence)
         return output
 
 
