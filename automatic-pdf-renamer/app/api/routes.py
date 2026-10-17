@@ -95,7 +95,10 @@ def _as_file_item(file_id: str, metadata: dict[str, Any]) -> FileListItem:
 @router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     """Service health checkpoint."""
-    return HealthResponse(status="ok", app="automatic-pdf-renamer")
+    logger.debug("API GET /health: health check requested")
+    result = HealthResponse(status="ok", app="automatic-pdf-renamer")
+    logger.debug("API GET /health: status=%s", result.status)
+    return result
 
 
 @router.get("/files", response_model=list[FileListItem])
@@ -118,6 +121,8 @@ async def list_files(
     page: int = 1,
 ) -> list[FileListItem]:
     """List documents and report filtered and global counts in response headers."""
+    logger.debug("API GET /files: user=%s page=%s sort_by=%s sort_order=%s", (current_user or {}).get("username", "anonymous"), page, sort_by, sort_order)
+    logger.debug("API GET /files: active filters=%s", {key: value for key, value in {"status": status, "template": template, "period_format": period_format, "q": q, "current_key": current_key, "emitting_company": emitting_company, "document_type": document_type, "period": period, "confidence": confidence, "updated_at": updated_at}.items() if value is not None})
     storage = _storage(request)
     db = _db(request)
     filters = {
@@ -151,6 +156,7 @@ async def list_files(
     )
     response.headers["X-Total-Count"] = str(db.count_files(**filters))
     response.headers["X-Status-Counts"] = json.dumps(db.get_status_counts())
+    logger.debug("API GET /files: returning %s records; filtered_total=%s; status_counts=%s", len(records), response.headers["X-Total-Count"], response.headers["X-Status-Counts"])
 
     return [
         FileListItem(
@@ -178,6 +184,7 @@ async def get_file(
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> FileDetail:
     """Return metadata and extracted text for a single file."""
+    logger.debug("API GET /files/%s: loading document metadata", file_id)
     storage = _storage(request)
     db = _db(request)
     record = db.get_by_id(file_id)
@@ -236,7 +243,7 @@ async def get_file(
         "history": sidecar_metadata.get("events", []),
     }
     item = _as_file_item(record.id, metadata)
-    return FileDetail(
+    result = FileDetail(
         id=item.id,
         status=item.status,
         current_key=item.current_key,
@@ -255,6 +262,8 @@ async def get_file(
         optional_fields=record.optional_fields,
         history=metadata["history"] if isinstance(metadata["history"], list) else [],
     )
+    logger.debug("API GET /files/%s: loaded status=%s current_key=%s optional_field_count=%s", file_id, result.status, result.current_key, len(result.optional_fields or {}))
+    return result
 
 
 @router.post("/files/{file_id}/suggestions")
@@ -265,6 +274,7 @@ async def get_document_model_suggestions(
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Return confidence-gated model suggestions without delaying document rendering."""
+    logger.debug("API POST /files/%s/suggestions: requested fields=%s", file_id, sorted(payload.keys()))
     db = _db(request)
     record = db.get_by_id(file_id)
     if record is None:
@@ -354,6 +364,7 @@ async def get_document_model_suggestions(
     except (TypeError, ValueError):
         pass
 
+    logger.debug("API POST /files/%s/suggestions: returning fields=%s threshold=%s", file_id, sorted(suggestions.keys()), threshold)
     return {"suggestions": suggestions, "confidence_threshold": threshold}
 
 
@@ -364,6 +375,7 @@ async def get_file_pdf(
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> Response:
     """Stream a PDF by key from storage when present."""
+    logger.debug("API GET /files/%s/pdf: resolving PDF storage key", file_id)
     storage = _storage(request)
     db = _db(request)
     record = db.get_by_id(file_id)
@@ -403,6 +415,7 @@ async def edit_file(
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> FileDetail:
     """Recalculate and persist user-edited document metadata and its storage key."""
+    logger.debug("API POST /files/%s/edit: template=%s period_format=%s company=%s document_type=%s optional_fields=%s", file_id, payload.template_name, payload.period_format, payload.emitting_company, payload.document_type, sorted((payload.optional_fields or {}).keys()))
     storage = _storage(request)
     db = _db(request)
     registry = _registry(request)
@@ -653,6 +666,7 @@ async def document_edit_options(
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Return configured templates and existing document values for edit suggestions."""
+    logger.debug("API GET /document-options: loading template and field options")
     registry = _registry(request)
     db = _db(request)
     records = db.list_files(page_size=10000)
@@ -770,7 +784,10 @@ async def get_models(
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> dict[str, Any]:
     """List model types, trained versions, and currently active versions."""
-    return list_models()
+    logger.debug("API GET /models: listing local model inventory")
+    result = list_models()
+    logger.debug("API GET /models: response contains %s model types", len(result.get("models", [])))
+    return result
 
 
 @router.post("/models/train")
@@ -781,6 +798,7 @@ async def train_models(
 ) -> dict[str, Any]:
     """Train a model version from validated documents in the local SQLite index."""
     model_name = str(payload.get("model_name", "")).strip()
+    logger.debug("API POST /models/train: training requested for model=%s", model_name)
     db = _db(request)
     records = db.list_files(status="validated", page=1, page_size=100000)
     try:
@@ -840,6 +858,7 @@ async def list_consistency_flags(
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Return consistency anomalies. In the current implementation, this is a lightweight placeholder."""
+    logger.debug("API GET /consistency: scanning storage and database consistency")
     storage = _storage(request)
     db = _db(request)
     anomalies: list[dict[str, Any]] = []
