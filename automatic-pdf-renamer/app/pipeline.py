@@ -122,7 +122,7 @@ class DocumentProcessor:
             company, doc_type, field_errors = self._extract_company_and_type(extracted_text)
             if field_errors:
                 result.errors.extend(field_errors)
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
 
             result.company = company
@@ -132,14 +132,14 @@ class DocumentProcessor:
                     f"Unknown company '{company}'. "
                     f"Valid companies: {', '.join(self.registry.get_companies()[:10])}"
                 )
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
             if not self.registry.is_valid_document_type(doc_type):
                 result.errors.append(
                     f"Unknown document type '{doc_type}'. "
                     f"Valid types: {', '.join(self.registry.get_document_types()[:10])}"
                 )
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
 
             # Step 4: Determine the applicable additional-field groups from the
@@ -152,7 +152,7 @@ class DocumentProcessor:
                 field_value, field_error = self._extract_field_value(extracted_text, group_name)
                 if field_error:
                     result.errors.append(field_error)
-                    result.status = SidecarStatus.NOT_PROCESSED.value
+                    result.status = SidecarStatus.PENDING.value
                     return result
                 if field_value:
                     optional_fields[group_name] = field_value
@@ -166,7 +166,7 @@ class DocumentProcessor:
                     f"No mapping found for company='{company}', "
                     f"document_type='{doc_type}'. Routing to review."
                 )
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
 
             template_name = resolved.get("template")
@@ -176,14 +176,14 @@ class DocumentProcessor:
                     f"No template resolved for company='{company}', "
                     f"document_type='{doc_type}'. Routing to review."
                 )
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
             if not period_format:
                 result.errors.append(
                     f"No period_format resolved for company='{company}', "
                     f"document_type='{doc_type}'. Routing to review."
                 )
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
 
             result.template_name = template_name
@@ -195,7 +195,7 @@ class DocumentProcessor:
                     f"No period_format resolved for company='{company}', "
                     f"document_type='{doc_type}'. Routing to review."
                 )
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
             
             period_format_config = self.registry.get_period_format_config(period_format)
@@ -203,7 +203,7 @@ class DocumentProcessor:
                 result.errors.append(
                     f"Period format '{period_format}' not found in configuration"
                 )
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
             
             try:
