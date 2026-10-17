@@ -647,7 +647,7 @@ async def validate_file(
     )
 
 
-@router.get("/api/document-options")
+@router.get("/document-options")
 async def document_edit_options(
     request: Request,
     current_user: dict[str, str] | None = Depends(get_current_user),
@@ -708,7 +708,7 @@ async def document_edit_options(
     }
 
 
-@router.get("/api/config")
+@router.get("/config")
 async def get_config(
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> dict[str, str]:
@@ -720,7 +720,7 @@ async def get_config(
         raise HTTPException(status_code=500, detail="Unable to read the configured template file.") from error
 
 
-@router.put("/api/config")
+@router.put("/config")
 async def update_config(
     payload: ConfigUpdateRequest,
     request: Request,
@@ -879,130 +879,3 @@ async def rebuild_consistency(
         "count": len(rebuilt),
     }
     return request.app.state.last_rebuild
-
-
-@router.get("/api/health")
-async def api_health() -> HealthResponse:
-    """Alias for /health."""
-    return await health()
-
-
-@router.get("/api/files", response_model=list[FileListItem])
-async def list_files_api(
-    request: Request,
-    response: Response,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-    status: str | None = None,
-    template: str | None = None,
-    period_format: str | None = None,
-    q: str | None = None,
-    current_key: str | None = None,
-    emitting_company: str | None = None,
-    document_type: str | None = None,
-    period: str | None = None,
-    confidence: str | None = None,
-    updated_at: str | None = None,
-    sort_by: str = "updated_at",
-    sort_order: str = "desc",
-    page: int = 1,
-) -> list[FileListItem]:
-    """Compatibility alias for /files."""
-    return await list_files(
-        request=request,
-        response=response,
-        current_user=current_user,
-        status=status,
-        template=template,
-        period_format=period_format,
-        q=q,
-        current_key=current_key,
-        emitting_company=emitting_company,
-        document_type=document_type,
-        period=period,
-        confidence=confidence,
-        updated_at=updated_at,
-        sort_by=sort_by,
-        sort_order=sort_order,
-        page=page,
-    )
-
-
-@router.get("/api/files/{file_id}", response_model=FileDetail)
-async def get_file_api(
-    request: Request,
-    file_id: str,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> FileDetail:
-    """Compatibility alias for /files/{file_id}."""
-    return await get_file(request=request, file_id=file_id, current_user=current_user)
-
-
-@router.post("/api/files/{file_id}/edit", response_model=FileDetail)
-async def edit_file_api(
-    request: Request,
-    file_id: str,
-    payload: DocumentEditRequest,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> FileDetail:
-    """Compatibility alias for POST /files/{file_id}/edit."""
-    return await edit_file(
-        request=request,
-        file_id=file_id,
-        payload=payload,
-        current_user=current_user,
-    )
-
-
-@router.get("/api/templates")
-async def list_templates_api(
-    request: Request,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> list[dict[str, Any]]:
-    """Compatibility alias for /templates."""
-    return await list_templates(request=request, current_user=current_user)
-
-
-@router.get("/api/models")
-async def get_models_api(
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Compatibility alias for /models."""
-    return list_models()
-
-
-@router.post("/api/models/train")
-async def train_models_api(
-    request: Request,
-    payload: dict[str, Any],
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Compatibility alias for /models/train."""
-    return await train_models(request=request, payload=payload, current_user=current_user)
-
-
-@router.post("/api/models/{model_name}/{version}/activate")
-async def activate_model_version_api(
-    model_name: str,
-    version: str,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Compatibility alias for model activation."""
-    return await activate_model_version(model_name=model_name, version=version, current_user=current_user)
-
-
-@router.get("/api/consistency")
-async def list_consistency_flags_api(
-    request: Request,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> list[dict[str, Any]]:
-    """Compatibility alias for /consistency."""
-    return await list_consistency_flags(request=request, current_user=current_user)
-
-
-@router.post("/api/consistency/rebuild")
-async def rebuild_consistency_api(
-    request: Request,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Compatibility alias for /consistency/rebuild."""
-    return await rebuild_consistency(request=request, current_user=current_user)
