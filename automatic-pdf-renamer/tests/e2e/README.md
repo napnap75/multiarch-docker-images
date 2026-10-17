@@ -19,7 +19,7 @@ The suite builds the application image once per pytest session. Each test create
 
 Set `E2E_DOCKER_IMAGE` to override the temporary image tag. Set `E2E_STARTUP_TIMEOUT` to adjust the bounded startup wait. The suite uses a dynamically allocated localhost port and removes each container and temporary workspace when finished.
 
-Fixtures are immutable inputs. The baseline includes an empty PDF and a generated valid one-page PDF with deterministic sidecars. PDF generation exists only to keep the fixture small and readable; tests exercise the running service, not a test-only in-process app.
+Fixtures are checked-in immutable inputs under `tests/e2e/fixtures/baseline/`. The baseline includes an empty PDF and a valid one-page PDF, each with its matching `.meta.json` sidecar. Each test copies these files into its own temporary workspace; tests do not generate PDF or sidecar contents in Python.
 
 ## Safety
 
