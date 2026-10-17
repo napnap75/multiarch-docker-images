@@ -171,15 +171,18 @@ class DocumentProcessor:
 
             optional_fields: dict[str, str] = {}
             field_confidences = [initial_confidence, groups_confidence]
-            for group_name in additional_field_groups:
+            if additional_field_groups:
                 try:
-                    field_value, field_confidence = self.ml_pipeline.predict_additional_value(group_name, extracted_text)
+                    extracted_additional_fields = self.ml_pipeline.predict_additional_values(
+                        additional_field_groups, extracted_text
+                    )
                 except (ModelUnavailableError, AmbiguousPredictionError) as exc:
                     result.errors.append(str(exc))
                     result.status = SidecarStatus.PENDING.value
                     return result
-                optional_fields[group_name] = field_value
-                field_confidences.append(field_confidence)
+                for field_name, (field_value, field_confidence) in extracted_additional_fields.items():
+                    optional_fields[field_name] = field_value
+                    field_confidences.append(field_confidence)
 
             # Template and period format are independent ML predictions, not
             # deterministic mapping lookups. Configuration only validates that
