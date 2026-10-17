@@ -47,7 +47,7 @@ The following inventory consolidates the requirements from the project brief and
 - **FR-TXT-01 — Text extraction:** extract all available text from every page of a PDF using a local library; no OCR in v1.
 - **FR-TXT-02 — Empty text handling:** route PDFs with empty or insufficient extracted text to human review with an explicit reason.
 - **FR-TXT-03 — Text persistence:** persist extracted text in the sidecar and SQLite replica so normal review and training workflows do not need to re-parse the PDF.
-- **FR-CLS-01 — Classification:** classify documents against configured templates. The initial light release uses deterministic rules; the ML epic adds TF-IDF and Logistic Regression classification.
+- **FR-CLS-01 — Ordered ML-assisted extraction:** first extract emitting company, document type, additional-field values, and emission date from document text; determine additional-field groups from the company/type mapping; next resolve template and period format; finally calculate period and storage key. ML proposes/ranks candidates, while configured rules and allow-lists validate them.
 - **FR-CLS-02 — Confidence and unknown class (post-v1):** ML classification exposes confidence and routes results below a configurable threshold to review. The deterministic initial release uses explicit rule outcomes and does not generate artificial confidence scores.
 - **FR-FLD-01 — Common fields:** every document has template, emission date, emitting company, document type, and period.
 - **FR-FLD-02 — Optional fields:** templates define optional fields and reusable field groups with formats, allowed values, and extraction rules.
