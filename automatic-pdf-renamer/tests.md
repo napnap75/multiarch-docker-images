@@ -6,14 +6,14 @@ The end-to-end (E2E) test harness is intended to verify the Automatic PDF Rename
 
 The harness is designed to test the backend without depending on the web dashboard or a real S3 service. It uses a local filesystem-backed test storage area and disposable test data.
 
- > **Implementation status:** A first Docker-based pytest harness is implemented under `tests/e2e/`. It reuses the existing filesystem storage backend and includes representative rebuild, read-only, missing-document, and PDF-streaming scenarios. The broader scenarios below remain future coverage.
+> **Implementation status:** A first Docker-based pytest harness is implemented under `tests/e2e/`. It reuses the existing filesystem storage backend and includes representative rebuild, read-only, missing-document, and PDF-streaming scenarios. The broader scenarios below remain future coverage.
 
 ## Test design at a glance
 
 Each test run should follow this sequence:
 
-1. Start from a checked-in fixture directory containing sample PDF files and their sidecars.
-2. Copy that fixture directory to a unique temporary workspace. Never run a test against the original fixtures.
+1. Create a baseline fixture directory containing sample PDF files and their `.meta.json` sidecars.
+2. Keep that baseline inside a unique temporary workspace, never in a developer or production data directory.
 3. Start a fresh instance of the application configured to use that workspace as its local storage root and a new SQLite database.
 4. Call the API's consistency rebuild endpoint and wait for its asynchronous job to finish. This initializes the database from the sidecars rather than from pre-populated database state.
 5. Execute the test's ordered list of HTTP actions.
