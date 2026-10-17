@@ -15,7 +15,7 @@ python -m pip install -r tests/e2e/requirements.txt
 pytest -q tests/e2e
 ```
 
-The suite builds the application image once per pytest session. Each test copies the baseline fixture into its own temporary workspace, starts a new container with a new SQLite database, rebuilds SQLite from sidecars, and executes ordered HTTP actions. After each action, assertions can inspect the API, the host-mounted filesystem, and SQLite.
+The suite builds the application image once per pytest session. Each test creates a baseline fixture tree (PDFs plus `.meta.json` sidecars) in its own temporary workspace, starts a new container with a new SQLite database, rebuilds SQLite from sidecars, and executes ordered HTTP actions. After each action, assertions can inspect the API, the host-mounted filesystem, and SQLite.
 
 Set `E2E_DOCKER_IMAGE` to override the temporary image tag. Set `E2E_STARTUP_TIMEOUT` to adjust the bounded startup wait. The suite uses a dynamically allocated localhost port and removes each container and temporary workspace when finished.
 
