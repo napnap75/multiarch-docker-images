@@ -95,3 +95,113 @@ def test_pdf_endpoint_streams_original_bytes(e2e_service: dict[str, Any]) -> Non
 
     _assert_baseline(service, expected_count=2)
     assert _filesystem_snapshot(service["storage"]) == before
+
+def test_file_list_filters_and_search(e2e_service: dict[str, Any]) -> None:
+    service = e2e_service
+    base = service["base_url"]
+    status_code, rebuilt, _ = request_json(base, "POST", "/consistency/rebuild")
+    assert status_code == 200, rebuilt
+
+    status_code, processed, headers = request_json(base, "GET", "/files?status=processed")
+    assert status_code == 200, processed
+    assert len(processed) == 1
+    assert processed[0]["id"] == "b6c81b0f56ce2237b8d121f1066ed699fc32cd18a587e337cb7273d63e862fa4"
+    assert {key.lower(): value for key, value in headers.items()}.get("x-total-count") == "1"
+
+    status_code, by_company, _ = request_json(base, "GET", "/files?emitting_company=EDF")
+    assert status_code == 200, by_company
+    assert len(by_company) == 1
+    assert by_company[0]["emitting_company"] == "EDF"
+
+    status_code, by_text, _ = request_json(base, "GET", "/files?q=E2E%20sample%20document")
+    assert status_code == 200, by_text
+    assert any(item["id"] == "b6c81b0f56ce2237b8d121f1066ed699fc32cd18a587e337cb7273d63e862fa4" for item in by_text)
+
+
+def test_document_edit_updates_metadata_and_moves_pdf_safely(e2e_service: dict[str, Any]) -> None:
+    service = e2e_service
+    base = service["base_url"]
+    file_id = "b6c81b0f56ce2237b8d121f1066ed699fc32cd18a587e337cb7273d63e862fa4"
+    status_code, rebuilt, _ = request_json(base, "POST", "/consistency/rebuild")
+    assert status_code == 200, rebuilt
+
+    source_pdf = service["storage"] / "pending/valid.pdf"
+    original_bytes = source_pdf.read_bytes()
+    payload = {
+        "template_name": "default",
+        "period_format": "monthly",
+        "emitting_company": "EDF",
+        "document_type": "facture",
+        "emission_date": "2026-09-20",
+        "optional_fields": {"customer_number": "CUST-12345678"},
+    }
+    status_code, detail, _ = request_json(base, "POST", f"/files/{file_id}/edit", payload)
+    assert status_code == 200, detail
+    assert detail["status"] == "validated"
+    assert detail["emission_date"] == "2026-09-20"
+    assert detail["period"] == "September 2026"
+    assert detail["current_key"].startswith("files/EDF/September 2026/facture/2026-09-20_valid.pdf")
+    assert detail["optional_fields"] == {"customer_number": "CUST-12345678"}
+
+    destination = service["storage"] / detail["current_key"]
+    assert destination.read_bytes() == original_bytes
+    assert not source_pdf.exists()
+    assert not (service["storage"] / "pending/valid.meta.json").exists()
+
+    rows = _database_rows(service["db_path"])
+    matching = [row for row in rows if row["sha256"] == file_id]
+    assert len(matching) == 1
+    assert matching[0]["status"] == "validated"
+    assert matching[0]["current_key"] == detail["current_key"]
+    assert matching[0]["optional_fields"] == json.dumps({"customer_number": "CUST-12345678"}, separators=(",", ":")) or json.loads(matching[0]["optional_fields"]) == {"customer_number": "CUST-12345678"}
+
+    sidecar_path = service["storage"] / f"{detail['current_key']}.meta.json"
+    assert sidecar_path.exists()
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    assert sidecar["status"] == "validated"
+    assert sidecar["optional_fields"] == {"customer_number": "CUST-12345678"}
+    assert any(event.get("type") == "corrected" for event in sidecar.get("events", []))
+
+
+def test_configuration_can_be_read_and_invalid_update_is_rejected(e2e_service: dict[str, Any]) -> None:
+    base = e2e_service["base_url"]
+    status_code, original, _ = request_json(base, "GET", "/api/config")
+    assert status_code == 200, original
+    assert isinstance(original.get("content"), str)
+    assert '"templates"' in original["content"]
+
+    status_code, error, _ = request_json(base, "PUT", "/api/config", {"content": '{"templates":'})
+    assert status_code == 422, error
+
+    status_code, after, _ = request_json(base, "GET", "/api/config")
+    assert status_code == 200, after
+    assert after["content"] == original["content"]
+
+
+def test_configuration_valid_update_reloads_without_changing_content(e2e_service: dict[str, Any]) -> None:
+    base = e2e_service["base_url"]
+    status_code, original, _ = request_json(base, "GET", "/api/config")
+    assert status_code == 200, original
+
+    status_code, saved, _ = request_json(base, "PUT", "/api/config", {"content": original["content"]})
+    assert status_code == 200, saved
+    assert saved == {"saved": True, "reloaded": True}
+
+    status_code, current, _ = request_json(base, "GET", "/api/config")
+    assert status_code == 200, current
+    assert current["content"] == original["content"]
+
+
+def test_template_options_are_available_for_dashboard(e2e_service: dict[str, Any]) -> None:
+    base = e2e_service["base_url"]
+    status_code, templates, _ = request_json(base, "GET", "/templates")
+    assert status_code == 200, templates
+    assert {template["name"] for template in templates} >= {"default", "edf_invoice", "bank_statement"}
+
+    status_code, options, _ = request_json(base, "GET", "/api/document-options")
+    assert status_code == 200, options
+    assert "templates" in options
+    assert "period_formats" in options
+    assert "companies" in options
+    assert "document_types" in options
+
