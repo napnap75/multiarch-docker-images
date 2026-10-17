@@ -325,12 +325,10 @@ async def get_document_model_suggestions(
                 item["confidence"] for key, item in suggestions.items()
                 if key in {"template_name", "period_format", "emitting_company", "document_type"}
             ]
-            if source_confidences:
-                suggestions["period"] = {
-                    "value": calculated_period,
-                    "confidence": min(source_confidences),
-                    "source": "derived",
-                }
+            suggestions["period"] = {
+                "value": calculated_period,
+                "source": "derived",
+            }
             key_pattern = registry.get_key_pattern(str(suggested_template))
             if key_pattern:
                 optional_fields = payload.get("optional_fields")
@@ -361,12 +359,10 @@ async def get_document_model_suggestions(
                         calculated_key = f"files/{calculated_key}"
                     if not calculated_key.lower().endswith(".pdf"):
                         calculated_key = f"{calculated_key}.pdf"
-                    if source_confidences:
-                        suggestions["current_key"] = {
-                            "value": calculated_key,
-                            "confidence": min(source_confidences),
-                            "source": "derived",
-                        }
+                    suggestions["current_key"] = {
+                        "value": calculated_key,
+                        "source": "derived",
+                    }
     except (TypeError, ValueError):
         pass
 
