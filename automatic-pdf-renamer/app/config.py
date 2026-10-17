@@ -143,6 +143,17 @@ class MappingMatch:
             additional_fields=data.get("additional_fields", {}),
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize configured match criteria, including optional-field predicates."""
+        result: dict[str, Any] = {}
+        if self.company is not None:
+            result["company"] = self.company
+        if self.document_type is not None:
+            result["document_type"] = self.document_type
+        if self.additional_fields:
+            result["additional_fields"] = self.additional_fields.copy()
+        return result
+
     def matches_identity(self, company: str, document_type: str) -> bool:
         """Match company/document type independently of extracted optional fields."""
         company_match = self.company is None or (isinstance(self.company, list) and company in self.company) or self.company == company
