@@ -296,8 +296,8 @@ async def get_document_model_suggestions(
 
     suggested_company = suggestions.get("emitting_company", {}).get("value", company)
     suggested_type = suggestions.get("document_type", {}).get("value", document_type)
-    suggested_template = suggestions.get("template_name", {}).get("value", payload.get("template_name") or record.template_name)
-    suggested_format = suggestions.get("period_format", {}).get("value", payload.get("period_format") or record.period_format)
+    suggested_template = payload.get("template_name") or suggestions.get("template_name", {}).get("value", record.template_name)
+    suggested_format = payload.get("period_format") or suggestions.get("period_format", {}).get("value", record.period_format)
 
     try:
         raw_date = str(payload.get("emission_date") or record.emission_date or "")
