@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
-import socket
 import subprocess
 import time
 import uuid
@@ -13,8 +11,6 @@ from typing import Any, Iterator
 import pytest
 
 APP_DIR = Path(__file__).resolve().parents[2]
-FIXTURE_DIR = Path(__file__).parent / "fixtures" / "baseline"
-
 
 def _run(command: list[str], *, timeout: int = 120) -> str:
     result = subprocess.run(
