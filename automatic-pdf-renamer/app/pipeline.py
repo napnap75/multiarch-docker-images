@@ -108,8 +108,12 @@ class DocumentProcessor:
                 result.status = SidecarStatus.PENDING.value
                 return result
 
-            # Step 2: Find emission date using regex patterns from config
+            # Stage 1: extract all text-derived common fields in the same pass.
+            # Keep these independent so a missing date does not prevent company/type
+            # ambiguity from being detected and reported for the same document.
             emission_date, date_error = self._extract_emission_date(extracted_text)
+            company, doc_type, field_errors = self._extract_company_and_type(extracted_text)
+
             if date_error:
                 result.errors.append(date_error)
                 result.status = SidecarStatus.PENDING.value
@@ -117,9 +121,8 @@ class DocumentProcessor:
 
             result.emission_date = emission_date
 
-            # Step 3: Identify the issuing company and document type from the text.
+            # Stage 1 results are validated only after all initial extractors have run.
             # Never substitute a default class: ambiguous or unknown values require review.
-            company, doc_type, field_errors = self._extract_company_and_type(extracted_text)
             if field_errors:
                 result.errors.extend(field_errors)
                 result.status = SidecarStatus.PENDING.value
