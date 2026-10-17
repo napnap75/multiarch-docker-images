@@ -80,7 +80,7 @@ class DocumentSuggestionTests(unittest.TestCase):
         self.assertEqual(suggestions["emitting_company"]["value"], "Suggested Company")
         self.assertEqual(suggestions["template_name"]["value"], "invoice-template")
         self.assertEqual(suggestions["period"]["value"], "2026-09")
-        self.assertEqual(suggestions["current_key"]["value"], "files/example/2026-09/invoice.pdf")
+        self.assertEqual(suggestions["current_key"]["value"], "files/example/Suggested Company/2026-09/invoice.pdf")
 
     def test_unavailable_or_low_confidence_predictions_are_omitted(self):
         class LowConfidencePipeline(FakeMLPipeline):
