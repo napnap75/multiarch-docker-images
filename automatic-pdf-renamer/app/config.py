@@ -130,6 +130,7 @@ class MappingMatch:
 
     company: str | None = None
     document_type: str | None = None
+    additional_fields: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "MappingMatch":
@@ -139,9 +140,15 @@ class MappingMatch:
         return cls(
             company=data.get("company"),
             document_type=data.get("document_type"),
+            additional_fields=data.get("additional_fields", {}),
         )
 
-    def matches(self, company: str, document_type: str) -> bool:
+    def matches(
+        self,
+        company: str,
+        document_type: str,
+        optional_fields: dict[str, Any] | None = None,
+    ) -> bool:
         """Check if this match criteria matches the given company and document type.
         
         Empty match (both None) matches everything.
@@ -150,7 +157,12 @@ class MappingMatch:
         """
         company_match = self.company is None or (isinstance(self.company, list) and company in self.company) or self.company == company
         doc_type_match = self.document_type is None or (isinstance(self.document_type, list) and document_type in self.document_type) or self.document_type == document_type
-        return company_match and doc_type_match
+        if not (company_match and doc_type_match):
+            return False
+        # Additional-field criteria are optional for backward compatibility.
+        # When configured, every named field must equal its expected value.
+        extracted = optional_fields or {}
+        return all(extracted.get(name) == expected for name, expected in self.additional_fields.items())
 
 
 @dataclass
@@ -521,7 +533,12 @@ class TemplateRegistry:
                 groups = rule.set.additional_fields.copy()
         return groups
 
-    def resolve_mapping(self, company: str, document_type: str) -> dict[str, Any]:
+    def resolve_mapping(
+        self,
+        company: str,
+        document_type: str,
+        optional_fields: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Resolve the mapping for a specific (company, document_type) tuple.
         
         Processes all rules in order. For each matching rule, applies the set fields.
@@ -538,7 +555,7 @@ class TemplateRegistry:
         result: dict[str, Any] = {}
         
         for rule in self._mappings:
-            if rule.matches(company, document_type):
+            if rule.matches(company, document_type, optional_fields):
                 # Apply set fields, overriding previous values
                 if rule.set.template is not None:
                     result["template"] = rule.set.template
