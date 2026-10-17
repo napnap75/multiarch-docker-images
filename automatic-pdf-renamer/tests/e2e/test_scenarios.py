@@ -52,7 +52,7 @@ def test_rebuild_and_read_only_requests(e2e_service: dict[str, Any]) -> None:
     status, items, headers = request_json(base, "GET", "/files")
     assert status == 200, items
     assert len(items) == 2
-    assert headers.get("X-Total-Count") == "2"
+    assert {key.lower(): value for key, value in headers.items()}.get("x-total-count") == "2"
     _assert_baseline(service, expected_count=2)
     assert _filesystem_snapshot(storage) == original_files
 
