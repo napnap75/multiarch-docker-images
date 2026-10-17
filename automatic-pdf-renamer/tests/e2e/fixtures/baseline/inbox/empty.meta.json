@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "original_key": "inbox/empty.pdf",
+  "current_key": "inbox/empty.pdf",
+  "status": "not processed",
+  "template_name": "default",
+  "period_format": "monthly",
+  "confidence": 0,
+  "emission_date": "",
+  "period": "",
+  "emitting_company": "",
+  "document_type": "",
+  "optional_fields": {},
+  "extracted_text": "",
+  "created_at": "2026-01-01T00:00:00+00:00",
+  "updated_at": "2026-01-01T00:00:00+00:00",
+  "events": []
+}
