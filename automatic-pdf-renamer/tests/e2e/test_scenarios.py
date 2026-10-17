@@ -139,8 +139,8 @@ def test_document_edit_updates_metadata_and_moves_pdf_safely(e2e_service: dict[s
     assert status_code == 200, detail
     assert detail["status"] == "validated"
     assert detail["emission_date"] == "2026-09-20"
-    assert detail["period"] == "September 2026"
-    assert detail["current_key"].startswith("files/EDF/September 2026/facture/2026-09-20_valid.pdf")
+    assert detail["period"] == "Septembre 2026"
+    assert detail["current_key"].startswith("files/EDF/Septembre 2026/facture/2026-09-20_valid.pdf")
     assert detail["optional_fields"] == {"customer_number": "CUST-12345678"}
 
     destination = service["storage"] / detail["current_key"]
