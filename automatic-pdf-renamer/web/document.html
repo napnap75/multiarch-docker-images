@@ -54,18 +54,22 @@
                   <div class="field-group">
                     <label for="edit-template">Template</label>
                     <select id="edit-template" name="template_name" required></select>
+                    <div class="model-suggestion" id="suggestion-template_name" hidden></div>
                   </div>
                   <div class="field-group">
                     <label for="edit-period-format">Period format</label>
                     <select id="edit-period-format" name="period_format" required></select>
+                    <div class="model-suggestion" id="suggestion-period_format" hidden></div>
                   </div>
                   <div class="field-group">
                     <label for="edit-company">Company</label>
                     <select id="edit-company" name="emitting_company" required></select>
+                    <div class="model-suggestion" id="suggestion-emitting_company" hidden></div>
                   </div>
                   <div class="field-group">
                     <label for="edit-document-type">Document type</label>
                     <select id="edit-document-type" name="document_type" required></select>
+                    <div class="model-suggestion" id="suggestion-document_type" hidden></div>
                   </div>
                   <div class="field-group">
                     <label for="edit-emission-date">Emission date</label>
@@ -77,10 +81,12 @@
                   <div>
                     <span class="edit-output-label">Period, recalculated on save</span>
                     <output id="period-preview">—</output>
+                    <div class="model-suggestion" id="suggestion-period" hidden></div>
                   </div>
                   <div>
                     <span class="edit-output-label">Current key, recalculated on save</span>
                     <output id="current-key-preview" class="key-text">—</output>
+                    <div class="model-suggestion" id="suggestion-current_key" hidden></div>
                   </div>
                 </div>
                 <div class="edit-form-actions">
