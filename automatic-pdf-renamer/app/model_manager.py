@@ -122,6 +122,17 @@ def train_model(model_name: str, records: list[Any]) -> dict[str, Any]:
         unique_labels = sorted({label for row in labels for label in row})
         if len(samples) < 2 or not unique_labels:
             raise ValueError("At least two validated documents and one labeled additional-field group are required.")
+        # Each one-vs-rest classifier needs positive and negative examples.
+        eligible_labels = [
+            label for label in unique_labels
+            if 0 < sum(label in row for row in labels) < len(labels)
+        ]
+        if not eligible_labels:
+            raise ValueError(
+                "No additional-field group has both positive and negative validated examples."
+            )
+        unique_labels = eligible_labels
+        labels = [[label for label in row if label in unique_labels] for row in labels]
         mlb = MultiLabelBinarizer(classes=unique_labels)
         target = mlb.fit_transform(labels)
         vectorizer = TfidfVectorizer(ngram_range=(1, 2), sublinear_tf=True)
