@@ -1,7 +1,7 @@
 # API — Automatic PDF Renamer
 
 Version: 1.0 (design specification)  
-Base path: `/api/v1`  
+Base path: `/`  
 Backend: FastAPI; storage: Garage S3-compatible bucket; metadata source of truth: per-file sidecars; query index: SQLite.
 
 This document defines the HTTP API consumed by the local web dashboard and the operational API used to observe ingestion, recover the index, and run maintenance jobs. The API is a local, same-origin interface; it does not expose the S3 credentials or bypass the sidecar-as-source-of-truth rule.
@@ -191,7 +191,7 @@ Query parameters:
 | `sort_by` | string | Allowlisted: `emission_date`, `period`, `current_key`, `status`, `template_name`, `document_type`, `emitting_company`, `created_at`, `updated_at` |
 | `sort_order` | string | `asc` or `desc` |
 
-Example: `GET /api/v1/files?status=pending&q=EDF&page=1&page_size=25`
+Example: `GET /files?status=pending&q=EDF&page=1&page_size=25`
 
 Response:
 
@@ -415,9 +415,9 @@ Allowed job statuses are technical job states such as `queued`, `running`, `succ
 
 The Maintenance page manages local model versions using these endpoints:
 
-- `GET /api/models`: list supported model types, stored versions, and the active version for each type.
-- `POST /api/models/train`: train a new version from indexed documents with business status `validated`. JSON body: `{"model_name":"additional_field_values"}`. Returns the model name, version, training sample count, and status. Training errors return a validation error when the labeled dataset is insufficient.
-- `POST /api/models/{model_name}/{version}/activate`: select an existing version for runtime inference. The selection is written atomically to `MODEL_DIR/active_models.json`.
+- `GET /models`: list supported model types, stored versions, and the active version for each type.
+- `POST /models/train`: train a new version from indexed documents with business status `validated`. JSON body: `{"model_name":"additional_field_values"}`. Returns the model name, version, training sample count, and status. Training errors return a validation error when the labeled dataset is insufficient.
+- `POST /models/{model_name}/{version}/activate`: select an existing version for runtime inference. The selection is written atomically to `MODEL_DIR/active_models.json`.
 
 Supported model types are `field_emitting_company`, `field_document_type`, `field_emission_date`, `additional_field_groups`, `additional_field_values`, `template_name`, and `period_format`. The shared additional-field model is trained and activated once for all eligible field names. All additional-field values are extracted by the shared `additional_field_values` model artifact. It uses one shared token-level classifier to label document-text spans by field, allowing values not seen during training when their text appears in the document. Each extracted span is confidence-gated independently. Training labels are accepted only when the validated field value appears in the saved extracted text.
 
