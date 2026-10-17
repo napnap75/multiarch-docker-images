@@ -455,6 +455,10 @@ const fetchModelSuggestions = async () => {
     Object.keys(suggestionElements).forEach((fieldName) => {
       renderModelSuggestion(fieldName, result.suggestions[fieldName]);
     });
+    const calculatedPeriod = result.suggestions.period?.value;
+    const calculatedKey = result.suggestions.current_key?.value;
+    periodPreview.textContent = calculatedPeriod || '—';
+    keyPreview.textContent = calculatedKey || '—';
   } catch (error) {
     if (error.name !== 'AbortError') console.debug('Document model suggestions are unavailable.', error);
   }
