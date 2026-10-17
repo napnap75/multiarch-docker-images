@@ -17,7 +17,8 @@ RUN python -m pip install --upgrade pip && \
         boto3 \
         pymupdf \
         python-dateutil \
-        PyYAML
+        PyYAML \
+        joblib
 
 EXPOSE 8000
 
