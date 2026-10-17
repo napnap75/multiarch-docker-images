@@ -354,6 +354,124 @@ const renderDocument = (documentData, fileId) => {
   statusMessage.textContent = '';
 };
 
+const suggestionElements = {
+  template_name: document.getElementById('suggestion-template_name'),
+  period_format: document.getElementById('suggestion-period_format'),
+  emitting_company: document.getElementById('suggestion-emitting_company'),
+  document_type: document.getElementById('suggestion-document_type'),
+  period: document.getElementById('suggestion-period'),
+  current_key: document.getElementById('suggestion-current_key'),
+};
+
+let suggestionRequestSequence = 0;
+let suggestionTimer = null;
+let suggestionAbortController = null;
+
+const hideModelSuggestions = () => {
+  Object.values(suggestionElements).forEach((element) => {
+    if (element) {
+      element.hidden = true;
+      element.replaceChildren();
+    }
+  });
+};
+
+const renderModelSuggestion = (fieldName, suggestion) => {
+  const container = suggestionElements[fieldName];
+  if (!container) return;
+  container.replaceChildren();
+  if (!suggestion || typeof suggestion.value !== 'string' || !suggestion.value.trim()) {
+    container.hidden = true;
+    return;
+  }
+
+  const prefix = document.createElement('span');
+  const confidence = Number(suggestion.confidence);
+  const confidenceText = Number.isFinite(confidence)
+    ? ` · confidence ${Math.round(confidence * 100)}%`
+    : '';
+  prefix.textContent = `Model suggestion: ${suggestion.value}${confidenceText}`;
+  container.append(prefix);
+
+  const controls = {
+    template_name: templateSelect,
+    period_format: periodFormatSelect,
+    emitting_company: companyInput,
+    document_type: documentTypeInput,
+  };
+  const control = controls[fieldName];
+  if (control) {
+    const applyButton = document.createElement('button');
+    applyButton.type = 'button';
+    applyButton.textContent = 'Use suggestion';
+    applyButton.setAttribute('aria-label', `Use model suggestion for ${fieldName.replaceAll('_', ' ')}`);
+    applyButton.addEventListener('click', () => {
+      const options = [...control.options].map((option) => option.value);
+      if (control.tagName === 'SELECT' && !options.includes(suggestion.value)) {
+        const option = document.createElement('option');
+        option.value = suggestion.value;
+        option.textContent = suggestion.value;
+        control.append(option);
+      }
+      control.value = suggestion.value;
+      control.dispatchEvent(new Event('change', { bubbles: true }));
+      updateSaveButtonState();
+      scheduleModelSuggestions();
+    });
+    container.append(' ', applyButton);
+  } else if (suggestion.source === 'derived') {
+    const applyButton = document.createElement('button');
+    applyButton.type = 'button';
+    applyButton.textContent = 'Show calculated value';
+    applyButton.addEventListener('click', () => {
+      if (fieldName === 'period') periodPreview.textContent = suggestion.value;
+      if (fieldName === 'current_key') keyPreview.textContent = suggestion.value;
+    });
+    container.append(' ', applyButton);
+  }
+  container.hidden = false;
+};
+
+const scheduleModelSuggestions = () => {
+  if (!currentFileId) return;
+  if (suggestionTimer) clearTimeout(suggestionTimer);
+  suggestionTimer = setTimeout(() => {
+    fetchModelSuggestions();
+  }, 250);
+};
+
+const fetchModelSuggestions = async () => {
+  if (!currentFileId) return;
+  const sequence = ++suggestionRequestSequence;
+  if (suggestionAbortController) suggestionAbortController.abort();
+  suggestionAbortController = new AbortController();
+
+  const payload = {
+    template_name: templateSelect.value,
+    period_format: periodFormatSelect.value,
+    emitting_company: companyInput.value.trim(),
+    document_type: documentTypeInput.value.trim(),
+    emission_date: parseEmissionDateInput(emissionDateInput.value),
+    optional_fields: getAdditionalFieldEntries(),
+  };
+  try {
+    const response = await fetch(`/api/files/${encodeURIComponent(currentFileId)}/suggestions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: suggestionAbortController.signal,
+    });
+    if (!response.ok) return;
+    const result = await response.json();
+    if (sequence !== suggestionRequestSequence || !result || !result.suggestions) return;
+    Object.keys(suggestionElements).forEach((fieldName) => {
+      renderModelSuggestion(fieldName, result.suggestions[fieldName]);
+    });
+  } catch (error) {
+    if (error.name !== 'AbortError') console.debug('Document model suggestions are unavailable.', error);
+  }
+};
+
 const saveDocument = async (event) => {
   event.preventDefault();
   if (!currentFileId || saveButton.disabled) return;
@@ -400,10 +518,22 @@ if (addAdditionalFieldButton) {
   });
 }
 
-editForm.addEventListener('input', updateSaveButtonState);
-editForm.addEventListener('change', updateSaveButtonState);
-additionalFields.addEventListener('input', updateSaveButtonState);
-additionalFields.addEventListener('change', updateSaveButtonState);
+editForm.addEventListener('input', () => {
+  updateSaveButtonState();
+  scheduleModelSuggestions();
+});
+editForm.addEventListener('change', () => {
+  updateSaveButtonState();
+  scheduleModelSuggestions();
+});
+additionalFields.addEventListener('input', () => {
+  updateSaveButtonState();
+  scheduleModelSuggestions();
+});
+additionalFields.addEventListener('change', () => {
+  updateSaveButtonState();
+  scheduleModelSuggestions();
+});
 
 const loadDocument = async () => {
   const fileId = new URLSearchParams(window.location.search).get('id');
@@ -435,6 +565,7 @@ const loadDocument = async () => {
     renderDocument(documentData, fileId);
     renderAdditionalFields(documentData.optional_fields || {}, fieldSuggestionState);
     updateSaveButtonState();
+    scheduleModelSuggestions();
     await loadDocumentNavigation(fileId);
   } catch (error) {
     title.textContent = 'Unable to load document';
