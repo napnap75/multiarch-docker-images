@@ -53,22 +53,11 @@ const modelsStatus = document.getElementById('models-status');
 const refreshModelsButton = document.getElementById('refresh-models');
 const trainModelForm = document.getElementById('train-model-form');
 const modelTypeSelect = document.getElementById('model-type');
-const additionalGroupInput = document.getElementById('additional-group-name');
-const additionalGroupLabel = document.getElementById('additional-group-label');
 const trainModelButton = document.getElementById('train-model-button');
 
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[character]));
-
-const updateAdditionalGroupInput = () => {
-  const needsGroup = modelTypeSelect.value === 'additional_value_custom';
-  additionalGroupInput.hidden = !needsGroup;
-  additionalGroupLabel.hidden = !needsGroup;
-  additionalGroupInput.required = needsGroup;
-};
-modelTypeSelect.addEventListener('change', updateAdditionalGroupInput);
-updateAdditionalGroupInput();
 
 const loadModels = async () => {
   refreshModelsButton.disabled = true;
@@ -112,15 +101,7 @@ const loadModels = async () => {
 
 trainModelForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  let modelName = modelTypeSelect.value;
-  if (modelName === 'additional_value_custom') {
-    const groupName = additionalGroupInput.value.trim();
-    if (!/^[A-Za-z0-9_-]+$/.test(groupName)) {
-      modelsStatus.textContent = 'Use only letters, numbers, underscores, and hyphens for the group name.';
-      return;
-    }
-    modelName = `additional_value_${groupName}`;
-  }
+  const modelName = modelTypeSelect.value;
   if (!window.confirm(`Train a new ${modelName} model version from validated document records?`)) return;
 
   trainModelButton.disabled = true;
