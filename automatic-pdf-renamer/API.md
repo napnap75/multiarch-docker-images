@@ -64,7 +64,6 @@ This convention applies to HTTP error responses from every endpoint. Successful 
 | GET | `/files` | Browse, filter, sort, and search documents |
 | GET | `/files/{sha256}` | Document detail and metadata |
 | GET | `/files/{sha256}/pdf` | Stream the current PDF for the embedded viewer |
-| GET | `/files/{sha256}/text` | Retrieve complete extracted text |
 | POST | `/files/{sha256}/preview` | Validate proposed fields and calculate the target key without mutation |
 | POST | `/files/{sha256}/validate` | Validate metadata and apply the final move/rename if required |
 | GET | `/consistency` | List known storage/index anomalies |
@@ -226,7 +225,7 @@ The response must not claim ML confidence for a rules-only decision. `confidence
 
 ### GET `/files/{sha256}`
 
-Returns the latest sidecar-backed record, including fields needed by the detail page. SQLite may be used to locate the record, but authoritative metadata must be reconciled from the sidecar where needed.
+Returns the complete document detail in a single request, including metadata and the full extracted text from every PDF page. The extracted text is stored in SQLite for efficient retrieval and search, so the detail endpoint should return it from the SQLite index rather than requiring a separate text request. Sidecars remain authoritative for metadata and must be reconciled where needed.
 
 Example response:
 
@@ -242,6 +241,7 @@ Example response:
   "emitting_company": "EDF",
   "document_type": "invoice",
   "optional_fields": {"invoice_number": null, "amount": 125.5},
+  "extracted_text": "Complete text from page 1...\\n\\nComplete text from page 2...",
   "target_key_preview": null,
   "confidence": null,
   "events": [
@@ -267,17 +267,6 @@ Requirements:
 - Support HTTP range requests (`206 Partial Content`) if supported by the chosen PDF viewer and storage client; otherwise document the limitation.
 - Return `404` if the object is genuinely missing and create/retain a consistency anomaly for diagnosis.
 - Never return the extracted text in place of the PDF bytes.
-
-### GET `/files/{sha256}/text`
-
-Returns the complete extracted text stored in the sidecar/replica, including all pages. Useful for a separate text panel or troubleshooting; the UI may instead use the detail response if the payload size is acceptable.
-
-```json
-{
-  "sha256": "0123456789abcdef...",
-  "text": "Complete text from page 1...\n\nComplete text from page 2..."
-}
-```
 
 ## 8. Preview and validation
 
