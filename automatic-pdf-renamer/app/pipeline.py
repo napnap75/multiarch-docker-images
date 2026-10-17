@@ -105,7 +105,7 @@ class DocumentProcessor:
             
             if extracted_text is None:
                 result.errors.append("Failed to extract text from PDF")
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
 
             # Step 2: Find emission date using regex patterns from config
@@ -214,7 +214,7 @@ class DocumentProcessor:
                 result.period = period
             except Exception as e:
                 result.errors.append(f"Failed to compute period: {e}")
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
 
             # Step 6: Generate the final key using template's key_pattern
@@ -235,7 +235,7 @@ class DocumentProcessor:
                     )
                 except Exception as e:
                     result.errors.append(f"Failed to format key pattern: {e}")
-                    result.status = SidecarStatus.NOT_PROCESSED.value
+                    result.status = SidecarStatus.PENDING.value
                     return result
             else:
                 # Fallback: use a simple pattern
