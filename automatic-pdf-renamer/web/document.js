@@ -336,7 +336,6 @@ const renderDocument = (documentData, fileId) => {
 
   const technicalMetadata = [
     ['Status', documentData.status],
-    ['Confidence', documentData.confidence],
     ['Original key', documentData.original_key],
     ['Current key', documentData.current_key],
     ['SHA-256', documentData.id],
@@ -360,8 +359,6 @@ const suggestionElements = {
   period_format: document.getElementById('suggestion-period_format'),
   emitting_company: document.getElementById('suggestion-emitting_company'),
   document_type: document.getElementById('suggestion-document_type'),
-  period: document.getElementById('suggestion-period'),
-  current_key: document.getElementById('suggestion-current_key'),
 };
 
 let suggestionRequestSequence = 0;
@@ -387,11 +384,7 @@ const renderModelSuggestion = (fieldName, suggestion) => {
   }
 
   const prefix = document.createElement('span');
-  const confidence = Number(suggestion.confidence);
-  const confidenceText = Number.isFinite(confidence)
-    ? ` · confidence ${Math.round(confidence * 100)}%`
-    : '';
-  prefix.textContent = `Model suggestion: ${suggestion.value}${confidenceText}`;
+  prefix.textContent = `Model suggestion: ${suggestion.value}`;
   container.append(prefix);
 
   const controls = {
@@ -418,15 +411,6 @@ const renderModelSuggestion = (fieldName, suggestion) => {
       control.dispatchEvent(new Event('change', { bubbles: true }));
       updateSaveButtonState();
       scheduleModelSuggestions();
-    });
-    container.append(' ', applyButton);
-  } else if (suggestion.source === 'derived') {
-    const applyButton = document.createElement('button');
-    applyButton.type = 'button';
-    applyButton.textContent = 'Use calculated value';
-    applyButton.addEventListener('click', () => {
-      if (fieldName === 'period') periodPreview.textContent = suggestion.value;
-      if (fieldName === 'current_key') keyPreview.textContent = suggestion.value;
     });
     container.append(' ', applyButton);
   }
