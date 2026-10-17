@@ -47,7 +47,7 @@ The exact sidecar filename convention and directory layout must match the applic
 
 PDF fixtures may be minimal or empty when a scenario only needs to test file identity, moves, sidecar updates, or indexing. Scenarios that test PDF parsing or text extraction must use valid PDF fixtures with known contents. Sidecars should be small, explicit, and deterministic, with stable metadata and extracted text.
 
-The initial harness generates its baseline fixtures directly inside each temporary workspace. Keep those files unchanged during a test; do not point the service at a developer data directory or a production storage endpoint.
+The E2E harness keeps its baseline PDFs and `.meta.json` sidecars as checked-in files under `tests/e2e/fixtures/baseline/`, then copies them into each temporary workspace. Keep those source fixtures unchanged during a test; do not point the service at a developer data directory or a production storage endpoint.
 
 ## Local storage and service isolation
 
