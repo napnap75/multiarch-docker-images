@@ -52,7 +52,7 @@ flowchart TD
 | Text extraction | PyMuPDF | Fastest option; AGPL acceptable for a personal offline tool. Wrapped behind a small extractor interface so it remains swappable (PRD open question resolved). |
 | S3 client | boto3 | Most complete API coverage (copy-object, versioning, ETag), mature Garage compatibility. Wrapped behind a thin storage interface; v1 ships one implementation. |
 | SQLite access | SQLAlchemy ORM, WAL mode | Declared replica schema, typed models, migrations via Alembic. Sidecar remains authoritative; ORM layer only reads/writes the mirror. |
-| Initial classification | Configured deterministic rules and reference data | Initial release must work without ML; TF-IDF + Logistic Regression is a post-v1 enhancement. |
+| ML inference | Local model artifacts for field extraction, additional-field group selection, template prediction, and period-format prediction | No predefined mappings decide classification outcomes; missing or low-confidence predictions route to `pending`. |
 | Fuzzy matching | rapidfuzz | PRD FR4.2, counterparty gazetteer. |
 | Dates | python-dateutil | PRD FR4.2, emission date parsing and period computation. |
 | Frontend | React + Vite, react-pdf viewer | NFR7; built to static assets served by FastAPI. |
@@ -103,13 +103,17 @@ flowchart TD
   dl --> tx["Extract text from every PDF page (PyMuPDF)"]
   tx --> empty{"Text empty?"}
   empty -- yes --> pending["Move to pending/ (reason: empty text)"]
-  empty -- no --> cls["Classify using deterministic rules"]
-  cls --> unamb{"Exactly one unambiguous rule match?"}
-  unamb -- no --> pending
-  unamb -- yes --> fill["Fill fields: regexes, companies list, additional fields from groups, period from emission date"]
-  fill --> valid{"Fields valid?"}
+  empty -- no --> stage1["Stage 1: extract emitting company, document type, additional-field values, and emission date from text"]
+  stage1 --> groups["ML predicts additional-field groups from company/type; ML extracts values"]
+  groups --> firstvalid{"Required first-stage fields unambiguous?"}
+  firstvalid -- no --> pending
+  firstvalid -- yes --> stage2["Stage 2: resolve template and period_format from configured mapping"]
+  stage2 --> mappingvalid{"Template and period format resolved?"}
+  mappingvalid -- no --> pending
+  mappingvalid -- yes --> stage3["Stage 3: calculate period, then generate target storage key"]
+  stage3 --> valid{"Fields and key valid?"}
   valid -- no --> pending
-  valid -- yes --> rename["Compute key and copy object to target"]
+  valid -- yes --> rename["Copy object to target key"]
   rename --> sidecar["Persist sidecar with target key and event"]
   sidecar --> delete["Delete source only after sidecar is durable"]
   delete --> sqlite["Synchronize SQLite replica"]
@@ -389,3 +393,8 @@ Subprocesses report progress and metrics by writing a status JSON consumed by th
 ## 12. Traceability to PRD
 
 Every epic maps to a component: ingestion (jobs/poller), extraction and classification (pipeline), data model and validation (templates, period, gazetteer, pipeline), renaming and logging (rename, sidecar), dashboards (web + api), JSONC configuration editing (config), retraining (jobs/retrain + models), consistency and recovery (jobs/consistency, replica/rebuild). Acceptance criteria AC1-AC12 are covered by the components above; AC8-AC10 by section 8, AC9 by section 4.5.
+
+
+### Local ML inference
+
+The runtime loads trusted, locally stored model artifacts from `MODEL_DIR`. Separate models predict the common text fields, applicable additional-field groups, `template_name`, and `period_format`. One shared token-level extraction model identifies spans for every requested additional field using a shared feature representation and a single classifier; it can return values not seen verbatim during training when they occur in document text. Training labels come from validated sidecar values that appear in saved extracted text. Each extracted span is confidence-gated; missing training coverage or uncertain predictions route to `pending`. The template and period-format classifiers receive only emitting company and document type. Templates and period-format definitions remain execution metadata for key formatting and period arithmetic, not classification mappings.

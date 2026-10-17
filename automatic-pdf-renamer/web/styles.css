@@ -770,3 +770,144 @@ body {
     justify-content: flex-start;
   }
 }
+
+
+.model-management {
+  max-width: 1100px;
+  margin-bottom: 20px;
+}
+
+.model-section-heading,
+.model-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.model-section-heading h3,
+.model-card-heading h4 {
+  margin: 0 0 6px;
+}
+
+.model-section-heading p,
+.model-card-heading p,
+.model-help,
+.model-empty {
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.model-train-form {
+  display: grid;
+  grid-template-columns: max-content minmax(200px, 1fr) max-content;
+  align-items: center;
+  gap: 10px;
+  margin: 22px 0 12px;
+}
+
+.model-train-form label {
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.model-train-form select,
+.model-train-form input {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: white;
+  color: var(--text);
+  font: inherit;
+}
+
+.model-train-form input[hidden],
+.model-train-form label[hidden] {
+  display: none;
+}
+
+.model-help {
+  font-size: 0.85rem;
+  margin-bottom: 14px;
+}
+
+.model-management .action-status {
+  margin: 12px 0;
+}
+
+.models-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.model-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  min-width: 0;
+}
+
+.model-card-heading {
+  margin-bottom: 12px;
+}
+
+.model-card-heading h4 {
+  overflow-wrap: anywhere;
+}
+
+.model-card-heading p {
+  font-size: 0.84rem;
+}
+
+.model-count {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.model-versions {
+  border-top: 1px solid var(--border);
+}
+
+.model-version {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.model-version:last-child {
+  border-bottom: 0;
+}
+
+.model-version code {
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+}
+
+.model-active-tag {
+  display: inline-block;
+  color: var(--success);
+  background: #e9f7ef;
+  border-radius: 999px;
+  padding: 3px 7px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+@media (max-width: 820px) {
+  .model-train-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .model-section-heading,
+  .model-card-heading {
+    flex-direction: column;
+  }
+}

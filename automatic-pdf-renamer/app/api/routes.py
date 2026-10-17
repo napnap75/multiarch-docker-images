@@ -14,6 +14,7 @@ from app.config import TemplateRegistry, load_templates
 from app.db import FileRecord, SQLiteFileRepository
 from app.period import format_period_from_emission_date
 from app.storage import StorageBackend
+from app.model_manager import activate_model, list_models, train_model
 
 from .deps import get_current_user
 from .models import (
@@ -663,18 +664,55 @@ async def list_templates(
     return items
 
 
+@router.get("/models")
+async def get_models(
+    current_user: dict[str, str] | None = Depends(get_current_user),
+) -> dict[str, Any]:
+    """List model types, trained versions, and currently active versions."""
+    return list_models()
+
+
+@router.post("/models/train")
+async def train_models(
+    request: Request,
+    payload: dict[str, Any],
+    current_user: dict[str, str] | None = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Train a model version from validated documents in the local SQLite index."""
+    model_name = str(payload.get("model_name", "")).strip()
+    db = _db(request)
+    records = db.list_files(status="validated", page=1, page_size=100000)
+    try:
+        return train_model(model_name, records)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except Exception as error:
+        logger.exception("Model training failed for %s", model_name)
+        raise HTTPException(status_code=500, detail="Model training failed. Check server logs.") from error
+
+
+@router.post("/models/{model_name}/{version}/activate")
+async def activate_model_version(
+    model_name: str,
+    version: str,
+    current_user: dict[str, str] | None = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Select a trained model version for runtime inference."""
+    try:
+        return activate_model(model_name, version)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
 @router.post("/retrain")
 async def start_retrain(
     request: Request,
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Start a retraining job. The current implementation records a job stub and returns its status."""
-    request.app.state.last_retrain_job = {
-        "job_id": "retrain-1",
-        "status": "queued",
-        "message": "Retrain job accepted. Replace with a subprocess-backed job in production.",
-    }
-    return request.app.state.last_retrain_job
+    """Compatibility endpoint; use /models/train to choose a model type."""
+    raise HTTPException(status_code=400, detail="Select a model type and use POST /models/train.")
 
 
 @router.get("/retrain/status")
@@ -682,9 +720,8 @@ async def get_retrain_status(
     request: Request,
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Read the active retraining status."""
-    job = getattr(request.app.state, "last_retrain_job", {"job_id": "retrain-1", "status": "idle"})
-    return job
+    """Return an idle status for legacy clients."""
+    return {"status": "idle", "message": "Model training is initiated per model type."}
 
 
 @router.post("/retrain/{job_id}/activate")
@@ -692,8 +729,8 @@ async def activate_model(
     job_id: str,
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Activate a completed training model."""
-    return {"job_id": job_id, "status": "activated", "message": "Model activation accepted."}
+    """Reject legacy job activation without an explicit model version."""
+    raise HTTPException(status_code=400, detail="Activate a specific model with POST /models/{model_name}/{version}/activate.")
 
 
 @router.get("/consistency")
@@ -824,22 +861,32 @@ async def list_templates_api(
     return await list_templates(request=request, current_user=current_user)
 
 
-@router.post("/api/retrain")
-async def start_retrain_api(
-    request: Request,
+@router.get("/api/models")
+async def get_models_api(
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Compatibility alias for /retrain."""
-    return await start_retrain(request=request, current_user=current_user)
+    """Compatibility alias for /models."""
+    return list_models()
 
 
-@router.get("/api/retrain/status")
-async def get_retrain_status_api(
+@router.post("/api/models/train")
+async def train_models_api(
     request: Request,
+    payload: dict[str, Any],
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Compatibility alias for /retrain/status."""
-    return await get_retrain_status(request=request, current_user=current_user)
+    """Compatibility alias for /models/train."""
+    return await train_models(request=request, payload=payload, current_user=current_user)
+
+
+@router.post("/api/models/{model_name}/{version}/activate")
+async def activate_model_version_api(
+    model_name: str,
+    version: str,
+    current_user: dict[str, str] | None = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Compatibility alias for model activation."""
+    return await activate_model_version(model_name=model_name, version=version, current_user=current_user)
 
 
 @router.get("/api/consistency")

@@ -411,17 +411,19 @@ Returns job status for consistency scan, SQLite rebuild, or other asynchronous m
 
 Allowed job statuses are technical job states such as `queued`, `running`, `succeeded`, and `failed`; these are not document business statuses. This generic endpoint reports maintenance and retraining jobs. If the process restarts and in-memory job state is lost, the API should report the job as interrupted/unknown and use persisted status files or database state where available.
 
-## 10. Post-v1 model endpoints
+## 10. Local model maintenance endpoints
 
-These routes are future extensions; they are not required for the deterministic initial release.
+The Maintenance page manages local model versions using these endpoints:
 
-- `GET /models`: list locally stored model versions and identify the active model.
-- `POST /retrain`: start training using the initial corpus plus eligible `validated` documents. Returns `202` and a job ID.
-- `GET /jobs/{job_id}`: show training state, dataset/model version, accuracy, confusion matrix, warnings, and output artifact.
-- `POST /retrain/{job_id}/activate`: atomically activate a successfully evaluated candidate.
-- `POST /retrain/{job_id}/discard`: discard a candidate without changing the active model.
+- `GET /api/models`: list supported model types, stored versions, and the active version for each type.
+- `POST /api/models/train`: train a new version from indexed documents with business status `validated`. JSON body: `{"model_name":"additional_field_values"}`. Returns the model name, version, training sample count, and status. Training errors return a validation error when the labeled dataset is insufficient.
+- `POST /api/models/{model_name}/{version}/activate`: select an existing version for runtime inference. The selection is written atomically to `MODEL_DIR/active_models.json`.
 
-Training and activation must remain local. Failed training must not replace the active model. ML confidence and candidate scores are absent or null when no model was used.
+Supported model types are `field_emitting_company`, `field_document_type`, `field_emission_date`, `additional_field_groups`, `additional_field_values`, `template_name`, and `period_format`. The shared additional-field model is trained and activated once for all eligible field names. All additional-field values are extracted by the shared `additional_field_values` model artifact. It uses one shared token-level classifier to label document-text spans by field, allowing values not seen during training when their text appears in the document. Each extracted span is confidence-gated independently. Training labels are accepted only when the validated field value appears in the saved extracted text.
+
+Training runs locally and stores versioned joblib artifacts under `MODEL_DIR/versions/<model_name>/`. Training does not activate a model automatically. Runtime inference requires an explicitly active model version; missing or uncertain model predictions are routed to `pending`. The model artifacts must be trusted because loading joblib files can execute code.
+
+The first implementation trains synchronously in the API request and reports training errors directly. A future implementation may move long-running training to a persistent background-job queue and add held-out evaluation metrics before activation.
 
 ## 11. Consistency and implementation rules
 

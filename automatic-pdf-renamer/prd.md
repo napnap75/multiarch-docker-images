@@ -67,12 +67,14 @@ Transitions:
 - FR2.3 If extracted text is empty or below a minimum length, route the file to `pending` with reason "empty text".
 - FR2.4 Store the complete extracted text from all pages in the sidecar and replicate it to SQLite for the file's lifetime, so search, the detail page, and retraining do not need to re-download and re-parse the object.
 
-### Epic 3 — Template classification
+### Epic 3 — ML-assisted field extraction and classification
 
-- FR3.1 Classify the document into one of the configured templates using configured deterministic rules, extracted text, and reference data in the initial release. TF-IDF + Logistic Regression is a post-v1 enhancement specified in Epic 3, not a dependency of the initial release.
-- FR3.2 In the initial release, if deterministic rules do not yield one unambiguous template, route the file to `pending` with reason `insufficient deterministic evidence`; do not fabricate a confidence score. In the post-v1 ML enhancement, expose model scores and route predictions below the configured threshold to `pending`.
-- FR3.3 In the initial release, display the matching rules and ambiguity/review reason on the detail page. When ML is enabled in a future release, also display ranked candidates and scores.
-- FR3.4 Post-v1 only: retrain the classifier on demand from the initial corpus plus eligible validated files. Record the training date and evaluation metrics in the local model registry and display them in the dashboard.
+- FR3.1 Process the full extracted document text in ordered stages. Stage 1 extracts `emitting_company`, `document_type`, `additional_fields`, and `emission_date`; emission date extraction runs in the same stage as the other text-derived fields.
+- FR3.2 Use local ML to predict applicable additional-field groups from `(emitting_company, document_type)`, then use one shared local token-level extraction model to extract all selected values from document text. No predefined mapping selects these groups. Do not select or consume the template and period format before this extraction stage completes.
+- FR3.3 Stage 2 resolves `template_name` and `period_format` from the configured mapping using the first-stage fields. Stage 3 calculates `period` from `emission_date` and `period_format`, then generates and validates the target storage key.
+- FR3.4 Ambiguous or missing indispensable values, unknown values, unresolved mappings, and invalid calculations must route to `pending`; the pipeline must never substitute a default company or document type or fabricate a candidate.
+- FR3.5 ML is an assistive candidate-proposal/ranking layer, not an authority that bypasses configuration. Deterministic rules and configured allow-lists remain available as fallback and validation boundaries. ML must be disabled or unavailable without breaking the rules-only path. Exact model strategy and confidence thresholds remain an explicit calibration decision.
+- FR3.6 Retrain on demand from the initial labeled corpus plus eligible validated files. Record the training date and evaluation metrics in the local model registry; require evaluation before activation.
 
 ### Epic 4 — Document data model, slot filling and validation
 
@@ -91,10 +93,10 @@ Every document, regardless of template, carries at least these five common field
 
 The object key pattern of each template is composed from these common fields, plus the template's optional fields.
 
-#### 4.2 Optional fields (template-specific)
+#### 4.2 Optional fields (template-specific)\n\n**Required processing order:** (1) extract emitting company, document type, additional-field values, and emission date from text; (2) resolve template and period format using the first-stage fields and configured mapping; (3) calculate period and storage key. The first stage must not select a default class. If an indispensable field is missing or ambiguous, route the document to `pending`.
 
 - FR4.1 Each template declares in JSONC its optional fields beyond the common five. Additional fields are organized in predefined field groups (e.g., `bank_accounts`, `properties`, `contract_references`, `customer_numbers`) with their possible values. The (company, document_type) mapping specifies which field groups to extract for each document. Examples: bank statements extract from `bank_accounts` group; rent receipts extract from `properties` group.
-- FR4.2 Fill common and optional fields using per-template regexes for dates and the companies list for company matching. Additional fields are extracted in the initial release using configured deterministic rules and lookup lists. ML-assisted selection from predefined possible values is a post-v1 enhancement. The period is computed server-side from the emission date using the configured granularity, format template, and offset (current/previous/following); it is recomputed whenever the emission date or applicable template rules change and cannot be edited or submitted by the user.
+- FR4.2 Extract `emitting_company`, `document_type`, `additional_fields`, and `emission_date` from the document text in the first processing stage. Predict additional-field groups with a local ML model from `(emitting_company, document_type)`, then extract their values using one shared token-level model trained from validated field spans in extracted text. No predefined mapping or allow-list determines these decisions. Only after this stage resolves required fields may the system select `template_name` and `period_format`. Compute `period` server-side from `emission_date` and the selected period format, then generate the storage key from the validated fields and template pattern. Recompute period and key whenever a relevant source field or mapping changes; period is not client-editable.
 - FR4.3 Validate fields before renaming: emission date parses and is within a plausible range, period is non-empty and consistent with the emission date and the template's granularity/offset, emitting company recognized, document type among the template's allowed values, each optional field matches its declared format (empty optional fields are allowed). Any failure routes to `pending` with the failing fields identified.
 - FR4.4 Collisions in the target prefix are resolved with an incremental suffix; the final key is always the one logged.
 
@@ -199,3 +201,8 @@ SQLite replica (rebuilt from sidecars):
 - Post-v1 ML decision: exact model confidence threshold and per-template overrides, to be calibrated on the initial corpus before enabling ML.
 - Poll interval tradeoff between responsiveness and Garage listing load.
 - Exact human-readable period formats (French month names, quarter notation) and their rendering in the object key — to be fixed in the template JSONC spec.
+
+
+### ML-only inference contract
+
+The runtime uses local model artifacts for emitting-company, document-type and emission-date extraction; additional-field-group selection from emitting company and document type; shared token-level additional-field span extraction; and independent `template_name` and `period_format` prediction from emitting company and document type. Configuration may define template key patterns and period arithmetic parameters, but it must not select classification outcomes. Missing models, invalid predictions, or confidence below `CONFIDENCE_THRESHOLD` route the document to `pending`. The `period` and final storage key remain deterministic calculations after model inference.
