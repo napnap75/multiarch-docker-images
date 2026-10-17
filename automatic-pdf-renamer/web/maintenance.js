@@ -30,7 +30,7 @@ rebuildButton.addEventListener('click', () => runAction({
   operation: document.getElementById('rebuild-operation'),
   progress: document.getElementById('rebuild-progress'),
   status: document.getElementById('rebuild-status'),
-  endpoint: '/api/consistency/rebuild',
+  endpoint: '/consistency/rebuild',
   method: 'POST',
   confirmation: 'Rebuild the database from sidecar files? Existing database records will be replaced.',
   getResult: (result) => `Database rebuilt from ${result.count} sidecar file${result.count === 1 ? '' : 's'}.`,
@@ -40,7 +40,7 @@ checkButton.addEventListener('click', () => runAction({
   operation: document.getElementById('check-operation'),
   progress: document.getElementById('check-progress'),
   status: document.getElementById('check-status'),
-  endpoint: '/api/consistency',
+  endpoint: '/consistency',
   method: 'GET',
   confirmation: 'Run a consistency check? This scans metadata and database records against storage.',
   getResult: (anomalies) => anomalies.length
@@ -63,7 +63,7 @@ const loadModels = async () => {
   refreshModelsButton.disabled = true;
   modelsStatus.textContent = 'Loading model inventory…';
   try {
-    const response = await fetch('/api/models');
+    const response = await fetch('/models');
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
     const models = result.models || [];
@@ -108,7 +108,7 @@ trainModelForm.addEventListener('submit', async (event) => {
   refreshModelsButton.disabled = true;
   modelsStatus.textContent = 'Training model… This may take a while.';
   try {
-    const response = await fetch('/api/models/train', {
+    const response = await fetch('/models/train', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model_name: modelName }),
@@ -133,7 +133,7 @@ modelsList.addEventListener('click', async (event) => {
   button.disabled = true;
   modelsStatus.textContent = `Activating ${model} version ${version}…`;
   try {
-    const response = await fetch(`/api/models/${encodeURIComponent(model)}/${encodeURIComponent(version)}/activate`, {
+    const response = await fetch(`/models/${encodeURIComponent(model)}/${encodeURIComponent(version)}/activate`, {
       method: 'POST',
     });
     const result = await response.json();
