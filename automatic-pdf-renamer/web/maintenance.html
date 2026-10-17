@@ -27,6 +27,34 @@
           </div>
         </header>
 
+        <section class="config-card model-management" aria-labelledby="models-heading">
+          <div class="model-section-heading">
+            <div>
+              <h3 id="models-heading">Machine learning models</h3>
+              <p>Train versioned models from validated documents, review available versions, and explicitly select the active version for inference.</p>
+            </div>
+            <button id="refresh-models" class="secondary-btn" type="button">Refresh models</button>
+          </div>
+          <form id="train-model-form" class="model-train-form">
+            <label for="model-type">Model type</label>
+            <select id="model-type" required>
+              <option value="field_emitting_company">Emitting company extraction</option>
+              <option value="field_document_type">Document type extraction</option>
+              <option value="field_emission_date">Emission date extraction</option>
+              <option value="additional_field_groups">Additional-field group selection</option>
+              <option value="template_name">Template prediction</option>
+              <option value="period_format">Period format prediction</option>
+              <option value="additional_value_custom">Additional-field value extraction</option>
+            </select>
+            <label for="additional-group-name" id="additional-group-label" hidden>Additional-field group name</label>
+            <input id="additional-group-name" type="text" placeholder="e.g. account_number" hidden pattern="[A-Za-z0-9_-]+" />
+            <button id="train-model-button" class="primary-btn" type="submit">Train new version</button>
+          </form>
+          <p class="model-help">Training uses records with status <code>validated</code>. At least two labeled examples and two target classes are required for single-label models. A newly trained version is not activated automatically.</p>
+          <p id="models-status" class="action-status" role="status" aria-live="polite">Loading model inventory…</p>
+          <div id="models-list" class="models-list" aria-live="polite"></div>
+        </section>
+
         <section class="maintenance-actions" aria-label="Maintenance actions">
           <article class="maintenance-action">
             <div>
