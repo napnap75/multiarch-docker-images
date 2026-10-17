@@ -1,16 +1,16 @@
 """Processing pipeline module for Automatic PDF Renamer.
 
 Implements the document processing workflow:
-1. Load the first page and extract text using PyMuPDF
-2. Find the emission date using regex patterns from config (ordered list, first match wins)
-3. Find company and document_type using ML, validated against predefined lists in config
+1. Extract text from every page using PyMuPDF
+2. Extract emission date in parallel with the initial text-derived fields
+3. Identify emitting company and document type from text, validated against configured lists
    - Unknown values must route to review
-4. Look up the (company, document_type) tuple in mappings to get template, period_format, and additional_fields
+4. Resolve applicable additional-field groups from (company, document_type), then extract their values from text
    - Mappings use match/set structure: match criteria (company, document_type, both, or neither)
    - Rules are processed in order, later matches override earlier ones
    - Empty match {} matches all documents (default rule)
-5. Apply period_format (with granularity, format template, and offset) to calculate the human-readable period string
-6. Apply template key_pattern to generate the final filename
+5. After first-stage extraction, resolve template and period_format from configuration
+6. Calculate period from emission_date and period_format, then render the final storage key
 """
 
 import logging
@@ -117,39 +117,50 @@ class DocumentProcessor:
 
             result.emission_date = emission_date
 
-            # Step 3: Find company and document_type using ML
-            company, doc_type, ml_errors = self._extract_company_and_type(extracted_text)
-            
-            if ml_errors:
-                result.errors.extend(ml_errors)
+            # Step 3: Identify the issuing company and document type from the text.
+            # Never substitute a default class: ambiguous or unknown values require review.
+            company, doc_type, field_errors = self._extract_company_and_type(extracted_text)
+            if field_errors:
+                result.errors.extend(field_errors)
                 result.status = SidecarStatus.NOT_PROCESSED.value
                 return result
 
             result.company = company
             result.document_type = doc_type
-
-            # Validate company and document_type against config lists
-            # Strict validation: unknown values route to review
             if not self.registry.is_valid_company(company):
                 result.errors.append(
                     f"Unknown company '{company}'. "
-                    f"Valid companies: {', '.join(self.registry.get_companies()[:10])}..."
+                    f"Valid companies: {', '.join(self.registry.get_companies()[:10])}"
                 )
                 result.status = SidecarStatus.NOT_PROCESSED.value
                 return result
-
             if not self.registry.is_valid_document_type(doc_type):
                 result.errors.append(
                     f"Unknown document type '{doc_type}'. "
-                    f"Valid types: {', '.join(self.registry.get_document_types()[:10])}..."
+                    f"Valid types: {', '.join(self.registry.get_document_types()[:10])}"
                 )
                 result.status = SidecarStatus.NOT_PROCESSED.value
                 return result
 
-            # Step 4: Resolve mapping using match/set rules
-            # Rules are processed in order, later matches override earlier ones
+            # Step 4: Determine the applicable additional-field groups from the
+            # company/document-type pair, then extract their values from the text.
+            # Template and period format are deliberately not consumed until this
+            # first-stage field extraction has completed.
+            additional_field_groups = self.registry.get_additional_field_groups(company, doc_type)
+            optional_fields: dict[str, str] = {}
+            for group_name in additional_field_groups:
+                field_value, field_error = self._extract_field_value(extracted_text, group_name)
+                if field_error:
+                    result.errors.append(field_error)
+                    result.status = SidecarStatus.NOT_PROCESSED.value
+                    return result
+                if field_value:
+                    optional_fields[group_name] = field_value
+
+            # Step 5: Resolve the template and period format only after the
+            # first-stage fields have been extracted. Configuration remains
+            # authoritative; candidate suggestions cannot bypass its mappings.
             resolved = self.registry.resolve_mapping(company, doc_type)
-            
             if not resolved:
                 result.errors.append(
                     f"No mapping found for company='{company}', "
@@ -157,12 +168,9 @@ class DocumentProcessor:
                 )
                 result.status = SidecarStatus.NOT_PROCESSED.value
                 return result
-            
-            # Extract resolved fields
+
             template_name = resolved.get("template")
             period_format = resolved.get("period_format")
-            additional_field_groups = resolved.get("additional_fields", [])
-            
             if not template_name:
                 result.errors.append(
                     f"No template resolved for company='{company}', "
@@ -170,22 +178,16 @@ class DocumentProcessor:
                 )
                 result.status = SidecarStatus.NOT_PROCESSED.value
                 return result
-            
+            if not period_format:
+                result.errors.append(
+                    f"No period_format resolved for company='{company}', "
+                    f"document_type='{doc_type}'. Routing to review."
+                )
+                result.status = SidecarStatus.NOT_PROCESSED.value
+                return result
+
             result.template_name = template_name
             result.period_format = period_format
-
-            # Step 4b: Extract additional fields from additional_fields lists
-            optional_fields = {}
-            for group_name in additional_field_groups:
-                field_value, field_error = self._extract_field_value(
-                    extracted_text, group_name
-                )
-                if field_error:
-                    result.errors.append(field_error)
-                    result.status = SidecarStatus.NOT_PROCESSED.value
-                    return result
-                if field_value:
-                    optional_fields[group_name] = field_value
 
             # Step 5: Calculate period using period_format configuration
             if not period_format:
@@ -284,7 +286,7 @@ class DocumentProcessor:
         return result
 
     def _extract_text(self, pdf_bytes: bytes) -> str | None:
-        """Extract first page text from PDF.
+        """Extract text from every page of the PDF.
 
         Args:
             pdf_bytes: The PDF content as bytes.
@@ -417,24 +419,24 @@ class DocumentProcessor:
         Returns:
             Tuple of (company, document_type, errors).
         """
-        errors = []
-        
-        # Try to find company names from the config
-        companies = self.registry.get_companies()
-        for company in companies:
-            if company.lower() in text.lower():
-                # Try to find document type
-                doc_types = self.registry.get_document_types()
-                for doc_type in doc_types:
-                    if doc_type.lower() in text.lower():
-                        return (company, doc_type, errors)
-                
-                # If no document type found, use first one as default
-                if doc_types:
-                    return (company, doc_types[0], [f"Could not determine document type, using default: {doc_types[0]}"])
-        
-        # If no company found, return unknown
-        return ("", "", ["Could not determine company and document type"])
+        text_lower = text.casefold()
+        matched_companies = [
+            value for value in self.registry.get_companies()
+            if value.casefold() in text_lower
+        ]
+        matched_types = [
+            value for value in self.registry.get_document_types()
+            if value.casefold() in text_lower
+        ]
+        if not matched_companies:
+            return ("", "", ["Could not determine emitting company from document text"])
+        if len(matched_companies) > 1:
+            return ("", "", ["Ambiguous emitting company: multiple configured companies match the document text: " + ", ".join(matched_companies)])
+        if not matched_types:
+            return ("", "", ["Could not determine document type from document text"])
+        if len(matched_types) > 1:
+            return ("", "", ["Ambiguous document type: multiple configured document types match the document text: " + ", ".join(matched_types)])
+        return (matched_companies[0], matched_types[0], [])
 
     def _extract_field_value(self, text: str, group_name: str) -> tuple[str, str | None]:
         """Extract a field value from text using ML from predefined list.
@@ -459,15 +461,15 @@ class DocumentProcessor:
         if not possible_values:
             return ("", f"No predefined values for additional field group '{group_name}'")
         
-        # Try to find a value from the predefined list in the text
-        # This is a placeholder for ML-based extraction
-        # For now, we'll do simple string matching
-        text_lower = text.lower()
-        for value in possible_values:
-            if value.lower() in text_lower:
-                return (value, None)
-        
-        # Strict validation: if no value found in predefined list, route to review
+        # Use configured values as the allowed candidate set and refuse to
+        # guess when multiple values match. A future ML ranker may propose
+        # candidates, but it must respect this validation boundary.
+        text_lower = text.casefold()
+        matches = [value for value in possible_values if value.casefold() in text_lower]
+        if len(matches) == 1:
+            return (matches[0], None)
+        if len(matches) > 1:
+            return ("", f"Ambiguous values for additional field '{group_name}': " + ", ".join(matches))
         return ("", f"Could not determine value for additional field '{group_name}' from predefined list")
 
     def _format_key_pattern(
