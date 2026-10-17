@@ -5,7 +5,7 @@ const status = document.getElementById('config-status');
 
 const loadConfig = async () => {
   try {
-    const response = await fetch('/api/config');
+    const response = await fetch('/config');
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -28,7 +28,7 @@ form.addEventListener('submit', async (event) => {
   status.textContent = 'Validating and saving configuration...';
 
   try {
-    const response = await fetch('/api/config', {
+    const response = await fetch('/config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: editor.value }),
