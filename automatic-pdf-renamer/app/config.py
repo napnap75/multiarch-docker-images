@@ -143,21 +143,20 @@ class MappingMatch:
             additional_fields=data.get("additional_fields", {}),
         )
 
+    def matches_identity(self, company: str, document_type: str) -> bool:
+        """Match company/document type independently of extracted optional fields."""
+        company_match = self.company is None or (isinstance(self.company, list) and company in self.company) or self.company == company
+        doc_type_match = self.document_type is None or (isinstance(self.document_type, list) and document_type in self.document_type) or self.document_type == document_type
+        return company_match and doc_type_match
+
     def matches(
         self,
         company: str,
         document_type: str,
         optional_fields: dict[str, Any] | None = None,
     ) -> bool:
-        """Check if this match criteria matches the given company and document type.
-        
-        Empty match (both None) matches everything.
-        company=None in match means match any company.
-        document_type=None in match means match any document type.
-        """
-        company_match = self.company is None or (isinstance(self.company, list) and company in self.company) or self.company == company
-        doc_type_match = self.document_type is None or (isinstance(self.document_type, list) and document_type in self.document_type) or self.document_type == document_type
-        if not (company_match and doc_type_match):
+        """Match document identity and, when configured, extracted field values."""
+        if not self.matches_identity(company, document_type):
             return False
         # Additional-field criteria are optional for backward compatibility.
         # When configured, every named field must equal its expected value.
@@ -529,7 +528,7 @@ class TemplateRegistry:
         """
         groups: list[str] = []
         for rule in self._mappings:
-            if rule.matches(company, document_type) and rule.set.additional_fields:
+            if rule.match.matches_identity(company, document_type) and rule.set.additional_fields:
                 groups = rule.set.additional_fields.copy()
         return groups
 
