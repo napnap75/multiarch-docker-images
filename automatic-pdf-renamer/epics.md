@@ -30,8 +30,8 @@ Build a personal, fully offline application that watches a self-hosted Garage S3
 ### Delivery strategy
 
 1. Deliver the technical foundation and durable metadata model.
-2. Deliver a complete, useful ingestion flow using deterministic rules only.
-3. Add ML classification and ML-assisted extraction, training and model lifecycle management.
+2. Deliver the ingestion and storage foundation, with classification outcomes delegated to local ML models.
+3. Add local ML inference for all extraction and classification decisions, then training and model lifecycle management.
 4. Deliver the dashboard for search, review, correction, validation, and template visibility.
 5. Complete consistency checks, recovery, deployment hardening, and operational verification.
 
@@ -47,7 +47,7 @@ The following inventory consolidates the requirements from the project brief and
 - **FR-TXT-01 — Text extraction:** extract all available text from every page of a PDF using a local library; no OCR in v1.
 - **FR-TXT-02 — Empty text handling:** route PDFs with empty or insufficient extracted text to human review with an explicit reason.
 - **FR-TXT-03 — Text persistence:** persist extracted text in the sidecar and SQLite replica so normal review and training workflows do not need to re-parse the PDF.
-- **FR-CLS-01 — Ordered ML-assisted extraction:** first extract emitting company, document type, additional-field values, and emission date from document text; determine additional-field groups from the company/type mapping; next resolve template and period format; finally calculate period and storage key. ML proposes/ranks candidates, while configured rules and allow-lists validate them.
+- **FR-CLS-01 — Ordered ML-assisted extraction:** use local ML to extract emitting company, document type, and emission date; use another ML model to select additional-field groups from company and document type, then ML to extract their values; independently predict template and period format from company and document type; finally calculate period and storage key deterministically. No predefined mapping selects these outcomes.
 - **FR-CLS-02 — Confidence and unknown class (post-v1):** ML classification exposes confidence and routes results below a configurable threshold to review. The deterministic initial release uses explicit rule outcomes and does not generate artificial confidence scores.
 - **FR-FLD-01 — Common fields:** every document has template, emission date, emitting company, document type, and period.
 - **FR-FLD-02 — Optional fields:** templates define optional fields and reusable field groups with formats, allowed values, and extraction rules.
