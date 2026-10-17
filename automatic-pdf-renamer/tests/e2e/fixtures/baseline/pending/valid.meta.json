@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "sha256": "b6c81b0f56ce2237b8d121f1066ed699fc32cd18a587e337cb7273d63e862fa4",
+  "original_key": "pending/valid.pdf",
+  "current_key": "pending/valid.pdf",
+  "status": "processed",
+  "template_name": "default",
+  "period_format": "monthly",
+  "confidence": 1,
+  "emission_date": "2026-09-20",
+  "period": "September 2026",
+  "emitting_company": "EDF",
+  "document_type": "facture",
+  "optional_fields": {},
+  "extracted_text": "E2E sample document 2026-09-20",
+  "created_at": "2026-01-01T00:00:00+00:00",
+  "updated_at": "2026-01-01T00:00:00+00:00",
+  "events": []
+}
