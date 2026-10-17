@@ -423,7 +423,7 @@ const renderModelSuggestion = (fieldName, suggestion) => {
   } else if (suggestion.source === 'derived') {
     const applyButton = document.createElement('button');
     applyButton.type = 'button';
-    applyButton.textContent = 'Show calculated value';
+    applyButton.textContent = 'Use calculated value';
     applyButton.addEventListener('click', () => {
       if (fieldName === 'period') periodPreview.textContent = suggestion.value;
       if (fieldName === 'current_key') keyPreview.textContent = suggestion.value;
