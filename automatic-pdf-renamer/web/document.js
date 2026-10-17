@@ -434,6 +434,7 @@ const renderModelSuggestion = (fieldName, suggestion) => {
 
 const scheduleModelSuggestions = () => {
   if (!currentFileId) return;
+  hideModelSuggestions();
   if (suggestionTimer) clearTimeout(suggestionTimer);
   suggestionTimer = setTimeout(() => {
     fetchModelSuggestions();
