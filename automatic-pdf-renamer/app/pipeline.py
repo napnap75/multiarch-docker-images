@@ -29,6 +29,7 @@ from .period import (
     format_period_from_emission_date,
 )
 from .sidecar import Sidecar, SidecarStatus, build_sidecar
+from .ml import LocalMLPipeline, ModelUnavailableError, AmbiguousPredictionError
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,7 @@ class DocumentProcessor:
         self,
         registry: TemplateRegistry,
         min_text_length: int = 10,
+        ml_pipeline: LocalMLPipeline | None = None,
     ):
         """Initialize the document processor.
 
@@ -75,6 +77,7 @@ class DocumentProcessor:
         """
         self.registry = registry
         self.min_text_length = min_text_length
+        self.ml_pipeline = ml_pipeline or LocalMLPipeline()
 
     def process(
         self,
@@ -111,8 +114,18 @@ class DocumentProcessor:
             # Stage 1: extract all text-derived common fields in the same pass.
             # Keep these independent so a missing date does not prevent company/type
             # ambiguity from being detected and reported for the same document.
-            emission_date, date_error = self._extract_emission_date(extracted_text)
-            company, doc_type, field_errors = self._extract_company_and_type(extracted_text)
+            try:
+                initial_fields = self.ml_pipeline.extract_initial_fields(extracted_text)
+                company = initial_fields["emitting_company"][0]
+                doc_type = initial_fields["document_type"][0]
+                emission_date = initial_fields["emission_date"][0]
+                initial_confidence = min(value[1] for value in initial_fields.values())
+                date_error = None if emission_date else "ML could not determine emission_date"
+                field_errors = []
+            except (ModelUnavailableError, AmbiguousPredictionError) as exc:
+                emission_date, date_error = "", str(exc)
+                company, doc_type, field_errors = "", "", [str(exc)]
+                initial_confidence = 0.0
 
             if date_error:
                 result.errors.append(date_error)
@@ -149,31 +162,37 @@ class DocumentProcessor:
             # company/document-type pair, then extract their values from the text.
             # Template and period format are deliberately not consumed until this
             # first-stage field extraction has completed.
-            additional_field_groups = self.registry.get_additional_field_groups(company, doc_type)
-            optional_fields: dict[str, str] = {}
-            for group_name in additional_field_groups:
-                field_value, field_error = self._extract_field_value(extracted_text, group_name)
-                if field_error:
-                    result.errors.append(field_error)
-                    result.status = SidecarStatus.PENDING.value
-                    return result
-                if field_value:
-                    optional_fields[group_name] = field_value
-
-            # Step 5: Resolve the template and period format only after the
-            # first-stage fields have been extracted. Configuration remains
-            # authoritative; candidate suggestions cannot bypass its mappings.
-            resolved = self.registry.resolve_mapping(company, doc_type, optional_fields)
-            if not resolved:
-                result.errors.append(
-                    f"No mapping found for company='{company}', "
-                    f"document_type='{doc_type}'. Routing to review."
-                )
+            try:
+                additional_field_groups, groups_confidence = self.ml_pipeline.predict_additional_groups(company, doc_type)
+            except (ModelUnavailableError, AmbiguousPredictionError) as exc:
+                result.errors.append(str(exc))
                 result.status = SidecarStatus.PENDING.value
                 return result
 
-            template_name = resolved.get("template")
-            period_format = resolved.get("period_format")
+            optional_fields: dict[str, str] = {}
+            field_confidences = [initial_confidence, groups_confidence]
+            for group_name in additional_field_groups:
+                try:
+                    field_value, field_confidence = self.ml_pipeline.predict_additional_value(group_name, extracted_text)
+                except (ModelUnavailableError, AmbiguousPredictionError) as exc:
+                    result.errors.append(str(exc))
+                    result.status = SidecarStatus.PENDING.value
+                    return result
+                optional_fields[group_name] = field_value
+                field_confidences.append(field_confidence)
+
+            # Template and period format are independent ML predictions, not
+            # deterministic mapping lookups. Configuration only validates that
+            # predicted identifiers can be executed downstream.
+            try:
+                template_name, template_confidence, period_format, period_confidence = (
+                    self.ml_pipeline.predict_template_and_period_format(company, doc_type)
+                )
+            except (ModelUnavailableError, AmbiguousPredictionError) as exc:
+                result.errors.append(str(exc))
+                result.status = SidecarStatus.PENDING.value
+                return result
+            field_confidences.extend([template_confidence, period_confidence])
             if not template_name:
                 result.errors.append(
                     f"No template resolved for company='{company}', "
@@ -245,7 +264,7 @@ class DocumentProcessor:
                 final_key = f"{template_name}/{period}/{company}/{doc_type}/{emission_date}_{original_key.split('/')[-1]}"
 
             # Step 7: Build the sidecar
-            confidence = 1.0  # Will be set by ML classifier
+            confidence = min(field_confidences)
             sidecar = build_sidecar(
                 sha256=sha256,
                 original_key=original_key,
@@ -411,158 +430,17 @@ class DocumentProcessor:
         return ("", "Could not find emission date in text")
 
     def _extract_company_and_type(self, text: str) -> tuple[str, str, list[str]]:
-        """Extract company and document type from text using ML.
-
-        This is a placeholder for the actual ML implementation.
-        For now, it tries to match company and document type names from config.
-
-        Args:
-            text: The extracted text.
-
-        Returns:
-            Tuple of (company, document_type, errors).
-        """
-        text_lower = text.casefold()
-        matched_companies = [
-            value for value in self.registry.get_companies()
-            if value.casefold() in text_lower
-        ]
-        matched_types = [
-            value for value in self.registry.get_document_types()
-            if value.casefold() in text_lower
-        ]
-        if not matched_companies:
-            return ("", "", ["Could not determine emitting company from document text"])
-        if len(matched_companies) > 1:
-            return ("", "", ["Ambiguous emitting company: multiple configured companies match the document text: " + ", ".join(matched_companies)])
-        if not matched_types:
-            return ("", "", ["Could not determine document type from document text"])
-        if len(matched_types) > 1:
-            return ("", "", ["Ambiguous document type: multiple configured document types match the document text: " + ", ".join(matched_types)])
-        return (matched_companies[0], matched_types[0], [])
+        """Predict emitting company and document type with local ML models."""
+        try:
+            fields = self.ml_pipeline.extract_initial_fields(text)
+            return fields["emitting_company"][0], fields["document_type"][0], []
+        except (ModelUnavailableError, AmbiguousPredictionError) as exc:
+            return "", "", [str(exc)]
 
     def _extract_field_value(self, text: str, group_name: str) -> tuple[str, str | None]:
-        """Extract a field value from text using ML from predefined list.
-
-        For each additional field group in the mapping, the value should be found
-        using ML from the predefined list of possible values for that group.
-        
-        Strict validation: if value not found in predefined list, route to review.
-
-        Args:
-            text: The extracted text.
-            group_name: The name of the additional field group.
-
-        Returns:
-            Tuple of (field_value, error_message).
-            If successful, error_message is None.
-            If no value can be determined, error_message describes the issue.
-        """
-        # Get the predefined list of values for this additional field group
-        possible_values = self.registry.get_additional_field_values(group_name)
-        
-        if not possible_values:
-            return ("", f"No predefined values for additional field group '{group_name}'")
-        
-        # Use configured values as the allowed candidate set and refuse to
-        # guess when multiple values match. A future ML ranker may propose
-        # candidates, but it must respect this validation boundary.
-        text_lower = text.casefold()
-        matches = [value for value in possible_values if value.casefold() in text_lower]
-        if len(matches) == 1:
-            return (matches[0], None)
-        if len(matches) > 1:
-            return ("", f"Ambiguous values for additional field '{group_name}': " + ", ".join(matches))
-        return ("", f"Could not determine value for additional field '{group_name}' from predefined list")
-
-    def _format_key_pattern(
-        self,
-        pattern: str,
-        **kwargs: Any,
-    ) -> str:
-        """Format a key pattern with the provided values.
-
-        Args:
-            pattern: The key pattern with placeholders.
-            **kwargs: Values to substitute into the pattern.
-
-        Returns:
-            Formatted key string.
-        """
+        """Predict an additional-field value from text using a local ML model."""
         try:
-            return pattern.format(**kwargs)
-        except KeyError as e:
-            # If a placeholder is missing, use a default value
-            missing = str(e).strip("'")
-            kwargs[missing] = "unknown"
-            return pattern.format(**kwargs)
-
-
-class DateExtractor:
-    """Specialized class for extracting dates from text using config patterns."""
-
-    def __init__(self, registry: TemplateRegistry):
-        """Initialize the date extractor.
-
-        Args:
-            registry: TemplateRegistry with date extraction patterns.
-        """
-        self.registry = registry
-        self._patterns = registry.get_date_extraction_compiled()
-
-    def extract_first_date(self, text: str) -> str | None:
-        """Extract the first date found in text using configured patterns.
-
-        Args:
-            text: The text to search.
-
-        Returns:
-            The first date string found, or None.
-        """
-        if not self._patterns:
-            return None
-
-        for pattern in self._patterns:
-            match = pattern.search(text)
-            if match:
-                groups = match.groups()
-                date_str = " ".join([g for g in groups if g])
-                if date_str.strip():
-                    return date_str.strip()
-
-        return None
-
-    def extract_all_dates(self, text: str) -> list[str]:
-        """Extract all dates found in text using configured patterns.
-
-        Args:
-            text: The text to search.
-
-        Returns:
-            List of date strings found.
-        """
-        dates = []
-        if not self._patterns:
-            return dates
-
-        for pattern in self._patterns:
-            matches = pattern.finditer(text)
-            for match in matches:
-                groups = match.groups()
-                date_str = " ".join([g for g in groups if g])
-                if date_str.strip() and date_str.strip() not in dates:
-                    dates.append(date_str.strip())
-
-        return dates
-
-
-def create_processor(registry: TemplateRegistry) -> DocumentProcessor:
-    """Factory function to create a DocumentProcessor.
-
-    Args:
-        registry: TemplateRegistry with configuration.
-
-    Returns:
-        DocumentProcessor instance.
-    """
-    return DocumentProcessor(registry)
+            value, _confidence = self.ml_pipeline.predict_additional_value(group_name, text)
+            return value, None
+        except (ModelUnavailableError, AmbiguousPredictionError) as exc:
+            return "", str(exc)
