@@ -52,7 +52,7 @@ flowchart TD
 | Text extraction | PyMuPDF | Fastest option; AGPL acceptable for a personal offline tool. Wrapped behind a small extractor interface so it remains swappable (PRD open question resolved). |
 | S3 client | boto3 | Most complete API coverage (copy-object, versioning, ETag), mature Garage compatibility. Wrapped behind a thin storage interface; v1 ships one implementation. |
 | SQLite access | SQLAlchemy ORM, WAL mode | Declared replica schema, typed models, migrations via Alembic. Sidecar remains authoritative; ORM layer only reads/writes the mirror. |
-| Initial classification | Configured deterministic rules and reference data | Initial release must work without ML; TF-IDF + Logistic Regression is a post-v1 enhancement. |
+| ML-assisted extraction | Local candidate proposal/ranking constrained by configured values and deterministic validation | ML may assist extraction but must not bypass mappings or silently resolve ambiguity; rules-only processing remains available. |
 | Fuzzy matching | rapidfuzz | PRD FR4.2, counterparty gazetteer. |
 | Dates | python-dateutil | PRD FR4.2, emission date parsing and period computation. |
 | Frontend | React + Vite, react-pdf viewer | NFR7; built to static assets served by FastAPI. |
@@ -103,13 +103,17 @@ flowchart TD
   dl --> tx["Extract text from every PDF page (PyMuPDF)"]
   tx --> empty{"Text empty?"}
   empty -- yes --> pending["Move to pending/ (reason: empty text)"]
-  empty -- no --> cls["Classify using deterministic rules"]
-  cls --> unamb{"Exactly one unambiguous rule match?"}
-  unamb -- no --> pending
-  unamb -- yes --> fill["Fill fields: regexes, companies list, additional fields from groups, period from emission date"]
-  fill --> valid{"Fields valid?"}
+  empty -- no --> stage1["Stage 1: extract emitting company, document type, additional-field values, and emission date from text"]
+  stage1 --> groups["Resolve additional-field groups from company/type mapping; extract configured values"]
+  groups --> firstvalid{"Required first-stage fields unambiguous?"}
+  firstvalid -- no --> pending
+  firstvalid -- yes --> stage2["Stage 2: resolve template and period_format from configured mapping"]
+  stage2 --> mappingvalid{"Template and period format resolved?"}
+  mappingvalid -- no --> pending
+  mappingvalid -- yes --> stage3["Stage 3: calculate period, then generate target storage key"]
+  stage3 --> valid{"Fields and key valid?"}
   valid -- no --> pending
-  valid -- yes --> rename["Compute key and copy object to target"]
+  valid -- yes --> rename["Copy object to target key"]
   rename --> sidecar["Persist sidecar with target key and event"]
   sidecar --> delete["Delete source only after sidecar is durable"]
   delete --> sqlite["Synchronize SQLite replica"]
