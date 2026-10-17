@@ -36,20 +36,25 @@ class LocalMLPipeline:
             else float(os.environ.get("CONFIDENCE_THRESHOLD", "0.8"))
         )
         self._models: dict[str, Any] = {}
+        self._model_versions: dict[str, str] = {}
 
     def _load(self, name: str) -> Any:
-        if name in self._models:
-            return self._models[name]
         active_path = self.model_dir / "active_models.json"
         try:
             active = __import__("json").loads(active_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             active = {}
         version = active.get(name)
-        path = (self.model_dir / "versions" / name / f"{version}.joblib") if version else (self.model_dir / f"{name}.joblib")
-        if not path.is_file():
+        if not version:
             raise ModelUnavailableError(
                 f"No active model artifact for {name}; train a version and activate it in Maintenance."
+            )
+        if name in self._models and self._model_versions.get(name) == version:
+            return self._models[name]
+        path = self.model_dir / "versions" / name / f"{version}.joblib"
+        if not path.is_file():
+            raise ModelUnavailableError(
+                f"Active model artifact is missing for {name} version {version}."
             )
         try:
             import joblib
@@ -57,6 +62,7 @@ class LocalMLPipeline:
         except Exception as exc:
             raise ModelUnavailableError(f"Could not load ML model {path.name}: {exc}") from exc
         self._models[name] = model
+        self._model_versions[name] = version
         return model
 
     def _predict_label(self, name: str, sample: Any) -> tuple[str, float]:
