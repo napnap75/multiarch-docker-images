@@ -416,10 +416,10 @@ Allowed job statuses are technical job states such as `queued`, `running`, `succ
 The Maintenance page manages local model versions using these endpoints:
 
 - `GET /api/models`: list supported model types, stored versions, and the active version for each type.
-- `POST /api/models/train`: train a new version from indexed documents with business status `validated`. JSON body: `{"model_name":"field_document_type"}`. Returns the model name, version, training sample count, and status. Training errors return a validation error when the labeled dataset is insufficient.
+- `POST /api/models/train`: train a new version from indexed documents with business status `validated`. JSON body: `{"model_name":"additional_field_values"}`. Returns the model name, version, training sample count, and status. Training errors return a validation error when the labeled dataset is insufficient.
 - `POST /api/models/{model_name}/{version}/activate`: select an existing version for runtime inference. The selection is written atomically to `MODEL_DIR/active_models.json`.
 
-Supported built-in model types are `field_emitting_company`, `field_document_type`, `field_emission_date`, `additional_field_groups`, `template_name`, and `period_format`. Additional-field value models use `additional_value_<group_name>`.
+Supported model types are `field_emitting_company`, `field_document_type`, `field_emission_date`, `additional_field_groups`, `additional_field_values`, `template_name`, and `period_format`. The shared additional-field model is trained and activated once for all eligible field names. All additional-field values are extracted by the shared `additional_field_values` model artifact. Its shared text vectorizer feeds field-specific output heads, and the requested field values are confidence-gated independently.
 
 Training runs locally and stores versioned joblib artifacts under `MODEL_DIR/versions/<model_name>/`. Training does not activate a model automatically. Runtime inference requires an explicitly active model version; missing or uncertain model predictions are routed to `pending`. The model artifacts must be trusted because loading joblib files can execute code.
 
