@@ -28,9 +28,9 @@ def _filesystem_snapshot(storage: Path) -> dict[str, bytes]:
 def _assert_baseline(service: dict[str, Any], *, expected_count: int) -> None:
     rows = _database_rows(service["db_path"])
     assert len(rows) == expected_count
-    assert {row["sha256"] for row in rows} == ({"e" * 64, "a" * 64} if expected_count else set())
-    assert _sidecar(service["storage"], "inbox/empty.pdf")["sha256"] == "e" * 64
-    assert _sidecar(service["storage"], "pending/valid.pdf")["sha256"] == "a" * 64
+    assert {row["sha256"] for row in rows} == ({"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "b6c81b0f56ce2237b8d121f1066ed699fc32cd18a587e337cb7273d63e862fa4"} if expected_count else set())
+    assert _sidecar(service["storage"], "inbox/empty.pdf")["sha256"] == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    assert _sidecar(service["storage"], "pending/valid.pdf")["sha256"] == "b6c81b0f56ce2237b8d121f1066ed699fc32cd18a587e337cb7273d63e862fa4"
 
 
 def test_rebuild_and_read_only_requests(e2e_service: dict[str, Any]) -> None:
@@ -57,7 +57,7 @@ def test_rebuild_and_read_only_requests(e2e_service: dict[str, Any]) -> None:
     assert _filesystem_snapshot(storage) == original_files
 
     # Action 3: read document detail, including extracted text.
-    status, detail, _ = request_json(base, "GET", f"/files/{'a' * 64}")
+    status, detail, _ = request_json(base, "GET", f"/files/b6c81b0f56ce2237b8d121f1066ed699fc32cd18a587e337cb7273d63e862fa4")
     assert status == 200, detail
     assert detail["current_key"] == "pending/valid.pdf"
     assert detail["extracted_text"] == "E2E sample document 2026-09-20"
@@ -87,7 +87,7 @@ def test_pdf_endpoint_streams_original_bytes(e2e_service: dict[str, Any]) -> Non
     before = _filesystem_snapshot(service["storage"])
 
     with urllib.request.urlopen(
-        service["base_url"] + f"/files/{'a' * 64}/pdf", timeout=10
+        service["base_url"] + f"/files/b6c81b0f56ce2237b8d121f1066ed699fc32cd18a587e337cb7273d63e862fa4/pdf", timeout=10
     ) as response:
         assert response.status == 200
         assert response.headers.get_content_type() == "application/pdf"
