@@ -15,6 +15,7 @@ from app.db import FileRecord, SQLiteFileRepository
 from app.period import format_period_from_emission_date
 from app.storage import StorageBackend
 from app.model_manager import activate_model, list_models, train_model
+from app.ml import AmbiguousPredictionError, LocalMLPipeline, ModelUnavailableError
 
 from .deps import get_current_user
 from .models import (
@@ -254,6 +255,106 @@ async def get_file(
         optional_fields=record.optional_fields,
         history=metadata["history"] if isinstance(metadata["history"], list) else [],
     )
+
+
+@router.post("/files/{file_id}/suggestions")
+async def get_document_model_suggestions(
+    request: Request,
+    file_id: str,
+    payload: dict[str, Any],
+    current_user: dict[str, str] | None = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Return confidence-gated model suggestions without delaying document rendering."""
+    db = _db(request)
+    record = db.get_by_id(file_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"File '{file_id}' not found")
+
+    registry = _registry(request)
+    threshold = float(os.environ.get("CONFIDENCE_THRESHOLD", "0.8"))
+    ml = LocalMLPipeline(confidence_threshold=threshold)
+    text = record.extracted_text or ""
+    company = str(payload.get("emitting_company") or record.emitting_company or "").strip()
+    document_type = str(payload.get("document_type") or record.document_type or "").strip()
+    suggestions: dict[str, dict[str, Any]] = {}
+
+    def add_prediction(field: str, model_name: str, sample: str) -> None:
+        try:
+            value, confidence = ml._predict_label(model_name, sample)
+            suggestions[field] = {"value": value, "confidence": confidence, "source": "model"}
+        except (ModelUnavailableError, AmbiguousPredictionError):
+            return
+
+    add_prediction("emitting_company", "field_emitting_company", text)
+    add_prediction("document_type", "field_document_type", text)
+
+    # Template and period format are conditioned on the current company/type values.
+    if company and document_type:
+        sample = f"{company}\n{document_type}"
+        add_prediction("template_name", "template_name", sample)
+        add_prediction("period_format", "period_format", sample)
+
+    suggested_company = suggestions.get("emitting_company", {}).get("value", company)
+    suggested_type = suggestions.get("document_type", {}).get("value", document_type)
+    suggested_template = suggestions.get("template_name", {}).get("value", payload.get("template_name") or record.template_name)
+    suggested_format = suggestions.get("period_format", {}).get("value", payload.get("period_format") or record.period_format)
+
+    try:
+        raw_date = str(payload.get("emission_date") or record.emission_date or "")
+        emission_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+        period_config = registry.get_period_format_config(str(suggested_format))
+        if period_config is not None:
+            calculated_period = format_period_from_emission_date(emission_date, period_config.to_dict())
+            source_confidences = [
+                item["confidence"] for key, item in suggestions.items()
+                if key in {"template_name", "period_format", "emitting_company", "document_type"}
+            ]
+            if source_confidences:
+                suggestions["period"] = {
+                    "value": calculated_period,
+                    "confidence": min(source_confidences),
+                    "source": "derived",
+                }
+            key_pattern = registry.get_key_pattern(str(suggested_template))
+            if key_pattern:
+                optional_fields = payload.get("optional_fields")
+                if not isinstance(optional_fields, dict):
+                    optional_fields = record.optional_fields or {}
+                pattern_values = dict(optional_fields)
+                pattern_values.update({
+                    "company": suggested_company,
+                    "document_type": suggested_type,
+                    "emission_date": emission_date.isoformat(),
+                    "period": calculated_period,
+                    "period_format": suggested_format,
+                    "template_name": suggested_template,
+                    "emitting_company": suggested_company,
+                    "additional_fields": ", ".join(str(value) for value in optional_fields.values()),
+                    "original_filename": (record.original_key or "").rsplit("/", 1)[-1],
+                })
+                for _ in range(20):
+                    try:
+                        calculated_key = key_pattern.format(**pattern_values).strip("/")
+                        break
+                    except KeyError as error:
+                        pattern_values[str(error.args[0])] = "unknown"
+                else:
+                    calculated_key = ""
+                if calculated_key:
+                    if not calculated_key.startswith("files/"):
+                        calculated_key = f"files/{calculated_key}"
+                    if not calculated_key.lower().endswith(".pdf"):
+                        calculated_key = f"{calculated_key}.pdf"
+                    if source_confidences:
+                        suggestions["current_key"] = {
+                            "value": calculated_key,
+                            "confidence": min(source_confidences),
+                            "source": "derived",
+                        }
+    except (TypeError, ValueError):
+        pass
+
+    return {"suggestions": suggestions, "confidence_threshold": threshold}
 
 
 @router.get("/files/{file_id}/pdf")
