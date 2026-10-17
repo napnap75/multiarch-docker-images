@@ -1,5 +1,6 @@
 """Tests for local ML inference and confidence-gated routing decisions."""
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,6 +21,11 @@ class FakeModel:
         return [[self.confidence, 1.0 - self.confidence]]
 
 
+class FakeSharedValuesModel:
+    def predict_values(self, text, fields):
+        return {field: (f"value-{field}", 0.95) for field in fields}
+
+
 class LocalMLPipelineTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -29,10 +35,16 @@ class LocalMLPipelineTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def pipeline_with(self, models, threshold=0.8):
+        active = {}
         for name in models:
-            (self.model_dir / f"{name}.joblib").touch()
+            version = "v1"
+            artifact = self.model_dir / "versions" / name / f"{version}.joblib"
+            artifact.parent.mkdir(parents=True, exist_ok=True)
+            artifact.touch()
+            active[name] = version
+        (self.model_dir / "active_models.json").write_text(json.dumps(active))
         pipeline = LocalMLPipeline(str(self.model_dir), threshold)
-        loader = patch("joblib.load", side_effect=lambda path: models[Path(path).stem])
+        loader = patch("joblib.load", side_effect=lambda path: models[Path(path).parent.name])
         loader.start()
         self.addCleanup(loader.stop)
         return pipeline
@@ -54,10 +66,21 @@ class LocalMLPipelineTests(unittest.TestCase):
         with self.assertRaises(AmbiguousPredictionError):
             pipeline._predict_label("field_document_type", "document text")
 
+    def test_shared_model_extracts_multiple_fields(self):
+        pipeline = self.pipeline_with({"additional_field_values": FakeSharedValuesModel()}, threshold=0.8)
+        values = pipeline.predict_additional_values(["invoice_number", "account_number"], "document text")
+        self.assertEqual(values["invoice_number"][0], "value-invoice_number")
+        self.assertEqual(values["account_number"][0], "value-account_number")
+
     def test_missing_model_is_not_replaced_by_rules(self):
         pipeline = LocalMLPipeline(str(self.model_dir), 0.8)
         with self.assertRaises(ModelUnavailableError):
             pipeline._predict_label("field_document_type", "invoice text")
+
+    def test_low_confidence_additional_field_is_rejected(self):
+        pipeline = self.pipeline_with({"additional_field_values": FakeSharedValuesModel()}, threshold=0.99)
+        with self.assertRaises(AmbiguousPredictionError):
+            pipeline.predict_additional_values(["invoice_number"], "document text")
 
 
 if __name__ == "__main__":
