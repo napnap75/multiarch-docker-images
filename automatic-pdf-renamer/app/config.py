@@ -226,9 +226,14 @@ class MappingRule:
             result["set"] = set_dict
         return result
 
-    def matches(self, company: str, document_type: str) -> bool:
-        """Check if this rule matches the given company and document type."""
-        return self.match.matches(company, document_type)
+    def matches(
+        self,
+        company: str,
+        document_type: str,
+        optional_fields: dict[str, Any] | None = None,
+    ) -> bool:
+        """Check if this rule matches document identity and extracted values."""
+        return self.match.matches(company, document_type, optional_fields)
 
 
 @dataclass
