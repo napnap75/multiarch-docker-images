@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from joblib import dump
+from sklearn.feature_extraction import DictVectorizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.multiclass import OneVsRestClassifier
@@ -54,29 +55,81 @@ class AdditionalGroupsModel:
 
 
 class AdditionalValuesModel:
-    """One versioned artifact containing a shared vectorizer and field-specific output heads."""
+    """One shared token-level model that extracts values as spans from document text."""
 
-    def __init__(self, vectorizer: TfidfVectorizer, field_models: dict[str, Any]):
+    def __init__(self, vectorizer: DictVectorizer, classifier: Any, trained_fields: list[str]):
         self.vectorizer = vectorizer
-        self.field_models = field_models
+        self.classifier = classifier
+        self.trained_fields = trained_fields
+
+    @staticmethod
+    def _tokens(text: str) -> list[tuple[str, int, int]]:
+        return [(match.group(), match.start(), match.end()) for match in re.finditer(r"\\S+", text)]
+
+    @staticmethod
+    def _features(tokens: list[tuple[str, int, int]], index: int) -> dict[str, Any]:
+        token = tokens[index][0]
+        normalized = token.casefold()
+        features: dict[str, Any] = {
+            "token": normalized, "prefix2": normalized[:2], "prefix4": normalized[:4],
+            "suffix2": normalized[-2:], "suffix4": normalized[-4:],
+            "shape_has_digit": any(char.isdigit() for char in token),
+            "shape_has_alpha": any(char.isalpha() for char in token),
+            "shape_upper": token.isupper(), "shape_title": token.istitle(),
+            "shape_length": min(len(token), 30), "position_bucket": min(index // 10, 20),
+        }
+        for offset in (-2, -1, 1, 2):
+            neighbor_index = index + offset
+            features[f"token_{offset}"] = (
+                tokens[neighbor_index][0].casefold()
+                if 0 <= neighbor_index < len(tokens) else "<BOUNDARY>"
+            )
+        return features
 
     def predict_values(self, text: str, fields: list[str]) -> dict[str, tuple[str, float]]:
-        features = self.vectorizer.transform([text])
-        results: dict[str, tuple[str, float]] = {}
+        tokens = self._tokens(text)
+        if not tokens:
+            raise ValueError("The document contains no tokens for additional-field extraction.")
+        unknown = sorted(set(fields) - set(self.trained_fields))
+        if unknown:
+            raise ValueError(
+                "The shared extraction model has no training spans for: " + ", ".join(unknown)
+                + ". Validate documents where these values appear in the extracted text, then retrain."
+            )
+        features = self.vectorizer.transform([
+            self._features(tokens, index) for index in range(len(tokens))
+        ])
+        probabilities = self.classifier.predict_proba(features)
+        classes = list(self.classifier.classes_)
+        predicted = self.classifier.predict(features)
+        output: dict[str, tuple[str, float]] = {}
         for field_name in fields:
-            classifier = self.field_models.get(field_name)
-            if classifier is None:
-                raise ValueError(
-                    f"No trained output for additional field '{field_name}'. "
-                    "Validate more documents containing this field, then retrain the shared model."
-                )
-            label = str(classifier.predict(features)[0]).strip()
-            probabilities = classifier.predict_proba(features)[0]
-            confidence = float(max(probabilities))
-            if not label:
-                raise ValueError(f"The shared model returned an empty value for '{field_name}'.")
-            results[field_name] = (label, confidence)
-        return results
+            spans: list[tuple[int, int, float]] = []
+            current_start: int | None = None
+            current_end: int | None = None
+            scores: list[float] = []
+            for index, tag in enumerate(predicted):
+                token_tag = str(tag)
+                if token_tag == f"B::{field_name}":
+                    if current_start is not None and current_end is not None:
+                        spans.append((current_start, current_end, sum(scores) / len(scores)))
+                    current_start, current_end = tokens[index][1], tokens[index][2]
+                    scores = [float(probabilities[index][classes.index(token_tag)])]
+                elif token_tag == f"I::{field_name}" and current_start is not None:
+                    current_end = tokens[index][2]
+                    scores.append(float(probabilities[index][classes.index(token_tag)]))
+                elif current_start is not None and current_end is not None:
+                    spans.append((current_start, current_end, sum(scores) / len(scores)))
+                    current_start = current_end = None
+                    scores = []
+            if current_start is not None and current_end is not None:
+                spans.append((current_start, current_end, sum(scores) / len(scores)))
+            if not spans:
+                output[field_name] = ("", 0.0)
+                continue
+            span_start, span_end, confidence = max(spans, key=lambda span: span[2])
+            output[field_name] = (text[span_start:span_end].strip(" :;,.\\t\\r\\n"), confidence)
+        return output
 
 
 def model_root() -> Path:
@@ -163,40 +216,57 @@ def train_model(model_name: str, records: list[Any]) -> dict[str, Any]:
 
     usable = [record for record in records if (record.extracted_text or "").strip()]
     if model_name == ADDITIONAL_VALUES_MODEL:
-        field_samples: dict[str, list[str]] = {}
-        field_labels: dict[str, list[str]] = {}
+        token_samples: list[dict[str, Any]] = []
+        token_labels: list[str] = []
+        field_counts: dict[str, int] = {}
         for record in usable:
+            text = str(record.extracted_text or "")
+            tokens = AdditionalValuesModel._tokens(text)
+            if not tokens:
+                continue
+            labels_for_tokens = ["O"] * len(tokens)
+            occupied: set[int] = set()
             for raw_name, raw_value in (record.optional_fields or {}).items():
                 field_name = str(raw_name).strip()
                 value = str(raw_value).strip() if raw_value is not None else ""
                 if not field_name or not value:
                     continue
-                field_samples.setdefault(field_name, []).append(record.extracted_text)
-                field_labels.setdefault(field_name, []).append(value)
-
-        eligible_fields = {
-            field_name: (samples, field_labels[field_name])
-            for field_name, samples in field_samples.items()
-            if len(samples) >= 2 and len(set(field_labels[field_name])) >= 2
-        }
-        if not eligible_fields:
-            raise ValueError(
-                "At least one additional field needs two validated examples with distinct non-empty values."
+                match = re.search(re.escape(value), text, flags=re.IGNORECASE)
+                if not match:
+                    continue
+                covered = [
+                    index for index, (_, token_start, token_end) in enumerate(tokens)
+                    if token_start < match.end() and token_end > match.start()
+                ]
+                if not covered or any(index in occupied for index in covered):
+                    continue
+                labels_for_tokens[covered[0]] = f"B::{field_name}"
+                for index in covered[1:]:
+                    labels_for_tokens[index] = f"I::{field_name}"
+                occupied.update(covered)
+                field_counts[field_name] = field_counts.get(field_name, 0) + 1
+            token_samples.extend(
+                AdditionalValuesModel._features(tokens, index) for index in range(len(tokens))
             )
+            token_labels.extend(labels_for_tokens)
 
-        # A single vectorizer is shared by every output head. Each field has its own
-        # categorical output head because different fields have different value domains.
-        all_texts = [text for samples, _ in eligible_fields.values() for text in samples]
-        vectorizer = TfidfVectorizer(ngram_range=(1, 2), sublinear_tf=True)
-        vectorizer.fit(all_texts)
-        field_models: dict[str, Any] = {}
-        for field_name, (samples, labels) in eligible_fields.items():
-            classifier = LogisticRegression(max_iter=1000, class_weight="balanced")
-            classifier.fit(vectorizer.transform(samples), labels)
-            field_models[field_name] = classifier
-        model = AdditionalValuesModel(vectorizer, field_models)
-        sample_count = sum(len(samples) for samples, _ in eligible_fields.values())
-        trained_fields = sorted(field_models)
+        trained_fields = sorted(name for name, count in field_counts.items() if count >= 2)
+        if not trained_fields:
+            raise ValueError(
+                "At least one additional field must have two validated examples whose labeled values "
+                "appear verbatim in the extracted document text."
+            )
+        valid_tags = {"O"} | {
+            tag for field_name in trained_fields for tag in (f"B::{field_name}", f"I::{field_name}")
+        }
+        filtered_samples = [sample for sample, label in zip(token_samples, token_labels) if label in valid_tags]
+        filtered_labels = [label for label in token_labels if label in valid_tags]
+        vectorizer = DictVectorizer(sparse=True)
+        features = vectorizer.fit_transform(filtered_samples)
+        classifier = LogisticRegression(max_iter=1000, class_weight="balanced")
+        classifier.fit(features, filtered_labels)
+        model = AdditionalValuesModel(vectorizer, classifier, trained_fields)
+        sample_count = len(usable)
     elif model_name == "additional_field_groups":
         samples, labels = [], []
         for record in usable:
