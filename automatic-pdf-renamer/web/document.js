@@ -83,7 +83,7 @@ const loadDocumentNavigation = async (fileId) => {
     while (true) {
       const params = new URLSearchParams(filters);
       params.set('page', String(page));
-      const response = await fetch(`/api/files?${params.toString()}`);
+      const response = await fetch(`/files?${params.toString()}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const items = await response.json();
       total = Number(response.headers.get('X-Total-Count')) || total;
@@ -96,7 +96,7 @@ const loadDocumentNavigation = async (fileId) => {
         if (!following && position < total) {
           const nextParams = new URLSearchParams(filters);
           nextParams.set('page', String(page + 1));
-          const nextResponse = await fetch(`/api/files?${nextParams.toString()}`);
+          const nextResponse = await fetch(`/files?${nextParams.toString()}`);
           if (!nextResponse.ok) throw new Error(`HTTP ${nextResponse.status}`);
           following = (await nextResponse.json())[0] || null;
         }
@@ -459,7 +459,7 @@ const fetchModelSuggestions = async () => {
     optional_fields: getAdditionalFieldEntries(),
   };
   try {
-    const response = await fetch(`/api/files/${encodeURIComponent(currentFileId)}/suggestions`, {
+    const response = await fetch(`/files/${encodeURIComponent(currentFileId)}/suggestions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -494,7 +494,7 @@ const saveDocument = async (event) => {
     optional_fields: getAdditionalFieldEntries(),
   };
   try {
-    const response = await fetch(`/api/files/${encodeURIComponent(currentFileId)}/edit`, {
+    const response = await fetch(`/files/${encodeURIComponent(currentFileId)}/edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -551,8 +551,8 @@ const loadDocument = async () => {
 
   try {
     const [documentResponse, optionsResponse] = await Promise.all([
-      fetch(`/api/files/${encodeURIComponent(fileId)}`),
-      fetch('/api/document-options'),
+      fetch(`/files/${encodeURIComponent(fileId)}`),
+      fetch('/document-options'),
     ]);
     if (!documentResponse.ok) throw new Error(`HTTP ${documentResponse.status}`);
     if (!optionsResponse.ok) throw new Error(`Unable to load edit options (HTTP ${optionsResponse.status})`);
