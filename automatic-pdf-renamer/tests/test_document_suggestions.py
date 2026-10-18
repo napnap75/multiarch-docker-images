@@ -40,6 +40,18 @@ class FakeMLPipeline:
             raise AmbiguousPredictionError("Below threshold")
         return values[model_name]
 
+    def predict_additional_groups(self, emitting_company, document_type):
+        return ["invoice_number"], 0.91
+
+    def predict_additional_values(self, field_names, text):
+        return {field_name: ("INV-123", 0.92) for field_name in field_names}
+
+    def predict_template_and_period_format(self, emitting_company, document_type, additional_fields):
+        sample = f"{emitting_company}\\n{document_type}\\n{additional_fields}"
+        template, template_confidence = self._predict_label("template_name", sample)
+        period_format, period_confidence = self._predict_label("period_format", sample)
+        return template, template_confidence, period_format, period_confidence
+
 
 class DocumentSuggestionTests(unittest.TestCase):
     def setUp(self):
@@ -103,7 +115,7 @@ class DocumentSuggestionTests(unittest.TestCase):
             ))
 
         self.assertNotIn("template_name", result["suggestions"])
-        self.assertIn("period_format", result["suggestions"])
+        self.assertNotIn("period_format", result["suggestions"])
 
 
 if __name__ == "__main__":
