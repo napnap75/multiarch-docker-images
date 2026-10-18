@@ -1,4 +1,4 @@
-"""Tests for versioned models and shared additional-field extraction."""
+"""Tests for full-set model retraining and shared additional-field extraction."""
 
 import json
 import os
@@ -8,11 +8,40 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.model_manager import activate_model, list_models, train_model
+from app.model_manager import BASE_MODELS, list_models, train_all_models
 from app.ml import LocalMLPipeline, ModelUnavailableError
 
 
-class ModelActivationTests(unittest.TestCase):
+def validated_records():
+    return [
+        SimpleNamespace(
+            extracted_text="Invoice number INV-100 for account AC-10",
+            optional_fields={"invoice_number": "INV-100", "account_number": "AC-10"},
+            emitting_company="Company A",
+            document_type="invoice",
+            template_name="invoice_template",
+            period_format="monthly",
+        ),
+        SimpleNamespace(
+            extracted_text="Invoice number INV-200",
+            optional_fields={"invoice_number": "INV-200"},
+            emitting_company="Company A",
+            document_type="invoice",
+            template_name="invoice_template",
+            period_format="quarterly",
+        ),
+        SimpleNamespace(
+            extracted_text="Account statement for AC-30",
+            optional_fields={"account_number": "AC-30"},
+            emitting_company="Company B",
+            document_type="statement",
+            template_name="statement_template",
+            period_format="yearly",
+        ),
+    ]
+
+
+class FullModelRetrainingTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
@@ -23,49 +52,51 @@ class ModelActivationTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def test_activation_updates_active_version_atomically(self):
-        artifact = self.root / "versions" / "field_document_type" / "v1.joblib"
-        artifact.parent.mkdir(parents=True)
-        artifact.touch()
-        result = activate_model("field_document_type", "v1")
-        self.assertEqual(result["active_version"], "v1")
-        active = json.loads((self.root / "active_models.json").read_text())
-        self.assertEqual(active["field_document_type"], "v1")
-        model = next(item for item in list_models()["models"] if item["name"] == "field_document_type")
-        self.assertTrue(model["has_active_model"])
-        self.assertTrue(model["versions"][0]["active"])
+    def test_retraining_replaces_all_models_without_history(self):
+        old_artifact = self.root / "versions" / "field_document_type" / "old-version.joblib"
+        old_artifact.parent.mkdir(parents=True)
+        old_artifact.write_bytes(b"old artifact")
+        (self.root / "active_models.json").write_text(
+            json.dumps({"field_document_type": "old-version"}), encoding="utf-8"
+        )
 
-    def test_inference_requires_explicit_active_version(self):
+        progress = []
+        result = train_all_models(validated_records(), lambda value, message: progress.append((value, message)))
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["count"], len(BASE_MODELS))
+        self.assertEqual(json.loads((self.root / "active_models.json").read_text()), {
+            name: "current" for name in BASE_MODELS
+        })
+        self.assertFalse(old_artifact.exists())
+        self.assertEqual(
+            {path.parent.name for path in (self.root / "versions").glob("*/*.joblib")},
+            set(BASE_MODELS),
+        )
+        self.assertEqual(len(list((self.root / "versions").glob("*/*.joblib"))), len(BASE_MODELS))
+        self.assertEqual(progress[-1][0], 100)
+
+    def test_inventory_has_no_version_history_or_emission_date_model(self):
+        result = list_models()
+        names = {model["name"] for model in result["models"]}
+        self.assertNotIn("field_emission_date", names)
+        self.assertTrue(all("versions" not in model for model in result["models"]))
+
+    def test_inference_requires_a_complete_active_model_set(self):
         pipeline = LocalMLPipeline(str(self.root), 0.8)
         with self.assertRaises(ModelUnavailableError):
             pipeline._load("field_document_type")
 
-    def test_activation_rejects_missing_version(self):
-        with self.assertRaises(FileNotFoundError):
-            activate_model("field_document_type", "missing")
-
-    def test_shared_additional_value_model_trains_and_predicts_multiple_fields(self):
-        records = [
-            SimpleNamespace(extracted_text="Invoice number INV-100 for account AC-10", optional_fields={"invoice_number": "INV-100", "account_number": "AC-10"}, emitting_company="A", document_type="invoice"),
-            SimpleNamespace(extracted_text="Invoice number INV-200 for account AC-20", optional_fields={"invoice_number": "INV-200", "account_number": "AC-20"}, emitting_company="A", document_type="invoice"),
-            SimpleNamespace(extracted_text="Invoice number INV-300 for account AC-30", optional_fields={"invoice_number": "INV-300", "account_number": "AC-30"}, emitting_company="A", document_type="invoice"),
-        ]
-        result = train_model("additional_field_values", records)
-        self.assertEqual(result["name"], "additional_field_values")
-        self.assertEqual(set(result["trained_fields"]), {"invoice_number", "account_number"})
-        self.assertEqual(len(list((self.root / "versions" / "additional_field_values").glob("*.joblib"))), 1)
-        activate_model("additional_field_values", result["version"])
+    def test_shared_additional_value_model_extracts_multiple_fields(self):
+        train_all_models(validated_records())
         pipeline = LocalMLPipeline(str(self.root), 0.0)
         predictions = pipeline.predict_additional_values(
-            ["invoice_number", "account_number"], "Invoice number INV-200 for account AC-20"
+            ["invoice_number", "account_number"],
+            "Invoice number INV-200 for account AC-20",
         )
         self.assertEqual(set(predictions), {"invoice_number", "account_number"})
         self.assertTrue(predictions["invoice_number"][0])
         self.assertTrue(predictions["account_number"][0])
-
-    def test_per_field_model_names_are_rejected(self):
-        with self.assertRaises(ValueError):
-            train_model("additional_value_invoice_number", [])
 
 
 if __name__ == "__main__":
