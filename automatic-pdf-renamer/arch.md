@@ -58,7 +58,7 @@ flowchart TD
 | Frontend | React + Vite, react-pdf viewer | NFR7; built to static assets served by FastAPI. |
 | Process model | API, poller, and background jobs in one container | Single-user tool; a process manager is unnecessary complexity. |
 | Inbox poller | asyncio background task inside the FastAPI process | Lightweight, no queue infrastructure; restart scan (FR1.3) covers crash recovery. |
-| Long jobs (retrain, consistency, rebuild) | Subprocesses launched and monitored by the API | Keeps the event loop responsive; status exposed via the existing endpoints (FR9, FR10). |
+| Long jobs (retrain, consistency, rebuild) | Background worker or subprocess, depending on operation | Keeps the event loop responsive; status and progress are exposed through job endpoints (FR9, FR10). |
 | Dashboard auth | Username + password (single account, env-var credentials, session cookie) | Local network but not fully trusted; cheap to implement. |
 | Testing | Unit tests only, pytest | Single-user offline tool; the storage layer is behind interfaces so mocks are cheap. Integration/CI coverage deferred. |
 
@@ -70,7 +70,7 @@ One Python process runs:
 
 - FastAPI app: serves the API, the static dashboard, and the PDF streaming proxy.
 - Poller task: asyncio loop, configurable interval, lists the `inbox/` prefix.
-- Job supervisor: spawns subprocesses for retrain, consistency scan, and SQLite rebuild; tracks their status in memory and in SQLite.
+- Job supervisor: runs full model retraining in a background worker and launches subprocesses for consistency scan and SQLite rebuild; tracks current job state for the API.
 
 On startup, the process recovers interrupted technical operations and discovers eligible objects in `inbox/`. The `pending/` prefix is reconciled for metadata and anomalies; documents awaiting manual correction are not automatically reclassified or renamed until corrected/requested.
 
@@ -87,8 +87,8 @@ app/
   period.py          # period computation from emission date + period format config
   templates.py       # JSONC template registry (slots, period rules, key patterns)
   rename.py          # copy-then-delete move + event logging
-  jobs/              # poller, consistency scan, retrain subprocess, rebuild
-  api/               # routes: files, templates, retrain, consistency, auth
+  jobs/              # poller, consistency scan, rebuild
+  api/               # routes: files, templates, model retraining, consistency, auth
 web/                 # React + Vite app (built to static assets)
 models/              # current model set; prior artifacts removed after successful replacement
 ```
