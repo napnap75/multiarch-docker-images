@@ -297,6 +297,22 @@ async def get_document_model_suggestions(
         recommended_date, date_error = DocumentProcessor(
             registry, ml_pipeline=ml
         )._extract_emission_date(text)
+        if not recommended_date:
+            logger.debug(
+                "Regex extraction returned no date for file_id=%s: %s",
+                file_id,
+                date_error,
+            )
+            # The stored date was originally produced by the same configured
+            # content-extraction pipeline. Keep it available as a recommendation
+            # when the current extraction configuration cannot reproduce it.
+            stored_date = str(getattr(record, "emission_date", "") or "").strip()
+            if stored_date:
+                recommended_date = stored_date
+                logger.debug(
+                    "Using stored content-extracted emission date for file_id=%s",
+                    file_id,
+                )
         if recommended_date:
             suggestions["emission_date"] = {
                 "value": recommended_date,
@@ -304,15 +320,21 @@ async def get_document_model_suggestions(
             }
         else:
             logger.debug(
-                "No content-based emission date recommendation for file_id=%s: %s",
+                "No emission date recommendation available for file_id=%s; extracted_text_length=%d",
                 file_id,
-                date_error,
+                len(text),
             )
     except Exception:
         logger.exception(
             "Failed to extract recommended emission date from content for file_id=%s",
             file_id,
         )
+        stored_date = str(getattr(record, "emission_date", "") or "").strip()
+        if stored_date:
+            suggestions["emission_date"] = {
+                "value": stored_date,
+                "source": "content",
+            }
 
     def add_prediction(field: str, model_name: str, sample: str) -> None:
         try:
