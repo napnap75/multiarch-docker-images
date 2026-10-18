@@ -1,4 +1,4 @@
-"""Training, versioning, and activation for local document classifiers."""
+"""Train and replace the complete local document model set."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import json
 import os
 import re
 from datetime import datetime, timezone
+import shutil
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -21,15 +23,13 @@ from sklearn.preprocessing import MultiLabelBinarizer
 SINGLE_LABEL_MODELS = {
     "field_emitting_company": ("extracted_text", "emitting_company"),
     "field_document_type": ("extracted_text", "document_type"),
-    "field_emission_date": ("extracted_text", "emission_date"),
-    "template_name": ("company_type", "template_name"),
-    "period_format": ("company_type", "period_format"),
+    "template_name": ("company_type_fields", "template_name"),
+    "period_format": ("company_type_fields", "period_format"),
 }
 ADDITIONAL_VALUES_MODEL = "additional_field_values"
 BASE_MODELS = (
     "field_emitting_company",
     "field_document_type",
-    "field_emission_date",
     "additional_field_groups",
     ADDITIONAL_VALUES_MODEL,
     "template_name",
@@ -152,45 +152,16 @@ def _read_active() -> dict[str, str]:
 
 
 def list_models() -> dict[str, Any]:
+    """Return the current model set without exposing model history."""
     root = model_root()
     active = _read_active()
-    versions_root = root / "versions"
-    model_names = set(BASE_MODELS)
-    if versions_root.exists():
-        for model_dir in versions_root.iterdir():
-            # Hide legacy per-field artifacts from the current inventory. They remain
-            # on disk for rollback/inspection but are no longer used by inference.
-            if model_dir.is_dir() and not model_dir.name.startswith("additional_value_"):
-                model_names.add(model_dir.name)
-    result = []
-    for name in sorted(model_names):
-        directory = versions_root / name
-        versions = sorted((p.stem for p in directory.glob("*.joblib")), reverse=True) if directory.exists() else []
-        active_version = active.get(name)
-        result.append({
-            "name": name,
-            "active_version": active_version,
-            "versions": [{"version": version, "active": version == active_version}
-                         for version in versions],
-            "has_active_model": bool(active_version and (directory / f"{active_version}.joblib").is_file()),
-        })
-    return {"models": result, "model_dir": str(root), "training_source": "validated documents"}
-
-
-def activate_model(model_name: str, version: str) -> dict[str, Any]:
-    if not re.fullmatch(r"[A-Za-z0-9_-]+", model_name) or not re.fullmatch(r"[A-Za-z0-9T_.-]+", version):
-        raise ValueError("Invalid model name or version")
-    artifact = model_root() / "versions" / model_name / f"{version}.joblib"
-    if not artifact.is_file():
-        raise FileNotFoundError(f"Model version '{version}' does not exist for '{model_name}'")
-    active = _read_active()
-    active[model_name] = version
-    root = model_root()
-    root.mkdir(parents=True, exist_ok=True)
-    temporary = _active_file().with_suffix(".tmp")
-    temporary.write_text(json.dumps(active, indent=2), encoding="utf-8")
-    temporary.replace(_active_file())
-    return {"name": model_name, "active_version": version, "status": "active"}
+    models = []
+    for name in BASE_MODELS:
+        version = active.get(name)
+        artifact = root / "versions" / name / f"{version}.joblib" if version else None
+        models.append({"name": name, "has_active_model": bool(artifact and artifact.is_file())})
+    return {"models": models, "model_dir": str(root), "training_source": "validated documents",
+            "complete": all(model["has_active_model"] for model in models)}
 
 
 def _new_classifier() -> Pipeline:
@@ -200,7 +171,7 @@ def _new_classifier() -> Pipeline:
     ])
 
 
-def train_model(model_name: str, records: list[Any]) -> dict[str, Any]:
+def train_model(model_name: str, records: list[Any], output_root: Path | None = None) -> dict[str, Any]:
     """Train one requested model from validated records and save a versioned artifact."""
     if not re.fullmatch(r"[A-Za-z0-9_-]+", model_name):
         raise ValueError("Model names may contain only letters, numbers, underscores, and hyphens.")
@@ -299,10 +270,15 @@ def train_model(model_name: str, records: list[Any]) -> dict[str, Any]:
         samples, labels = [], []
         source, target_name = SINGLE_LABEL_MODELS[model_name]
         for record in usable:
-            if source == "company_type":
+            if source in {"company_type", "company_type_fields"}:
                 if not record.emitting_company or not record.document_type:
                     continue
-                sample = f"{record.emitting_company}\n{record.document_type}"
+                sample = f"{record.emitting_company}\\n{record.document_type}"
+                if source == "company_type_fields":
+                    fields = record.optional_fields or {}
+                    sample += "\\n" + "\\n".join(
+                        f"{key}: {value}" for key, value in sorted(fields.items())
+                    )
                 label = getattr(record, target_name, None)
             else:
                 sample = record.extracted_text
@@ -318,8 +294,8 @@ def train_model(model_name: str, records: list[Any]) -> dict[str, Any]:
         sample_count = len(samples)
         trained_fields = []
 
-    version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    destination = model_root() / "versions" / model_name
+    version = "current" if output_root is not None else datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    destination = (output_root or model_root()) / "versions" / model_name
     destination.mkdir(parents=True, exist_ok=True)
     artifact = destination / f"{version}.joblib"
     dump(model, artifact)
@@ -328,8 +304,8 @@ def train_model(model_name: str, records: list[Any]) -> dict[str, Any]:
         "version": version,
         "samples": sample_count,
         "status": "trained",
-        "active": False,
-        "message": "Model trained and saved. Activate it explicitly to use it for inference.",
+        "active": output_root is not None,
+        "message": "Model trained in staging." if output_root is not None else "Model trained and saved.",
     }
     if model_name == ADDITIONAL_VALUES_MODEL:
         result["trained_fields"] = trained_fields
