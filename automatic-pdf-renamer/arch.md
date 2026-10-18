@@ -355,10 +355,10 @@ sequenceDiagram
 | Inbox poll | Interval (configurable, default from PRD) | asyncio task, in-process |
 | Stability check | Two consecutive listings, same size + ETag | Poller state kept in memory |
 | Consistency scan | Periodic (configurable) + on demand | Subprocess |
-| Retrain all models | Single Maintenance dashboard action | One subprocess trains every required model in dependency order; progress is reported through the same job-status/progress mechanism as consistency scan and SQLite rebuild. On success, the new complete model set replaces the previous set and old artifacts are deleted. |
+| Retrain all models | Single Maintenance dashboard action | One background worker trains every required model in dependency order; the API exposes job state and percentage progress. On success, an atomic active-set pointer switch replaces the previous set and old artifacts are deleted. |
 | SQLite rebuild | Dashboard action or CLI | Subprocess |
 
-Subprocesses report progress and metrics by writing a status JSON consumed by the API's status endpoints. Only one job of each kind runs at a time; the API refuses a duplicate start. Model retraining is one atomic maintenance operation: there are no per-model train/activate controls and no model-version history. The existing model set must remain usable if training fails before the replacement set is complete; once the replacement succeeds, remove the previous artifacts.
+Subprocess-based jobs report progress and metrics by writing a status JSON consumed by the API's status endpoints. Model retraining reports in-memory job state and progress through the API. Only one retraining job runs at a time; the API refuses a duplicate start. Model retraining is one atomic maintenance operation: there are no per-model train/activate controls and no model-version history. The existing model set must remain usable if training fails before the replacement set is complete; once the replacement succeeds, remove the previous artifacts.
 
 ## 7. Configuration and Secrets
 
