@@ -342,7 +342,7 @@ class DocumentProcessor:
             "septembre": "09", "octobre": "10", "novembre": "11", "decembre": "12",
         }
         for month_name, month_number in french_months.items():
-            value = re.sub(rf"\\b{month_name}\\b", month_number, value)
+            value = re.sub(rf"\b{month_name}\b", month_number, value)
         formats = (
             "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d",
             "%Y/%m", "%Y-%m", "%m/%Y", "%m-%Y",
