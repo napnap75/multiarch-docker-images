@@ -319,6 +319,7 @@ def train_all_models(records: list[Any], progress_callback=None) -> dict[str, An
     staging = root / f".staging-{uuid.uuid4().hex}"
     backup = root / f".backup-{uuid.uuid4().hex}"
     model_names = list(BASE_MODELS)
+    generation = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     try:
         staging.mkdir()
         results = []
@@ -330,7 +331,13 @@ def train_all_models(records: list[Any], progress_callback=None) -> dict[str, An
                 )
             results.append(train_model(model_name, records, output_root=staging))
 
-        active = {name: "current" for name in model_names}
+        for model_name, result in zip(model_names, results):
+            model_dir = staging / "versions" / model_name
+            staged_artifact = model_dir / "current.joblib"
+            staged_artifact.rename(model_dir / f"{generation}.joblib")
+            result["version"] = generation
+
+        active = {name: generation for name in model_names}
         staged_active = staging / "active_models.json"
         staged_active.write_text(json.dumps(active, indent=2), encoding="utf-8")
         if progress_callback:
