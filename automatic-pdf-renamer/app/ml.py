@@ -47,7 +47,7 @@ class LocalMLPipeline:
         version = active.get(name)
         if not version:
             raise ModelUnavailableError(
-                f"No active model artifact for {name}; train a version and activate it in Maintenance."
+                f"No active model artifact for {name}; retrain all models from Maintenance."
             )
         if name in self._models and self._model_versions.get(name) == version:
             return self._models[name]
