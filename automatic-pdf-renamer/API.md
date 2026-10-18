@@ -75,10 +75,7 @@ This convention applies to HTTP error responses from every endpoint. Successful 
 | PUT | `/config` | Validate and save a modified JSONC configuration file |
 | GET | `/models` | Post-v1: list model versions |
 | POST | `/retrain` | Post-v1: start local model training |
-| POST | `/retrain/{job_id}/activate` | Post-v1: activate a trained model |
-| POST | `/retrain/{job_id}/discard` | Post-v1: discard a candidate model |
-
-The endpoints in the models/retraining section are post-v1 capabilities. They may be omitted from the first deterministic release without affecting the core API.
+The model-maintenance API is described in [Section 10](#10-local-model-maintenance).
 
 ## 4. Configuration file
 
@@ -427,12 +424,12 @@ The replacement policy is **replace, do not version**. Train the full replacemen
 
 ### Required inference order
 
-1. Predict `company_name` (current persisted field: `emitting_company`) and `document_type` from the complete extracted PDF text.
+1. Predict `emitting_company` and `document_type` from the complete extracted PDF text.
 2. Extract `emission_date` with regex only, using the patterns in the `date_extraction` configuration section. Choose the earliest valid match in document order; if matches begin at the same position, use the order in the configuration. Normalize to `YYYY-MM-DD`. No ML model may predict the emission date.
-3. Predict `period_format` and the applicable additional-field list/group from `company_name` and `document_type`.
+3. Predict only the applicable additional-field list/group from `emitting_company` and `document_type`. Do not predict `period_format` at this stage.
 4. Predict each additional-field value from the complete extracted PDF text with the shared token-level extraction model.
-5. Predict `template_name` and the final `period_format` from `company_name`, `document_type`, and the extracted `additional_fields`. This final prediction supersedes the initial period-format estimate from step 3.
-6. Calculate `period` from the emission date and final period-format configuration; calculate `current_key` from the selected template's key pattern and final values. These are deterministic derived values, not model predictions.
+5. Predict `template_name` and `period_format` from `emitting_company`, `document_type`, and the extracted `additional_fields`.
+6. Calculate `period` once from the emission date and final period-format configuration; calculate `current_key` from the selected template's key pattern and final values. These are deterministic derived values, not model predictions.
 
 Any required ML result that is missing or below the configured confidence threshold is unresolved and must follow the existing pending/review behavior; do not substitute a hard-coded mapping.
 
