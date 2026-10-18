@@ -95,6 +95,15 @@ models/              # versioned model registry (initial + trained)
 
 ### 4.3 Processing pipeline
 
+The ingestion pipeline follows this strict analysis order. Model predictions that are unavailable or below the configured confidence threshold are treated as unresolved; the document is routed to `pending/` rather than silently substituting a deterministic mapping.
+
+1. **Company and document type:** ML models predict `company_name` (stored in the current schema as `emitting_company`) and `document_type` from the complete extracted PDF text.
+2. **Emission date:** no ML model is used. Scan the extracted text for dates matching the regular expressions listed in the `date_extraction` section of `config.jsonc`. Select the earliest matching date by its position in the document; use configuration order to resolve matches starting at the same position. Normalize the captured date to `YYYY-MM-DD`. If no valid match exists, the date is unresolved.
+3. **Initial field setup:** ML predicts `period_format` and the applicable list/group of additional fields using `company_name` and `document_type`.
+4. **Additional-field values:** the shared token-level ML extractor predicts each configured additional-field value from the complete extracted PDF text, conditioned on the field name/group as represented by the model.
+5. **Final template and period format:** ML predicts `template_name` and refines/finalizes `period_format` using `company_name`, `document_type`, and the extracted `additional_fields`. The result of this stage is the final template and period format used for calculations.
+6. **Derived values:** calculate `period` from the emission date and the selected period-format definition; calculate `current_key` from the selected template's key pattern and the final field values. Neither `period` nor `current_key` is an ML prediction or an independently editable input.
+
 One ingestion run, fully synchronous within the poller task:
 
 ```mermaid
@@ -103,15 +112,13 @@ flowchart TD
   dl --> tx["Extract text from every PDF page (PyMuPDF)"]
   tx --> empty{"Text empty?"}
   empty -- yes --> pending["Move to pending/ (reason: empty text)"]
-  empty -- no --> stage1["Stage 1: extract emitting company, document type, additional-field values, and emission date from text"]
-  stage1 --> groups["ML predicts additional-field groups from company/type; ML extracts values"]
-  groups --> firstvalid{"Required first-stage fields unambiguous?"}
-  firstvalid -- no --> pending
-  firstvalid -- yes --> stage2["Stage 2: resolve template and period_format from configured mapping"]
-  stage2 --> mappingvalid{"Template and period format resolved?"}
-  mappingvalid -- no --> pending
-  mappingvalid -- yes --> stage3["Stage 3: calculate period, then generate target storage key"]
-  stage3 --> valid{"Fields and key valid?"}
+  empty -- no --> company["1. ML: company_name + document_type from text"]
+  company --> date["2. Regex: first matching emission date from config date_extraction"]
+  date --> groups["3. ML: period_format + additional-field list from company/type"]
+  groups --> values["4. ML: additional-field values from full document text"]
+  values --> final["5. ML: template + final period_format from company/type/fields"]
+  final --> derived["6. Calculate period + current_key from config"]
+  derived --> valid{"Required predictions and derived values valid?"}
   valid -- no --> pending
   valid -- yes --> rename["Copy object to target key"]
   rename --> sidecar["Persist sidecar with target key and event"]
@@ -348,10 +355,10 @@ sequenceDiagram
 | Inbox poll | Interval (configurable, default from PRD) | asyncio task, in-process |
 | Stability check | Two consecutive listings, same size + ETag | Poller state kept in memory |
 | Consistency scan | Periodic (configurable) + on demand | Subprocess |
-| Retrain | Dashboard action | Subprocess; writes a new versioned model dir; activation is an atomic pointer swap, no restart (AC6) |
+| Retrain all models | Single Maintenance dashboard action | One subprocess trains every required model in dependency order; progress is reported through the same job-status/progress mechanism as consistency scan and SQLite rebuild. On success, the new complete model set replaces the previous set and old artifacts are deleted. |
 | SQLite rebuild | Dashboard action or CLI | Subprocess |
 
-Subprocesses report progress and metrics by writing a status JSON consumed by the API's status endpoints. Only one job of each kind runs at a time; the API refuses a duplicate start.
+Subprocesses report progress and metrics by writing a status JSON consumed by the API's status endpoints. Only one job of each kind runs at a time; the API refuses a duplicate start. Model retraining is one atomic maintenance operation: there are no per-model train/activate controls and no model-version history. The existing model set must remain usable if training fails before the replacement set is complete; once the replacement succeeds, remove the previous artifacts.
 
 ## 7. Configuration and Secrets
 
@@ -397,4 +404,4 @@ Every epic maps to a component: ingestion (jobs/poller), extraction and classifi
 
 ### Local ML inference
 
-The runtime loads trusted, locally stored model artifacts from `MODEL_DIR`. Separate models predict the common text fields, applicable additional-field groups, `template_name`, and `period_format`. One shared token-level extraction model identifies spans for every requested additional field using a shared feature representation and a single classifier; it can return values not seen verbatim during training when they occur in document text. Training labels come from validated sidecar values that appear in saved extracted text. Each extracted span is confidence-gated; missing training coverage or uncertain predictions route to `pending`. The template and period-format classifiers receive only emitting company and document type. Templates and period-format definitions remain execution metadata for key formatting and period arithmetic, not classification mappings.
+The runtime loads trusted, locally stored model artifacts from `MODEL_DIR`. The analysis order is mandatory: (1) predict `company_name` (stored as `emitting_company`) and `document_type` from extracted text; (2) extract `emission_date` using the configured `date_extraction` regexes only, selecting the earliest valid match in document order (no date ML model); (3) predict `period_format` and applicable additional-field groups from company and document type; (4) extract each additional-field value from the full text using one shared token-level model; (5) predict `template_name` and the final `period_format` from company, document type, and additional fields; and (6) calculate `period` and `current_key` from the configured period-format definition and template key pattern. The final period format is the prediction from step 5. Training labels come from validated sidecar values, and additional-field values are trained only when they appear in the saved extracted text. Predictions are confidence-gated; missing or uncertain required predictions route to `pending`. Templates and period-format definitions provide calculation/formatting rules, not hard-coded classification mappings.
