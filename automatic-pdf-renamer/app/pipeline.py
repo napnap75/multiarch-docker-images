@@ -111,41 +111,30 @@ class DocumentProcessor:
                 result.status = SidecarStatus.PENDING.value
                 return result
 
-            # Stage 1: extract all text-derived common fields in the same pass.
-            # Keep these independent so a missing date does not prevent company/type
-            # ambiguity from being detected and reported for the same document.
+            # Step 1: Predict emitting_company and document_type from the full text.
             try:
                 initial_fields = self.ml_pipeline.extract_initial_fields(extracted_text)
-                company = initial_fields["emitting_company"][0]
+                emitting_company = initial_fields["emitting_company"][0]
                 doc_type = initial_fields["document_type"][0]
-                emission_date = initial_fields["emission_date"][0]
                 initial_confidence = min(value[1] for value in initial_fields.values())
-                date_error = None if emission_date else "ML could not determine emission_date"
-                field_errors = []
             except (ModelUnavailableError, AmbiguousPredictionError) as exc:
-                emission_date, date_error = "", str(exc)
-                company, doc_type, field_errors = "", "", [str(exc)]
-                initial_confidence = 0.0
+                result.errors.append(str(exc))
+                result.status = SidecarStatus.PENDING.value
+                return result
 
+            # Step 2: Extract the emission date using configured regexes only.
+            emission_date, date_error = self._extract_emission_date(extracted_text)
             if date_error:
                 result.errors.append(date_error)
                 result.status = SidecarStatus.PENDING.value
                 return result
-
             result.emission_date = emission_date
 
-            # Stage 1 results are validated only after all initial extractors have run.
-            # Never substitute a default class: ambiguous or unknown values require review.
-            if field_errors:
-                result.errors.extend(field_errors)
-                result.status = SidecarStatus.PENDING.value
-                return result
-
-            result.company = company
+            result.company = emitting_company
             result.document_type = doc_type
-            if not self.registry.is_valid_company(company):
+            if not self.registry.is_valid_company(emitting_company):
                 result.errors.append(
-                    f"Unknown company '{company}'. "
+                    f"Unknown emitting company '{emitting_company}'. "
                     f"Valid companies: {', '.join(self.registry.get_companies()[:10])}"
                 )
                 result.status = SidecarStatus.PENDING.value
@@ -163,7 +152,7 @@ class DocumentProcessor:
             # Template and period format are deliberately not consumed until this
             # first-stage field extraction has completed.
             try:
-                additional_field_groups, groups_confidence = self.ml_pipeline.predict_additional_groups(company, doc_type)
+                additional_field_groups, groups_confidence = self.ml_pipeline.predict_additional_groups(emitting_company, doc_type)
             except (ModelUnavailableError, AmbiguousPredictionError) as exc:
                 result.errors.append(str(exc))
                 result.status = SidecarStatus.PENDING.value
@@ -189,7 +178,7 @@ class DocumentProcessor:
             # predicted identifiers can be executed downstream.
             try:
                 template_name, template_confidence, period_format, period_confidence = (
-                    self.ml_pipeline.predict_template_and_period_format(company, doc_type)
+                    self.ml_pipeline.predict_template_and_period_format(emitting_company, doc_type, optional_fields)
                 )
             except (ModelUnavailableError, AmbiguousPredictionError) as exc:
                 result.errors.append(str(exc))
