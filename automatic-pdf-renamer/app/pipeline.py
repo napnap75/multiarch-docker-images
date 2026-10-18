@@ -1,16 +1,12 @@
 """Processing pipeline module for Automatic PDF Renamer.
 
-Implements the document processing workflow:
-1. Extract text from every page using PyMuPDF
-2. Extract emission date in parallel with the initial text-derived fields
-3. Identify emitting company and document type from text, validated against configured lists
-   - Unknown values must route to review
-4. Resolve applicable additional-field groups from (company, document_type), then extract their values from text
-   - Mappings use match/set structure: match criteria (company, document_type, both, or neither)
-   - Rules are processed in order, later matches override earlier ones
-   - Empty match {} matches all documents (default rule)
-5. After first-stage extraction, resolve template and period_format from configuration
-6. Calculate period from emission_date and period_format, then render the final storage key
+Implements the ordered ML and deterministic processing workflow:
+1. Predict emitting_company and document_type from extracted PDF text
+2. Extract emission_date using configured date_extraction regexes only
+3. Predict applicable additional-field groups from emitting_company and document_type
+4. Extract additional-field values from the full text
+5. Predict template_name and period_format from emitting_company, document_type, and additional fields
+6. Calculate period and current_key from the final predictions and configuration
 """
 
 import logging
@@ -371,61 +367,6 @@ class DocumentProcessor:
         if non_empty:
             return " ".join(non_empty) if len(non_empty) > 1 else non_empty[0]
         return None
-
-    def _is_valid_date_string(self, date_str: str) -> bool:
-        """Check if a string looks like a valid date.
-
-        Args:
-            date_str: The string to check.
-
-        Returns:
-            True if it looks like a valid date.
-        """
-        # Simple heuristic: contains digits and possibly separators
-        if not date_str:
-            return False
-        
-        # Check for common date patterns
-        date_patterns = [
-            r"\d{4}-\d{2}-\d{2}",  # YYYY-MM-DD
-            r"\d{2}/\d{2}/\d{4}",  # DD/MM/YYYY
-            r"\d{2}-\d{2}-\d{4}",  # DD-MM-YYYY
-            r"\d{4}",  # YYYY
-            r"\d{4}/\d{2}",  # YYYY/MM
-            r"\d{2}\s+[a-zA-Z]+\s+\d{4}",  # DD Month YYYY
-        ]
-        
-        for p in date_patterns:
-            if re.match(p, date_str.strip()):
-                return True
-        
-        return False
-
-    def _extract_emission_date_fallback(self, text: str) -> tuple[str, str | None]:
-        """Fallback method for extracting emission date.
-
-        Args:
-            text: The extracted text.
-
-        Returns:
-            Tuple of (date_string, error_message).
-        """
-        # Try common date patterns
-        fallback_patterns = [
-            r"(\d{4}-\d{2}-\d{2})",  # YYYY-MM-DD
-            r"(\d{2}/\d{2}/\d{4})",  # DD/MM/YYYY
-            r"(\d{2}-\d{2}-\d{4})",  # DD-MM-YYYY
-            r"(\d{4})",  # YYYY
-        ]
-        
-        for pattern in fallback_patterns:
-            matches = re.finditer(pattern, text)
-            for match in matches:
-                date_str = match.group(1)
-                if self._is_valid_date_string(date_str):
-                    return (date_str, None)
-        
-        return ("", "Could not find emission date in text")
 
     def _extract_company_and_type(self, text: str) -> tuple[str, str, list[str]]:
         """Predict emitting company and document type with local ML models."""
