@@ -18,6 +18,7 @@ const periodFormatSelect = document.getElementById('edit-period-format');
 const companyInput = document.getElementById('edit-company');
 const documentTypeInput = document.getElementById('edit-document-type');
 const emissionDateInput = document.getElementById('edit-emission-date');
+const emissionDateSuggestion = document.getElementById('suggestion-emission-date');
 const periodPreview = document.getElementById('period-preview');
 const keyPreview = document.getElementById('current-key-preview');
 const saveButton = document.getElementById('save-document-button');
@@ -417,6 +418,34 @@ const renderModelSuggestion = (fieldName, suggestion) => {
   container.hidden = false;
 };
 
+const renderEmissionDateSuggestion = (suggestion) => {
+  if (!emissionDateSuggestion) return;
+  emissionDateSuggestion.replaceChildren();
+  if (!suggestion || typeof suggestion.value !== 'string' || !suggestion.value.trim()) {
+    emissionDateSuggestion.hidden = true;
+    return;
+  }
+
+  const recommendedDate = formatEmissionDateInput(suggestion.value);
+  const label = document.createElement('span');
+  label.textContent = `Content recommendation: ${recommendedDate}`;
+  emissionDateSuggestion.append(label);
+
+  const applyButton = document.createElement('button');
+  applyButton.type = 'button';
+  applyButton.textContent = 'Use recommendation';
+  applyButton.setAttribute('aria-label', 'Use recommended emission date extracted from document content');
+  applyButton.addEventListener('click', () => {
+    emissionDateInput.value = recommendedDate;
+    emissionDateInput.dispatchEvent(new Event('input', { bubbles: true }));
+    emissionDateInput.dispatchEvent(new Event('change', { bubbles: true }));
+    updateSaveButtonState();
+    scheduleModelSuggestions();
+  });
+  emissionDateSuggestion.append(' ', applyButton);
+  emissionDateSuggestion.hidden = false;
+};
+
 const scheduleModelSuggestions = () => {
   if (!currentFileId) return;
   hideModelSuggestions();
@@ -455,6 +484,7 @@ const fetchModelSuggestions = async () => {
     Object.keys(suggestionElements).forEach((fieldName) => {
       renderModelSuggestion(fieldName, result.suggestions[fieldName]);
     });
+    renderEmissionDateSuggestion(result.suggestions.emission_date);
     const calculatedPeriod = result.suggestions.period?.value;
     const calculatedKey = result.suggestions.current_key?.value;
     periodPreview.textContent = calculatedPeriod || '—';
