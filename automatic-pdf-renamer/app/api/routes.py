@@ -845,15 +845,6 @@ async def get_retrain_status(
     return {"status": "idle", "message": "Model training is initiated per model type."}
 
 
-@router.post("/retrain/{job_id}/activate")
-async def activate_model(
-    job_id: str,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Reject legacy job activation without an explicit model version."""
-    raise HTTPException(status_code=400, detail="Activate a specific model with POST /models/{model_name}/{version}/activate.")
-
-
 @router.get("/consistency")
 async def list_consistency_flags(
     request: Request,
