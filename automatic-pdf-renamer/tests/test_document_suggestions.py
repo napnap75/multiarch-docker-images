@@ -1,6 +1,7 @@
 """Tests for asynchronous, confidence-gated document suggestions."""
 
 import asyncio
+import re
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -18,6 +19,9 @@ class FakeDatabase:
 
 
 class FakeRegistry:
+    def get_date_extraction_compiled(self):
+        return [re.compile(r"([0-9]{1,2})/([0-9]{1,2})/([0-9]{4})")]
+
     def get_period_format_config(self, name):
         return SimpleNamespace(to_dict=lambda: {})
 
@@ -57,7 +61,7 @@ class DocumentSuggestionTests(unittest.TestCase):
     def setUp(self):
         self.record = SimpleNamespace(
             id="document-1",
-            extracted_text="Suggested Company invoice",
+            extracted_text="Suggested Company invoice\nDate: 20/09/2026",
             emitting_company="Old Company",
             document_type="receipt",
             template_name="old-template",
@@ -89,6 +93,8 @@ class DocumentSuggestionTests(unittest.TestCase):
             ))
 
         suggestions = result["suggestions"]
+        self.assertEqual(suggestions["emission_date"]["value"], "2026-09-20")
+        self.assertEqual(suggestions["emission_date"]["source"], "content")
         self.assertEqual(suggestions["emitting_company"]["value"], "Suggested Company")
         self.assertEqual(suggestions["template_name"]["value"], "invoice-template")
         self.assertEqual(suggestions["period"]["value"], "2026-09")
