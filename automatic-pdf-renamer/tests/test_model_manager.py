@@ -65,9 +65,11 @@ class FullModelRetrainingTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["count"], len(BASE_MODELS))
-        self.assertEqual(json.loads((self.root / "active_models.json").read_text()), {
-            name: "current" for name in BASE_MODELS
-        })
+        active = json.loads((self.root / "active_models.json").read_text())
+        self.assertEqual(set(active), set(BASE_MODELS))
+        self.assertEqual(len(set(active.values())), 1)
+        for name, version in active.items():
+            self.assertTrue((self.root / "versions" / name / f"{version}.joblib").is_file())
         self.assertFalse(old_artifact.exists())
         self.assertEqual(
             {path.parent.name for path in (self.root / "versions").glob("*/*.joblib")},
