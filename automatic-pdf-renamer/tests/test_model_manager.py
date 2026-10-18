@@ -79,6 +79,24 @@ class FullModelRetrainingTests(unittest.TestCase):
         self.assertFalse((self.root / "versions").exists())
         self.assertEqual(progress[-1][0], 100)
 
+    def test_failed_retraining_keeps_the_previous_active_set(self):
+        old_generation = "existing-set"
+        old_artifact = self.root / "sets" / old_generation / "field_document_type.joblib"
+        old_artifact.parent.mkdir(parents=True)
+        old_artifact.write_bytes(b"previous active artifact")
+        active_before = {"field_document_type": old_generation}
+        (self.root / "active_models.json").write_text(json.dumps(active_before), encoding="utf-8")
+
+        with self.assertRaises(ValueError):
+            train_all_models([])
+
+        self.assertEqual(
+            json.loads((self.root / "active_models.json").read_text()),
+            active_before,
+        )
+        self.assertTrue(old_artifact.is_file())
+        self.assertFalse(any(path.name.startswith(".staging-") for path in self.root.iterdir()))
+
     def test_inventory_has_no_version_history_or_emission_date_model(self):
         result = list_models()
         names = {model["name"] for model in result["models"]}
