@@ -158,7 +158,9 @@ def list_models() -> dict[str, Any]:
     models = []
     for name in BASE_MODELS:
         version = active.get(name)
-        artifact = root / "versions" / name / f"{version}.joblib" if version else None
+        artifact = root / "sets" / version / f"{name}.joblib" if version else None
+        if version and not (artifact and artifact.is_file()):
+            artifact = root / "versions" / name / f"{version}.joblib"
         models.append({"name": name, "has_active_model": bool(artifact and artifact.is_file())})
     return {"models": models, "model_dir": str(root), "training_source": "validated documents",
             "complete": all(model["has_active_model"] for model in models)}
@@ -313,13 +315,14 @@ def train_model(model_name: str, records: list[Any], output_root: Path) -> dict[
 
 
 def train_all_models(records: list[Any], progress_callback=None) -> dict[str, Any]:
-    """Train a complete model set in staging, then replace the previous set."""
+    """Train all models in staging and atomically switch the active-set pointer."""
     root = model_root()
     root.mkdir(parents=True, exist_ok=True)
     staging = root / f".staging-{uuid.uuid4().hex}"
-    backup = root / f".backup-{uuid.uuid4().hex}"
     model_names = list(BASE_MODELS)
     generation = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    set_published = False
+    pointer_switched = False
     try:
         staging.mkdir()
         results = []
@@ -331,47 +334,45 @@ def train_all_models(records: list[Any], progress_callback=None) -> dict[str, An
                 )
             results.append(train_model(model_name, records, output_root=staging))
 
+        staged_set = staging / "sets" / generation
+        staged_set.mkdir(parents=True)
         for model_name, result in zip(model_names, results):
-            model_dir = staging / "versions" / model_name
-            staged_artifact = model_dir / "current.joblib"
-            staged_artifact.rename(model_dir / f"{generation}.joblib")
+            artifact = staging / "versions" / model_name / "current.joblib"
+            artifact.rename(staged_set / f"{model_name}.joblib")
             result["version"] = generation
+        shutil.rmtree(staging / "versions", ignore_errors=True)
 
         active = {name: generation for name in model_names}
         staged_active = staging / "active_models.json"
         staged_active.write_text(json.dumps(active, indent=2), encoding="utf-8")
         if progress_callback:
-            progress_callback(95, "Replacing the previous model set")
+            progress_callback(95, "Switching to the new model set")
 
-        versions_dir = root / "versions"
-        active_file = root / "active_models.json"
-        backup.mkdir()
-        if versions_dir.exists():
-            versions_dir.rename(backup / "versions")
-        if active_file.exists():
-            active_file.rename(backup / "active_models.json")
-        try:
-            (staging / "versions").rename(versions_dir)
-            staged_active.rename(active_file)
-        except Exception:
-            if versions_dir.exists():
-                shutil.rmtree(versions_dir, ignore_errors=True)
-            if (backup / "versions").exists():
-                (backup / "versions").rename(versions_dir)
-            if active_file.exists():
-                active_file.unlink()
-            if (backup / "active_models.json").exists():
-                (backup / "active_models.json").rename(active_file)
-            raise
-        shutil.rmtree(backup, ignore_errors=True)
+        sets_root = root / "sets"
+        sets_root.mkdir(parents=True, exist_ok=True)
+        published_set = sets_root / generation
+        staged_set.rename(published_set)
+        set_published = True
+
+        # A single atomic pointer replacement switches every model at once.
+        os.replace(staged_active, _active_file())
+        pointer_switched = True
+
+        # The new set is active and complete; remove all old artifacts and history.
+        for old_set in sets_root.iterdir():
+            if old_set.is_dir() and old_set.name != generation:
+                shutil.rmtree(old_set, ignore_errors=True)
+        shutil.rmtree(root / "versions", ignore_errors=True)
         if progress_callback:
             progress_callback(100, "All models trained and replaced successfully")
         return {"status": "completed", "models": results, "count": len(results)}
     except Exception:
         import logging
         logging.getLogger(__name__).exception(
-            "Full model retraining failed; previous model set was retained where possible"
+            "Full model retraining failed; the previous active model set was retained"
         )
+        if set_published and not pointer_switched:
+            shutil.rmtree(root / "sets" / generation, ignore_errors=True)
         raise
     finally:
         shutil.rmtree(staging, ignore_errors=True)
