@@ -318,39 +318,37 @@ class DocumentProcessor:
             return None
 
     def _extract_emission_date(self, text: str) -> tuple[str, str | None]:
-        """Extract emission date from text using regex patterns from config.
-
-        Uses ordered list of regex patterns. Tries them in order and stops
-        at first match.
-
-        Args:
-            text: The extracted text from the PDF.
-
-        Returns:
-            Tuple of (date_string, error_message).
-            If successful, error_message is None.
-        """
+        """Return the earliest valid date matched by configured regexes only."""
         patterns = self.registry.get_date_extraction_compiled()
-        
-        if not patterns:
-            # Fallback: try to find any date-like pattern
-            return self._extract_emission_date_fallback(text)
+        matches: list[tuple[int, int, str]] = []
+        for pattern_index, pattern in enumerate(patterns):
+            for match in pattern.finditer(text):
+                raw_value = self._reconstruct_date(match.groups()) or match.group(0)
+                normalized = self._normalize_emission_date(raw_value)
+                if normalized:
+                    matches.append((match.start(), pattern_index, normalized))
+        if not matches:
+            return "", "Could not find a valid emission date matching configured date_extraction patterns"
+        matches.sort(key=lambda item: (item[0], item[1]))
+        return matches[0][2], None
 
-        # Try each pattern in order, first match wins
-        for idx, pattern in enumerate(patterns):
-            matches = pattern.finditer(text)
-            for match in matches:
-                # Get the first date-like match
-                groups = match.groups()
-                date_str = self._reconstruct_date(groups)
-                if date_str:
-                    # Validate it looks like a date
-                    if self._is_valid_date_string(date_str):
-                        return (date_str, None)
-
-        # If no patterns matched, try fallback
-        return self._extract_emission_date_fallback(text)
-
+    def _normalize_emission_date(self, value: str) -> str | None:
+        """Normalize a regex-captured date to YYYY-MM-DD."""
+        value = " ".join(value.strip().split())
+        formats = (
+            "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d",
+            "%Y/%m", "%Y-%m", "%m/%Y", "%m-%Y",
+            "%d %m %Y", "%d %B %Y", "%d %b %Y", "%Y%m%d", "%Y",
+        )
+        for date_format in formats:
+            try:
+                parsed = datetime.strptime(value, date_format)
+                if date_format == "%Y" or date_format in {"%Y/%m", "%Y-%m", "%m/%Y", "%m-%Y"}:
+                    parsed = parsed.replace(month=1 if date_format == "%Y" else parsed.month, day=1)
+                return parsed.strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+        return None
     def _reconstruct_date(self, groups: tuple[str, ...]) -> str | None:
         """Reconstruct a date string from regex match groups.
 
