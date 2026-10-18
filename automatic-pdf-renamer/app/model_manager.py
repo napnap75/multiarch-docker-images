@@ -310,3 +310,61 @@ def train_model(model_name: str, records: list[Any], output_root: Path | None = 
     if model_name == ADDITIONAL_VALUES_MODEL:
         result["trained_fields"] = trained_fields
     return result
+
+
+def train_all_models(records: list[Any], progress_callback=None) -> dict[str, Any]:
+    """Train a complete model set in staging, then replace the previous set."""
+    root = model_root()
+    root.mkdir(parents=True, exist_ok=True)
+    staging = root / f".staging-{uuid.uuid4().hex}"
+    backup = root / f".backup-{uuid.uuid4().hex}"
+    model_names = list(BASE_MODELS)
+    try:
+        staging.mkdir()
+        results = []
+        for index, model_name in enumerate(model_names, start=1):
+            if progress_callback:
+                progress_callback(
+                    round((index - 1) * 90 / len(model_names)),
+                    f"Training {model_name} ({index}/{len(model_names)})",
+                )
+            results.append(train_model(model_name, records, output_root=staging))
+
+        active = {name: "current" for name in model_names}
+        staged_active = staging / "active_models.json"
+        staged_active.write_text(json.dumps(active, indent=2), encoding="utf-8")
+        if progress_callback:
+            progress_callback(95, "Replacing the previous model set")
+
+        versions_dir = root / "versions"
+        active_file = root / "active_models.json"
+        backup.mkdir()
+        if versions_dir.exists():
+            versions_dir.rename(backup / "versions")
+        if active_file.exists():
+            active_file.rename(backup / "active_models.json")
+        try:
+            (staging / "versions").rename(versions_dir)
+            staged_active.rename(active_file)
+        except Exception:
+            if versions_dir.exists():
+                shutil.rmtree(versions_dir, ignore_errors=True)
+            if (backup / "versions").exists():
+                (backup / "versions").rename(versions_dir)
+            if active_file.exists():
+                active_file.unlink()
+            if (backup / "active_models.json").exists():
+                (backup / "active_models.json").rename(active_file)
+            raise
+        shutil.rmtree(backup, ignore_errors=True)
+        if progress_callback:
+            progress_callback(100, "All models trained and replaced successfully")
+        return {"status": "completed", "models": results, "count": len(results)}
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "Full model retraining failed; previous model set was retained where possible"
+        )
+        raise
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
