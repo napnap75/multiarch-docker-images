@@ -478,9 +478,19 @@ const fetchModelSuggestions = async () => {
       body: JSON.stringify(payload),
       signal: suggestionAbortController.signal,
     });
-    if (!response.ok) return;
+    if (!response.ok) {
+      console.debug(
+        `Document suggestions request failed (HTTP ${response.status}) for file ${currentFileId}.`,
+      );
+      return;
+    }
     const result = await response.json();
     if (sequence !== suggestionRequestSequence || !result || !result.suggestions) return;
+    if (!result.suggestions.emission_date) {
+      console.debug(
+        `No emission date recommendation returned for file ${currentFileId}; keeping any stored content-extracted date visible.`,
+      );
+    }
     Object.keys(suggestionElements).forEach((fieldName) => {
       renderModelSuggestion(fieldName, result.suggestions[fieldName]);
     });
