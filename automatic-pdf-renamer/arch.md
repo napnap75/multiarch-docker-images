@@ -90,7 +90,7 @@ app/
   jobs/              # poller, consistency scan, retrain subprocess, rebuild
   api/               # routes: files, templates, retrain, consistency, auth
 web/                 # React + Vite app (built to static assets)
-models/              # versioned model registry (initial + trained)
+models/              # current model set; prior artifacts removed after successful replacement
 ```
 
 ### 4.3 Processing pipeline
@@ -371,7 +371,7 @@ Subprocesses report progress and metrics by writing a status JSON consumed by th
 - Ingestion: classify errors as transient/retryable technical failures, permanent technical failures, or document/business validation failures. Retry transient failures up to 3 times after the initial attempt, with delays of 5 seconds, 30 seconds, and 2 minutes, using idempotent recovery. After the final retry fails, stop processing that item without another retry or review workflow. Do not set business status `pending` solely because a technical operation failed. Record technical state and error details separately from business status, and continue processing other objects.
 - Rename: copy to the target key, persist the sidecar with the new current key and event, then delete the old key; synchronize SQLite after the authoritative sidecar is durable. If a crash occurs before deletion, recovery follows the sidecar's current key and safely removes or reconciles the stale copy.
 - Sidecar/SQLite: sidecar first; drift repaired by the consistency job; rebuild is always possible from sidecars alone.
-- Retrain: trained models land in a new versioned directory; activation swaps an active-model pointer; a failed training run leaves the current model untouched.
+- Retrain: train the complete model set in staging, then replace all active artifacts as one maintenance operation. A failed training run leaves the current model set usable; a successful run deletes all previous artifacts and retains no history.
 - All object-not-found conditions during processing are treated as consistency anomalies and flagged (FR5.3).
 
 ## 9. Deployment
