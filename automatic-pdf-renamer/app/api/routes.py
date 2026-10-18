@@ -312,15 +312,18 @@ async def get_document_model_suggestions(
         try:
             groups, _groups_confidence = ml.predict_additional_groups(suggested_company, suggested_type)
             extracted_fields = ml.predict_additional_values(groups, text) if groups else {}
-            additional_fields = {name: value for name, (value, _confidence) in extracted_fields.items()}
+            predicted_fields = {
+                name: value for name, (value, _confidence) in extracted_fields.items()
+            }
             submitted_fields = payload.get("optional_fields")
-            if not isinstance(submitted_fields, dict):
-                submitted_fields = record.optional_fields or {}
-            additional_fields.update({
-                str(name): str(value)
-                for name, value in submitted_fields.items()
-                if value is not None and str(value).strip()
-            })
+            if isinstance(submitted_fields, dict):
+                additional_fields = {
+                    str(name): str(value)
+                    for name, value in submitted_fields.items()
+                    if value is not None and str(value).strip()
+                }
+            else:
+                additional_fields = predicted_fields or dict(record.optional_fields or {})
             template, template_confidence, period_format, period_confidence = (
                 ml.predict_template_and_period_format(
                     suggested_company, suggested_type, additional_fields
