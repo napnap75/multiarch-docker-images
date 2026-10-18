@@ -144,8 +144,8 @@ class DocumentProcessor:
                 result.status = SidecarStatus.PENDING.value
                 return result
 
-            # Step 4: Determine the applicable additional-field groups from the
-            # company/document-type pair, then extract their values from the text.
+            # Step 3: Determine the additional-field groups from emitting_company
+            # and document_type; the period format is not predicted at this stage.
             # Template and period format are deliberately not consumed until this
             # first-stage field extraction has completed.
             try:
@@ -200,14 +200,7 @@ class DocumentProcessor:
             result.template_name = template_name
             result.period_format = period_format
 
-            # Step 5: Calculate period using period_format configuration
-            if not period_format:
-                result.errors.append(
-                    f"No period_format resolved for company='{company}', "
-                    f"document_type='{doc_type}'. Routing to review."
-                )
-                result.status = SidecarStatus.PENDING.value
-                return result
+            # Step 6: Calculate period once using the final period-format configuration.
             
             period_format_config = self.registry.get_period_format_config(period_format)
             if period_format_config is None:
@@ -228,7 +221,7 @@ class DocumentProcessor:
                 result.status = SidecarStatus.PENDING.value
                 return result
 
-            # Step 6: Generate the final key using template's key_pattern
+            # Step 6: Generate current_key from the template and final field values.
             key_pattern = self.registry.get_key_pattern(template_name)
             if key_pattern:
                 try:
@@ -342,7 +335,7 @@ class DocumentProcessor:
         formats = (
             "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d",
             "%Y/%m", "%Y-%m", "%m/%Y", "%m-%Y",
-            "%d %m %Y", "%m %Y", "%Y%m%d", "%Y",
+            "%d %m %Y", "%Y %m %d", "%m %Y", "%Y%m%d", "%Y",
         )
         for date_format in formats:
             try:
