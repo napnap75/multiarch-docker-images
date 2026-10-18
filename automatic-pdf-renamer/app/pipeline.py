@@ -132,6 +132,7 @@ class DocumentProcessor:
 
             result.company = emitting_company
             result.document_type = doc_type
+            company = emitting_company  # Compatibility alias for existing key-pattern placeholders.
             if not self.registry.is_valid_company(emitting_company):
                 result.errors.append(
                     f"Unknown emitting company '{emitting_company}'. "
