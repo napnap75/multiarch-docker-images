@@ -588,6 +588,13 @@ const loadDocument = async () => {
     setSelectOptions(documentTypeInput, options.document_types || [], documentData.document_type);
     renderDocument(documentData, fileId);
     renderAdditionalFields(documentData.optional_fields || {}, fieldSuggestionState);
+    // Show the date already extracted during ingestion immediately; the async
+    // suggestions response will replace it if a fresh regex extraction succeeds.
+    renderEmissionDateSuggestion(
+      documentData.emission_date
+        ? { value: documentData.emission_date, source: 'content' }
+        : null,
+    );
     updateSaveButtonState();
     scheduleModelSuggestions();
     await loadDocumentNavigation(fileId);
