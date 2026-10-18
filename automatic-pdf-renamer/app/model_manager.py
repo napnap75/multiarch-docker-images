@@ -171,8 +171,8 @@ def _new_classifier() -> Pipeline:
     ])
 
 
-def train_model(model_name: str, records: list[Any], output_root: Path | None = None) -> dict[str, Any]:
-    """Train one requested model from validated records and save a versioned artifact."""
+def train_model(model_name: str, records: list[Any], output_root: Path) -> dict[str, Any]:
+    """Train one component of the full model set into a staging directory."""
     if not re.fullmatch(r"[A-Za-z0-9_-]+", model_name):
         raise ValueError("Model names may contain only letters, numbers, underscores, and hyphens.")
     if model_name not in SINGLE_LABEL_MODELS and model_name not in {
@@ -294,8 +294,8 @@ def train_model(model_name: str, records: list[Any], output_root: Path | None = 
         sample_count = len(samples)
         trained_fields = []
 
-    version = "current" if output_root is not None else datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    destination = (output_root or model_root()) / "versions" / model_name
+    version = "current"
+    destination = output_root / "versions" / model_name
     destination.mkdir(parents=True, exist_ok=True)
     artifact = destination / f"{version}.joblib"
     dump(model, artifact)
@@ -304,8 +304,8 @@ def train_model(model_name: str, records: list[Any], output_root: Path | None = 
         "version": version,
         "samples": sample_count,
         "status": "trained",
-        "active": output_root is not None,
-        "message": "Model trained in staging." if output_root is not None else "Model trained and saved.",
+        "active": False,
+        "message": "Model trained in staging; it is activated only when the full model set is replaced.",
     }
     if model_name == ADDITIONAL_VALUES_MODEL:
         result["trained_fields"] = trained_fields
