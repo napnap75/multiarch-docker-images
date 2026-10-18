@@ -411,19 +411,30 @@ Returns job status for consistency scan, SQLite rebuild, or other asynchronous m
 
 Allowed job statuses are technical job states such as `queued`, `running`, `succeeded`, and `failed`; these are not document business statuses. This generic endpoint reports maintenance and retraining jobs. If the process restarts and in-memory job state is lost, the API should report the job as interrupted/unknown and use persisted status files or database state where available.
 
-## 10. Local model maintenance endpoints
+## 10. Local model maintenance
 
-The Maintenance page manages local model versions using these endpoints:
+The Maintenance page exposes **one model action only**: retrain the complete model set. There are no per-model training actions, model activation controls, or model-history/version selection in the UI.
 
-- `GET /models`: list supported model types, stored versions, and the active version for each type.
-- `POST /models/train`: train a new version from indexed documents with business status `validated`. JSON body: `{"model_name":"additional_field_values"}`. Returns the model name, version, training sample count, and status. Training errors return a validation error when the labeled dataset is insufficient.
-- `POST /models/{model_name}/{version}/activate`: select an existing version for runtime inference. The selection is written atomically to `MODEL_DIR/active_models.json`.
+- `POST /models/train`: start a background job that retrains all required models in dependency order from indexed documents with business status `validated`. The request has no `model_name` parameter. Return a job identifier.
+- `GET /jobs/{job_id}`: report job state, current stage, progress percentage, and a user-readable status message. The UI displays a progress bar using the same job-progress mechanism as SQLite rebuild and consistency check.
+- `GET /models` may remain as a read-only diagnostic endpoint to report whether the complete active model set is present, but it must not expose a model-version history or offer activation.
 
-Supported model types are `field_emitting_company`, `field_document_type`, `field_emission_date`, `additional_field_groups`, `additional_field_values`, `template_name`, and `period_format`. The shared additional-field model is trained and activated once for all eligible field names. All additional-field values are extracted by the shared `additional_field_values` model artifact. It uses one shared token-level classifier to label document-text spans by field, allowing values not seen during training when their text appears in the document. Each extracted span is confidence-gated independently. Training labels are accepted only when the validated field value appears in the saved extracted text.
+Retraining covers all ML-supported stages: `field_emitting_company`, `field_document_type`, `additional_field_groups`, `additional_field_values`, `template_name`, and `period_format`. There is **no `field_emission_date` model**: emission dates are extracted only with the ordered regexes in `config.jsonc` under `date_extraction`.
 
-Training runs locally and stores versioned joblib artifacts under `MODEL_DIR/versions/<model_name>/`. Training does not activate a model automatically. Runtime inference requires an explicitly active model version; missing or uncertain model predictions are routed to `pending`. The model artifacts must be trusted because loading joblib files can execute code.
+Training labels come from validated sidecar values. Additional-field value labels are usable only when the value appears in the saved extracted text. The shared `additional_field_values` model uses one token-level classifier for all eligible additional fields.
 
-The first implementation trains synchronously in the API request and reports training errors directly. A future implementation may move long-running training to a persistent background-job queue and add held-out evaluation metrics before activation.
+The replacement policy is **replace, do not version**. Train the full replacement set in a staging location; report progress for the complete job; only after all required models train successfully, replace the active set and delete the previous artifacts. If training fails, report a failed job and keep the previous complete model set usable. No historical versions are retained after a successful replacement. Model artifacts are trusted local joblib files; loading them can execute code.
+
+### Required inference order
+
+1. Predict `company_name` (current persisted field: `emitting_company`) and `document_type` from the complete extracted PDF text.
+2. Extract `emission_date` with regex only, using the patterns in the `date_extraction` configuration section. Choose the earliest valid match in document order; if matches begin at the same position, use the order in the configuration. Normalize to `YYYY-MM-DD`. No ML model may predict the emission date.
+3. Predict `period_format` and the applicable additional-field list/group from `company_name` and `document_type`.
+4. Predict each additional-field value from the complete extracted PDF text with the shared token-level extraction model.
+5. Predict `template_name` and the final `period_format` from `company_name`, `document_type`, and the extracted `additional_fields`. This final prediction supersedes the initial period-format estimate from step 3.
+6. Calculate `period` from the emission date and final period-format configuration; calculate `current_key` from the selected template's key pattern and final values. These are deterministic derived values, not model predictions.
+
+Any required ML result that is missing or below the configured confidence threshold is unresolved and must follow the existing pending/review behavior; do not substitute a hard-coded mapping.
 
 
 ### POST `/files/{sha256}/suggestions`
