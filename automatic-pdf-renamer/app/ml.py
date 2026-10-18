@@ -53,6 +53,9 @@ class LocalMLPipeline:
             return self._models[name]
         path = self.model_dir / "sets" / version / f"{name}.joblib"
         if not path.is_file():
+            # Keep the pre-retraining model layout usable until the first full replacement.
+            path = self.model_dir / "versions" / name / f"{version}.joblib"
+        if not path.is_file():
             raise ModelUnavailableError(
                 f"Active model artifact is missing for {name} version {version}."
             )
