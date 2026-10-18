@@ -73,8 +73,8 @@ This convention applies to HTTP error responses from every endpoint. Successful 
 | GET | `/ingestion/status` | Inspect poller status and recent activity |
 | GET | `/config` | Retrieve the current JSONC configuration file |
 | PUT | `/config` | Validate and save a modified JSONC configuration file |
-| GET | `/models` | Post-v1: list model versions |
-| POST | `/retrain` | Post-v1: start local model training |
+| GET | `/models` | Report whether the current complete model set is available |
+| POST | `/models/train` | Start full model retraining and replace the active set on success |
 The model-maintenance API is described in [Section 10](#10-local-model-maintenance).
 
 ## 4. Configuration file
