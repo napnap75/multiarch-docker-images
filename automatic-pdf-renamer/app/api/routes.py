@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from app.config import TemplateRegistry, load_templates
 from app.db import FileRecord, SQLiteFileRepository
 from app.period import format_period_from_emission_date
+from app.pipeline import DocumentProcessor
 from app.storage import StorageBackend
 from app.model_manager import list_models, train_all_models
 from app.ml import AmbiguousPredictionError, LocalMLPipeline, ModelUnavailableError
@@ -289,6 +290,29 @@ async def get_document_model_suggestions(
     company = str(payload.get("emitting_company") or record.emitting_company or "").strip()
     document_type = str(payload.get("document_type") or record.document_type or "").strip()
     suggestions: dict[str, dict[str, Any]] = {}
+
+    # Recommend the first valid date matched in document order by configured regexes.
+    # This is deterministic content extraction, not an ML prediction.
+    try:
+        recommended_date, date_error = DocumentProcessor(
+            registry, ml_pipeline=ml
+        )._extract_emission_date(text)
+        if recommended_date:
+            suggestions["emission_date"] = {
+                "value": recommended_date,
+                "source": "content",
+            }
+        else:
+            logger.debug(
+                "No content-based emission date recommendation for file_id=%s: %s",
+                file_id,
+                date_error,
+            )
+    except Exception:
+        logger.exception(
+            "Failed to extract recommended emission date from content for file_id=%s",
+            file_id,
+        )
 
     def add_prediction(field: str, model_name: str, sample: str) -> None:
         try:
