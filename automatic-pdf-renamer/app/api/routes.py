@@ -304,16 +304,41 @@ async def get_document_model_suggestions(
     add_prediction("emitting_company", "field_emitting_company", text)
     add_prediction("document_type", "field_document_type", text)
 
-    # Template and period format are conditioned on the current company/type values.
-    if company and document_type:
-        sample = f"{company}\n{document_type}"
-        add_prediction("template_name", "template_name", sample)
-        add_prediction("period_format", "period_format", sample)
+    suggested_company = suggestions.get("emitting_company", {}).get("value", company)
+    suggested_type = suggestions.get("document_type", {}).get("value", document_type)
+
+    # Follow the inference dependency order: groups, extracted values, then template/format.
+    if suggested_company and suggested_type:
+        try:
+            groups, _groups_confidence = ml.predict_additional_groups(suggested_company, suggested_type)
+            extracted_fields = ml.predict_additional_values(groups, text) if groups else {}
+            additional_fields = {name: value for name, (value, _confidence) in extracted_fields.items()}
+            submitted_fields = payload.get("optional_fields")
+            if not isinstance(submitted_fields, dict):
+                submitted_fields = record.optional_fields or {}
+            additional_fields.update({
+                str(name): str(value)
+                for name, value in submitted_fields.items()
+                if value is not None and str(value).strip()
+            })
+            template, template_confidence, period_format, period_confidence = (
+                ml.predict_template_and_period_format(
+                    suggested_company, suggested_type, additional_fields
+                )
+            )
+            suggestions["template_name"] = {
+                "value": template, "confidence": template_confidence, "source": "model"
+            }
+            suggestions["period_format"] = {
+                "value": period_format, "confidence": period_confidence, "source": "model"
+            }
+        except (ModelUnavailableError, AmbiguousPredictionError) as exc:
+            logger.debug(
+                "Template/period suggestions unavailable for file_id=%s: %s", file_id, exc
+            )
 
     logger.debug("API POST /files/%s/suggestions: model predictions=%s", file_id, {k: v for k, v in suggestions.items() if v.get("source") == "model"})
 
-    suggested_company = suggestions.get("emitting_company", {}).get("value", company)
-    suggested_type = suggestions.get("document_type", {}).get("value", document_type)
     suggested_template = payload.get("template_name") or suggestions.get("template_name", {}).get("value", record.template_name)
     suggested_format = payload.get("period_format") or suggestions.get("period_format", {}).get("value", record.period_format)
 
