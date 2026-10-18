@@ -19,7 +19,7 @@ flowchart TD
   poll["Inbox poller (asyncio task)"]
   s3["Garage S3 bucket"]
   db[("SQLite replica (WAL)")]
-  worker["Subprocess jobs: retrain / consistency / rebuild"]
+  worker["Background jobs: retrain / consistency / rebuild"]
   model[("Model registry on disk")]
 
   user --> dash
@@ -395,7 +395,7 @@ Subprocess-based jobs report progress and metrics by writing a status JSON consu
 | Garage quirks in copy-object/versioning | Storage interface isolates the client. |
 | Corpus too small for reliable classification | Low-confidence routing to pending; retrain on validated files grows the corpus. |
 | SQLite drift after crash | Sidecar-first ordering + consistency job + full rebuild path. |
-| Single-process blast radius | Long jobs are subprocesses; the poller catches per-file exceptions. |
+| Single-process blast radius | Model retraining runs in a background worker; consistency/rebuild use subprocesses; the poller catches per-file exceptions. |
 
 ## 12. Traceability to PRD
 
