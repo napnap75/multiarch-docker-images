@@ -9,10 +9,10 @@ This document defines the HTTP API consumed by the local web dashboard and the o
 ## 1. API principles
 
 - **Nextcloud/S3 remains the upload interface.** A user uploads a PDF to the configured `inbox/` prefix through Nextcloud or an S3 client. The API does not accept PDF uploads in v1.
-- **Ingestion is server-side and automatic.** The poller discovers stable PDF objects in `inbox/`, extracts text from every page, applies deterministic rules, validates fields, and either renames the file or moves it to `pending/`.
+- **Ingestion is server-side and automatic.** The poller discovers stable PDF objects in `inbox/`, extracts text from every page, follows the ordered local-ML and configured-regex pipeline in Section 10, validates fields, and either renames the file or moves it to `pending/`.
 - **Sidecars are authoritative.** For a mutation, persist the sidecar first, then synchronize SQLite. SQLite is used for list/search and consistency diagnostics, and can be rebuilt from sidecars.
 - **Business statuses are exactly** `pending`, `processed`, and `validated`. Technical job state is separate and must not be represented as a business status.
-- **The initial release is deterministic.** API responses may include a nullable confidence/model section for forward compatibility, but the rules-only release must not fabricate ML scores.
+- **Classification is local and model-driven.** Company, document type, additional fields, template, and period format are predicted by local models. Emission dates are extracted only by configured regular expressions; period and storage key are calculated deterministically. Unavailable or low-confidence required predictions are routed to review.
 - **No rename undo endpoint exists.** Renames are recorded for audit, not reversed by a user-facing API.
 - The API and processing pipeline remain offline except for the configured local Garage endpoint.
 
@@ -285,7 +285,7 @@ All mutation endpoints must validate the requested state, recompute the period f
 ```
 
 - `template_name`, `emission_date`, `emitting_company`, and `document_type` must conform to the selected template's schema.
-- The server selects the applicable period rules from the configured mapping for the company and document type, calculates `period` from `emission_date`, and never accepts a client-supplied period or period format.
+- The server validates the model-selected template and final `period_format` against configuration, calculates `period` from `emission_date` exactly once, and never accepts a client-supplied derived `period` or `current_key` as authoritative.
 - `optional_fields` may contain only fields declared by the selected template. Empty optional fields are allowed where the schema permits them.
 - The server must never trust a target key supplied by the browser; it calculates the target key itself.
 
