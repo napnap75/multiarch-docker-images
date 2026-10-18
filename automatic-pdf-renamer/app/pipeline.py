@@ -335,11 +335,18 @@ class DocumentProcessor:
 
     def _normalize_emission_date(self, value: str) -> str | None:
         """Normalize a regex-captured date to YYYY-MM-DD."""
-        value = " ".join(value.strip().split())
+        value = " ".join(value.strip().split()).casefold()
+        french_months = {
+            "janvier": "01", "fevrier": "02", "mars": "03", "avril": "04",
+            "mai": "05", "juin": "06", "juillet": "07", "aout": "08",
+            "septembre": "09", "octobre": "10", "novembre": "11", "decembre": "12",
+        }
+        for month_name, month_number in french_months.items():
+            value = re.sub(rf"\\b{month_name}\\b", month_number, value)
         formats = (
             "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d",
             "%Y/%m", "%Y-%m", "%m/%Y", "%m-%Y",
-            "%d %m %Y", "%d %B %Y", "%d %b %Y", "%Y%m%d", "%Y",
+            "%d %m %Y", "%m %Y", "%Y%m%d", "%Y",
         )
         for date_format in formats:
             try:
