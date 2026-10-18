@@ -98,7 +98,7 @@ class DocumentProcessor:
         result = ProcessingResult(success=False)
 
         try:
-            # Step 1: Extract document text
+            # Preparation: Extract document text
             if extracted_text is None:
                 extracted_text = self._extract_text(pdf_bytes)
             
@@ -155,6 +155,7 @@ class DocumentProcessor:
                 result.status = SidecarStatus.PENDING.value
                 return result
 
+            # Step 4: Extract each selected additional-field value from the full text.
             optional_fields: dict[str, str] = {}
             field_confidences = [initial_confidence, groups_confidence]
             if additional_field_groups:
@@ -170,9 +171,8 @@ class DocumentProcessor:
                     optional_fields[field_name] = field_value
                     field_confidences.append(field_confidence)
 
-            # Template and period format are independent ML predictions, not
-            # deterministic mapping lookups. Configuration only validates that
-            # predicted identifiers can be executed downstream.
+            # Step 5: Predict template and final period format using all extracted fields.
+            # Configuration validates that predicted identifiers can be executed downstream.
             try:
                 template_name, template_confidence, period_format, period_confidence = (
                     self.ml_pipeline.predict_template_and_period_format(emitting_company, doc_type, optional_fields)
