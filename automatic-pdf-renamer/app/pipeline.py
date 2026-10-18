@@ -313,8 +313,19 @@ class DocumentProcessor:
         matches: list[tuple[int, int, str]] = []
         for pattern_index, pattern in enumerate(patterns):
             for match in pattern.finditer(text):
-                raw_value = self._reconstruct_date(match.groups()) or match.group(0)
-                normalized = self._normalize_emission_date(raw_value)
+                # Try captured groups first, but do not let an unrelated/context
+                # capture prevent a valid full-match date from being considered.
+                candidates = [self._reconstruct_date(match.groups()), match.group(0)]
+                normalized = next(
+                    (
+                        parsed
+                        for candidate in candidates
+                        if candidate
+                        for parsed in [self._normalize_emission_date(candidate)]
+                        if parsed
+                    ),
+                    None,
+                )
                 if normalized:
                     matches.append((match.start(), pattern_index, normalized))
         if not matches:
