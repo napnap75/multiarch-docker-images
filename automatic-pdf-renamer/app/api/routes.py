@@ -4,6 +4,8 @@ import json
 import logging
 import os
 import re
+import threading
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -14,7 +16,7 @@ from app.config import TemplateRegistry, load_templates
 from app.db import FileRecord, SQLiteFileRepository
 from app.period import format_period_from_emission_date
 from app.storage import StorageBackend
-from app.model_manager import activate_model as activate_model_artifact, list_models, train_model
+from app.model_manager import list_models, train_all_models
 from app.ml import AmbiguousPredictionError, LocalMLPipeline, ModelUnavailableError
 
 from .deps import get_current_user
@@ -785,64 +787,77 @@ async def list_templates(
 async def get_models(
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """List model types, trained versions, and currently active versions."""
-    logger.debug("API GET /models: listing local model inventory")
+    """Report whether each model in the current complete set is available."""
     result = list_models()
-    logger.debug("API GET /models: response contains %s model types", len(result.get("models", [])))
+    logger.debug("API GET /models: complete=%s", result.get("complete"))
     return result
 
 
-@router.post("/models/train")
+@router.post("/models/train", status_code=202)
 async def train_models(
     request: Request,
-    payload: dict[str, Any],
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Train a model version from validated documents in the local SQLite index."""
-    model_name = str(payload.get("model_name", "")).strip()
-    logger.debug("API POST /models/train: training requested for model=%s", model_name)
-    db = _db(request)
-    records = db.list_files(status="validated", page=1, page_size=100000)
-    try:
-        return train_model(model_name, records)
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    except Exception as error:
-        logger.exception("Model training failed for %s", model_name)
-        raise HTTPException(status_code=500, detail="Model training failed. Check server logs.") from error
+    """Start one background job that replaces the complete model set."""
+    jobs = getattr(request.app.state, "model_training_jobs", None)
+    if jobs is None:
+        jobs = {}
+        request.app.state.model_training_jobs = jobs
+    if any(job.get("status") == "running" for job in jobs.values()):
+        raise HTTPException(status_code=409, detail="A full model retraining job is already running.")
+
+    records = _db(request).list_files(status="validated", page=1, page_size=100000)
+    job_id = uuid.uuid4().hex
+    jobs[job_id] = {
+        "job_id": job_id,
+        "status": "running",
+        "progress": 0,
+        "stage": "Starting model training",
+        "message": "Preparing validated documents",
+    }
+
+    def update_progress(progress: int, message: str) -> None:
+        jobs[job_id].update({
+            "progress": max(0, min(100, int(progress))),
+            "stage": message,
+            "message": message,
+        })
+
+    def run_training() -> None:
+        try:
+            result = train_all_models(records, progress_callback=update_progress)
+            jobs[job_id].update({
+                "status": "completed",
+                "progress": 100,
+                "stage": "Completed",
+                "message": "All models have been retrained and replaced.",
+                "result": result,
+            })
+        except Exception as error:
+            logger.exception("Full model retraining job %s failed", job_id)
+            jobs[job_id].update({
+                "status": "failed",
+                "stage": "Failed",
+                "message": str(error),
+            })
+
+    threading.Thread(target=run_training, name=f"model-training-{job_id[:8]}", daemon=True).start()
+    logger.debug("API POST /models/train: started full retraining job %s", job_id)
+    return {"job_id": job_id, "status": "running"}
 
 
-@router.post("/models/{model_name}/{version}/activate")
-async def activate_model_version(
-    model_name: str,
-    version: str,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Select a trained model version for runtime inference."""
-    try:
-        return activate_model_artifact(model_name, version)
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    except FileNotFoundError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
-
-
-@router.post("/retrain")
-async def start_retrain(
+@router.get("/jobs/{job_id}")
+async def get_job_status(
     request: Request,
+    job_id: str,
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Compatibility endpoint; use /models/train to choose a model type."""
-    raise HTTPException(status_code=400, detail="Select a model type and use POST /models/train.")
-
-
-@router.get("/retrain/status")
-async def get_retrain_status(
-    request: Request,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Return an idle status for legacy clients."""
-    return {"status": "idle", "message": "Model training is initiated per model type."}
+    """Return current progress for a background model-training job."""
+    jobs = getattr(request.app.state, "model_training_jobs", {})
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return dict(job)
 
 
 @router.get("/consistency")
