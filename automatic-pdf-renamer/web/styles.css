@@ -800,8 +800,7 @@ body {
 }
 
 .model-train-form {
-  display: grid;
-  grid-template-columns: max-content minmax(200px, 1fr) max-content;
+  display: flex;
   align-items: center;
   gap: 10px;
   margin: 22px 0 12px;
@@ -903,7 +902,8 @@ body {
 
 @media (max-width: 820px) {
   .model-train-form {
-    grid-template-columns: minmax(0, 1fr);
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .model-section-heading,
