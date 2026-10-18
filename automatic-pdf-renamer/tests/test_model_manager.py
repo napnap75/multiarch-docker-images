@@ -53,7 +53,7 @@ class FullModelRetrainingTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_retraining_replaces_all_models_without_history(self):
-        old_artifact = self.root / "versions" / "field_document_type" / "old-version.joblib"
+        old_artifact = self.root / "sets" / "old-version" / "field_document_type.joblib"
         old_artifact.parent.mkdir(parents=True)
         old_artifact.write_bytes(b"old artifact")
         (self.root / "active_models.json").write_text(
@@ -69,13 +69,14 @@ class FullModelRetrainingTests(unittest.TestCase):
         self.assertEqual(set(active), set(BASE_MODELS))
         self.assertEqual(len(set(active.values())), 1)
         for name, version in active.items():
-            self.assertTrue((self.root / "versions" / name / f"{version}.joblib").is_file())
+            self.assertTrue((self.root / "sets" / version / f"{name}.joblib").is_file())
         self.assertFalse(old_artifact.exists())
         self.assertEqual(
-            {path.parent.name for path in (self.root / "versions").glob("*/*.joblib")},
+            {path.name.removesuffix(".joblib") for path in (self.root / "sets" / next(iter(active.values()))).glob("*.joblib")},
             set(BASE_MODELS),
         )
-        self.assertEqual(len(list((self.root / "versions").glob("*/*.joblib"))), len(BASE_MODELS))
+        self.assertEqual(len(list((self.root / "sets").glob("*"))), 1)
+        self.assertFalse((self.root / "versions").exists())
         self.assertEqual(progress[-1][0], 100)
 
     def test_inventory_has_no_version_history_or_emission_date_model(self):
