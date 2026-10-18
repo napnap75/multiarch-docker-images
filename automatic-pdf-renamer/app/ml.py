@@ -105,7 +105,7 @@ class LocalMLPipeline:
         """Predict common fields directly from full document text."""
         return {
             field: self._predict_label(f"field_{field}", text)
-            for field in ("emitting_company", "document_type", "emission_date")
+            for field in ("emitting_company", "document_type")
         }
 
     def predict_additional_groups(self, company: str, document_type: str) -> tuple[list[str], float]:
@@ -173,10 +173,16 @@ class LocalMLPipeline:
             raise ModelUnavailableError(f"ML inference failed for additional_field_values: {exc}") from exc
 
     def predict_template_and_period_format(
-        self, company: str, document_type: str
+        self,
+        emitting_company: str,
+        document_type: str,
+        additional_fields: dict[str, str],
     ) -> tuple[str, float, str, float]:
-        """Use independent ML classifiers to select template and period format."""
-        sample = f"{company}\n{document_type}"
+        """Predict template and period format from company, type, and extracted fields."""
+        fields_text = "\n".join(
+            f"{key}: {value}" for key, value in sorted(additional_fields.items())
+        )
+        sample = f"{emitting_company}\n{document_type}\n{fields_text}"
         template, template_confidence = self._predict_label("template_name", sample)
         period_format, period_confidence = self._predict_label("period_format", sample)
         return template, template_confidence, period_format, period_confidence
