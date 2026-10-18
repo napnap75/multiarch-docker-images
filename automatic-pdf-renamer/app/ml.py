@@ -51,7 +51,7 @@ class LocalMLPipeline:
             )
         if name in self._models and self._model_versions.get(name) == version:
             return self._models[name]
-        path = self.model_dir / "versions" / name / f"{version}.joblib"
+        path = self.model_dir / "sets" / version / f"{name}.joblib"
         if not path.is_file():
             raise ModelUnavailableError(
                 f"Active model artifact is missing for {name} version {version}."
