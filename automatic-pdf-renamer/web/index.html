@@ -42,7 +42,6 @@
         <section class="table-card">
           <div class="list-tools">
             <details id="column-picker"><summary>Choose columns</summary><div id="column-options" class="column-options"></div></details>
-            <label><input id="select-page" type="checkbox" /> Select loaded rows</label>
             <button id="select-filtered-btn" class="secondary-btn" type="button">Select all filtered</button>
             <button id="clear-selection-btn" class="secondary-btn" type="button">Clear selection</button>
             <span id="selection-count" role="status">0 selected</span>
@@ -51,12 +50,24 @@
           <form id="bulk-edit-form" class="bulk-edit-form" hidden>
             <h3>Bulk edit selected documents</h3>
             <p id="bulk-scope"></p>
-            <div class="field-group"><label for="bulk-company">Company (leave blank to keep unchanged)</label><input id="bulk-company" type="text" /></div>
-            <div class="field-group"><label for="bulk-type">Document type (leave blank to keep unchanged)</label><input id="bulk-type" type="text" /></div>
-            <div class="field-group"><label for="bulk-fields">Additional fields JSON (use null to clear a field)</label><textarea id="bulk-fields" rows="3" placeholder='{"account":"123","old_field":null}'></textarea></div>
-            <button class="primary-btn" type="submit">Apply changes</button>
-            <button id="cancel-bulk-edit" class="secondary-btn" type="button">Cancel</button>
-            <p id="bulk-result" role="status"></p>
+            <p class="config-description">Only fields you change below will be updated. Other metadata remains unchanged.</p>
+            <div class="bulk-edit-grid">
+              <div class="field-group"><label for="bulk-template">Template</label><select id="bulk-template"><option value="">Keep unchanged</option></select></div>
+              <div class="field-group"><label for="bulk-period-format">Period format</label><select id="bulk-period-format"><option value="">Keep unchanged</option></select></div>
+              <div class="field-group"><label for="bulk-company">Company</label><select id="bulk-company"><option value="">Keep unchanged</option></select></div>
+              <div class="field-group"><label for="bulk-type">Document type</label><select id="bulk-type"><option value="">Keep unchanged</option></select></div>
+              <div class="field-group"><label for="bulk-emission-date">Emission date</label><input id="bulk-emission-date" type="date" /></div>
+            </div>
+            <div class="additional-data">
+              <div class="additional-header"><h4>Additional fields</h4><button id="bulk-add-field" class="secondary-btn" type="button">Add field</button></div>
+              <p class="field-hint">Choose a field and a value, or choose “Clear field” to remove it from selected documents.</p>
+              <div id="bulk-additional-fields" class="additional-field-list"></div>
+            </div>
+            <div class="edit-form-actions">
+              <button class="primary-btn" type="submit">Review and apply changes</button>
+              <button id="cancel-bulk-edit" class="secondary-btn" type="button">Cancel</button>
+              <p id="bulk-result" role="status" aria-live="polite"></p>
+            </div>
           </form>
           <table class="documents-table">
             <thead id="documents-head"></thead>
