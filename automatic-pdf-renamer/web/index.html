@@ -40,33 +40,28 @@
         </section>
 
         <section class="table-card">
+          <div class="list-tools">
+            <details id="column-picker"><summary>Choose columns</summary><div id="column-options" class="column-options"></div></details>
+            <label><input id="select-page" type="checkbox" /> Select loaded rows</label>
+            <button id="select-filtered-btn" class="secondary-btn" type="button">Select all filtered</button>
+            <button id="clear-selection-btn" class="secondary-btn" type="button">Clear selection</button>
+            <span id="selection-count" role="status">0 selected</span>
+            <button id="bulk-edit-btn" class="primary-btn" type="button" disabled>Bulk edit</button>
+          </div>
+          <form id="bulk-edit-form" class="bulk-edit-form" hidden>
+            <h3>Bulk edit selected documents</h3>
+            <p id="bulk-scope"></p>
+            <div class="field-group"><label for="bulk-company">Company (leave blank to keep unchanged)</label><input id="bulk-company" type="text" /></div>
+            <div class="field-group"><label for="bulk-type">Document type (leave blank to keep unchanged)</label><input id="bulk-type" type="text" /></div>
+            <div class="field-group"><label for="bulk-fields">Additional fields JSON (e.g. {"account":"123","old_field":null to clear})</label><textarea id="bulk-fields" rows="3" placeholder='{"account":"123","old_field":null}'></textarea></div>
+            <button class="primary-btn" type="submit">Apply changes</button>
+            <button id="cancel-bulk-edit" class="secondary-btn" type="button">Cancel</button>
+            <p id="bulk-result" role="status"></p>
+          </form>
           <table class="documents-table">
-            <thead>
-              <tr>
-                <th scope="col" data-sort-column="status"><button class="sort-button" data-sort="status">Status <span></span></button></th>
-                <th scope="col" data-sort-column="current_key"><button class="sort-button" data-sort="current_key">Document <span></span></button></th>
-                <th scope="col" data-sort-column="template_name"><button class="sort-button" data-sort="template_name">Template <span></span></button></th>
-                <th scope="col" data-sort-column="emitting_company"><button class="sort-button" data-sort="emitting_company">Company <span></span></button></th>
-                <th scope="col" data-sort-column="document_type"><button class="sort-button" data-sort="document_type">Type <span></span></button></th>
-                <th scope="col" data-sort-column="period"><button class="sort-button" data-sort="period">Period <span></span></button></th>
-                <th scope="col" data-sort-column="confidence"><button class="sort-button" data-sort="confidence">Confidence <span></span></button></th>
-                <th scope="col" data-sort-column="updated_at" aria-sort="descending"><button class="sort-button" data-sort="updated_at">Updated <span>↓</span></button></th>
-              </tr>
-              <tr class="column-filters">
-                <th><label class="visually-hidden" for="filter-status">Filter by status</label><select id="filter-status" data-filter="status"><option value="">All</option><option value="processed">Processed</option><option value="validated">Validated</option><option value="not processed">Not processed</option><option value="unknown">Unknown</option></select></th>
-                <th><label class="visually-hidden" for="filter-document">Filter by document</label><input id="filter-document" data-filter="current_key" type="search" placeholder="Name or key" /></th>
-                <th><label class="visually-hidden" for="filter-template">Filter by template</label><input id="filter-template" data-filter="template" type="search" placeholder="Template" /></th>
-                <th><label class="visually-hidden" for="filter-company">Filter by company</label><input id="filter-company" data-filter="emitting_company" type="search" placeholder="Company" /></th>
-                <th><label class="visually-hidden" for="filter-type">Filter by type</label><input id="filter-type" data-filter="document_type" type="search" placeholder="Type" /></th>
-                <th><label class="visually-hidden" for="filter-period">Filter by period</label><input id="filter-period" data-filter="period" type="search" placeholder="Period" /></th>
-                <th><label class="visually-hidden" for="filter-confidence">Filter by confidence</label><input id="filter-confidence" data-filter="confidence" type="search" placeholder="Percent" /></th>
-                <th><label class="visually-hidden" for="filter-updated">Filter by updated date</label><input id="filter-updated" data-filter="updated_at" type="date" /></th>
-              </tr>
-            </thead>
+            <thead id="documents-head"></thead>
             <tbody id="documents-body">
-              <tr>
-                <td colspan="8" class="empty-state">Loading documents...</td>
-              </tr>
+              <tr><td colspan="8" class="empty-state">Loading documents...</td></tr>
             </tbody>
           </table>
         </section>
