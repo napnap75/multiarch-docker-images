@@ -26,6 +26,7 @@ from .models import (
     FileListItem,
     ConfigUpdateRequest,
     DocumentEditRequest,
+    BulkEditRequest,
     HealthResponse,
     ValidationRequest,
     ValidationResponse,
@@ -634,6 +635,74 @@ async def edit_file(
         storage.delete_object(source_pdf_key)
 
     return await get_file(request, record.id, current_user=current_user)
+
+
+@router.post("/files/bulk-edit")
+async def bulk_edit_files(
+    request: Request,
+    payload: BulkEditRequest,
+    current_user: dict[str, str] | None = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Apply company, document-type, and additional-field edits to selected files."""
+    db = _db(request)
+    if not payload.changes:
+        raise HTTPException(status_code=422, detail="At least one explicit change is required")
+    allowed = {"emitting_company", "document_type", "additional_fields"}
+    unknown = set(payload.changes) - allowed
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unsupported bulk fields: {', '.join(sorted(unknown))}")
+    if payload.all_matching:
+        if payload.ids:
+            raise HTTPException(status_code=422, detail="Specify ids or all_matching, not both")
+        filters = {key: value for key, value in payload.filters.items() if key in {
+            "status", "template", "period_format", "q", "current_key", "emitting_company",
+            "document_type", "period", "confidence", "updated_at"
+        }}
+        records = db.list_files(**filters, page=1, page_size=100000)
+    else:
+        if not payload.ids:
+            raise HTTPException(status_code=422, detail="Select at least one document")
+        records = [record for file_id in dict.fromkeys(payload.ids) if (record := db.get_by_id(file_id)) is not None]
+    if not records:
+        raise HTTPException(status_code=404, detail="No matching documents found")
+
+    results: list[dict[str, Any]] = []
+    for record in records:
+        try:
+            if not record.template_name or not record.period_format or not record.emission_date:
+                raise HTTPException(status_code=422, detail="Document is missing template, period format, or emission date")
+            optional_fields = dict(record.optional_fields or {})
+            field_changes = payload.changes.get("additional_fields", {})
+            if field_changes is not None:
+                if not isinstance(field_changes, dict):
+                    raise HTTPException(status_code=422, detail="additional_fields must be an object")
+                for name, value in field_changes.items():
+                    if not str(name).strip():
+                        raise HTTPException(status_code=422, detail="Additional-field names cannot be empty")
+                    if value is None or value == {"operation": "clear"}:
+                        optional_fields.pop(str(name), None)
+                    elif isinstance(value, dict) and value.get("operation") == "set":
+                        optional_fields[str(name)] = value.get("value", "")
+                    else:
+                        optional_fields[str(name)] = value
+            edit_payload = DocumentEditRequest(
+                template_name=record.template_name,
+                period_format=record.period_format,
+                emitting_company=str(payload.changes.get("emitting_company", record.emitting_company or "")),
+                document_type=str(payload.changes.get("document_type", record.document_type or "")),
+                emission_date=record.emission_date,
+                optional_fields=optional_fields,
+            )
+            updated = await edit_file(request, record.id, edit_payload, current_user=current_user)
+            results.append({"id": record.id, "success": True, "status": updated.status, "current_key": updated.current_key})
+        except HTTPException as error:
+            results.append({"id": record.id, "success": False, "status_code": error.status_code, "error": error.detail})
+        except Exception as error:
+            logger.exception("Bulk edit failed for file %s", record.id)
+            results.append({"id": record.id, "success": False, "status_code": 500, "error": str(error)})
+
+    succeeded = sum(1 for item in results if item["success"])
+    return {"requested": len(results), "succeeded": succeeded, "failed": len(results) - succeeded, "results": results}
 
 
 @router.post("/files/{file_id}/validate", response_model=ValidationResponse)
