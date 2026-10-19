@@ -58,6 +58,15 @@ class DocumentEditRequest(BaseModel):
     optional_fields: dict[str, Any] = Field(default_factory=dict)
 
 
+class BulkEditRequest(BaseModel):
+    """Apply explicit metadata changes to selected documents or filtered results."""
+
+    ids: list[str] = Field(default_factory=list)
+    all_matching: bool = False
+    filters: dict[str, Any] = Field(default_factory=dict)
+    changes: dict[str, Any] = Field(default_factory=dict)
+
+
 class ConfigUpdateRequest(BaseModel):
     """JSONC configuration text submitted by the dashboard."""
 
