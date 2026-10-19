@@ -253,7 +253,15 @@ const updateSortIndicators = () => {
 
 renderColumnPicker();
 renderTableHead();
-searchFilter.addEventListener('input', loadDocuments);
+fetch('/document-options').then((response) => response.ok ? response.json() : null).then((options) => {
+  if (options && Array.isArray(options.optional_field_names)) {
+    availableAdditionalFields = [...new Set([...availableAdditionalFields, ...options.optional_field_names])];
+    renderColumnPicker();
+  }
+}).catch(() => {});
+searchFilter.addEventListener('input', () => {
+  selectedIds.clear(); allFilteredSelection = false; updateSelectionUi(); loadDocuments();
+});
 refreshButton.addEventListener('click', loadDocuments);
 loadMoreButton.addEventListener('click', () => loadDocuments({ append: true }));
 sortButtons.forEach((button) => {
