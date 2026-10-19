@@ -1,12 +1,15 @@
 """Tests for asynchronous, confidence-gated document suggestions."""
 
 import asyncio
+import json
 import re
 import unittest
+from datetime import date
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from app.api import routes
+from app.api.models import DocumentEditRequest
 from app.ml import AmbiguousPredictionError, LocalMLPipeline
 
 
@@ -32,7 +35,7 @@ class FakeRegistry:
         return SimpleNamespace(to_dict=lambda: {})
 
     def get_key_pattern(self, name):
-        return "example/{company}/{period}/{document_type}"
+        return "example/{year}/{month}/{month_name}/{day}/{company}/{period}/{document_type}"
 
 
 class FakeMLPipeline(LocalMLPipeline):
@@ -140,7 +143,10 @@ class DocumentSuggestionTests(unittest.TestCase):
         self.assertEqual(suggestions["template_name"]["value"], "invoice-template")
         self.assertEqual(suggestions["period_format"]["value"], "monthly")
         self.assertEqual(suggestions["period"]["value"], "2026-09")
-        self.assertEqual(suggestions["current_key"]["value"], "files/example/Edited Company/2026-09/invoice.pdf")
+        self.assertEqual(
+            suggestions["current_key"]["value"],
+            "files/example/2026/09/Septembre/20/Edited Company/2026-09/invoice.pdf",
+        )
 
     def test_derived_values_use_form_values_not_model_predictions(self):
         class ConflictingPipeline(FakeMLPipeline):
@@ -302,6 +308,67 @@ class DocumentSuggestionTests(unittest.TestCase):
         self.assertEqual(suggestions["optional_fields"]["source"], "configured")
         self.assertEqual(suggestions["template_name"]["value"], "invoice-template")
         self.assertEqual(suggestions["period_format"]["value"], "monthly")
+
+    def test_edit_route_uses_computed_period_placeholders_in_storage_key(self):
+        record = SimpleNamespace(
+            id="document-1",
+            sha256="document-1",
+            current_key="pending/original.pdf",
+            original_key="pending/original.pdf",
+            template_name="old-template",
+            period_format="monthly",
+            emitting_company="Old Company",
+            document_type="receipt",
+            emission_date="2026-09-20",
+            period="September 2026",
+            optional_fields={},
+            status="pending",
+            confidence=None,
+            updated_at="2026-09-20T00:00:00+00:00",
+            created_at="2026-09-20T00:00:00+00:00",
+            extracted_text="document text",
+        )
+        metadata = json.dumps({"sha256": record.sha256, "current_key": record.current_key})
+        storage = Mock()
+        storage.get_object.return_value = metadata
+        storage.object_exists.side_effect = lambda key: key == record.current_key
+        database = Mock()
+        database.get_by_id.return_value = record
+        registry = Mock()
+        registry.get_template.return_value = object()
+        registry.get_period_format_config.return_value = SimpleNamespace(
+            to_dict=lambda: {"granularity": "month"}
+        )
+        registry.get_key_pattern.return_value = (
+            "{year}/{month}/{month_name}/{day}/{original_filename}"
+        )
+        request = SimpleNamespace(
+            app=SimpleNamespace(state=SimpleNamespace()),
+            state=SimpleNamespace(),
+        )
+        expected_key = "files/2026/09/Septembre/20/original.pdf"
+
+        with (
+            patch.object(routes, "_storage", return_value=storage),
+            patch.object(routes, "_db", return_value=database),
+            patch.object(routes, "_registry", return_value=registry),
+            patch.object(routes, "get_file", new=AsyncMock(return_value=None)),
+        ):
+            asyncio.run(routes.edit_file(
+                request,
+                record.id,
+                DocumentEditRequest(
+                    template_name="invoice-template",
+                    period_format="monthly",
+                    emitting_company="Example Company",
+                    document_type="invoice",
+                    emission_date=date(2026, 9, 20),
+                ),
+                current_user=None,
+            ))
+
+        self.assertEqual(record.current_key, expected_key)
+        storage.copy_object.assert_called_once_with(record.original_key, expected_key)
 
 
 if __name__ == "__main__":

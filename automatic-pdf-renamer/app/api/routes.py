@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.config import TemplateRegistry, load_templates
 from app.db import FileRecord, SQLiteFileRepository
-from app.period import format_period_from_emission_date
+from app.period import format_period_from_emission_date, get_period_key_values
 from app.pipeline import DocumentProcessor
 from app.storage import StorageBackend
 from app.model_manager import list_models, train_all_models
@@ -385,6 +385,9 @@ async def get_document_model_suggestions(
                     "additional_fields": ", ".join(str(value) for value in optional_fields.values()),
                     "original_filename": (record.original_key or "").rsplit("/", 1)[-1],
                 })
+                pattern_values.update(
+                    get_period_key_values(emission_date, period_config.to_dict())
+                )
                 for _ in range(20):
                     try:
                         calculated_key = key_pattern.format(**pattern_values).strip("/")
@@ -518,6 +521,9 @@ async def edit_file(
         "additional_fields": ", ".join(updated_optional_fields.values()),
         "original_filename": record.original_key.rsplit("/", 1)[-1],
     })
+    pattern_values.update(
+        get_period_key_values(payload.emission_date, period_config.to_dict())
+    )
     for _ in range(20):
         try:
             formatted_key = key_pattern.format(**pattern_values).strip("/")

@@ -28,6 +28,7 @@ saveButton.disabled = true;
 let currentFileId = null;
 let fieldSuggestionState = { names: [], values: {} };
 let initialDocumentState = null;
+let isSaving = false;
 
 const canonicalizeState = (value) => {
   if (value === null || value === undefined) return '';
@@ -53,13 +54,7 @@ const getCurrentDocumentState = () => ({
 });
 
 const updateSaveButtonState = () => {
-  if (!currentFileId || !initialDocumentState) {
-    saveButton.disabled = true;
-    return;
-  }
-  const currentState = canonicalizeState(getCurrentDocumentState());
-  const baselineState = canonicalizeState(initialDocumentState);
-  saveButton.disabled = JSON.stringify(currentState) === JSON.stringify(baselineState);
+  saveButton.disabled = !currentFileId || !initialDocumentState || isSaving;
 };
 
 const openNeighbor = (neighborId) => {
@@ -576,7 +571,8 @@ const saveDocument = async (event) => {
   emissionDateInput.setCustomValidity(emissionDate ? '' : 'Enter a valid date in dd/mm/yyyy format.');
   if (!editForm.reportValidity()) return;
 
-  saveButton.disabled = true;
+  isSaving = true;
+  updateSaveButtonState();
   editStatus.textContent = 'Recalculating document name and saving...';
   const payload = {
     template_name: templateSelect.value,
@@ -603,7 +599,8 @@ const saveDocument = async (event) => {
     editStatus.textContent = `Unable to save changes: ${error.message}`;
     console.error(error);
   } finally {
-    saveButton.disabled = false;
+    isSaving = false;
+    updateSaveButtonState();
   }
 };
 
