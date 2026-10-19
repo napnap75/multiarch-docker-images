@@ -93,6 +93,7 @@ def _as_file_item(file_id: str, metadata: dict[str, Any]) -> FileListItem:
         emission_date=metadata.get("emission_date"),
         confidence=metadata.get("confidence"),
         updated_at=metadata.get("updated_at"),
+        optional_fields=dict(metadata.get("optional_fields") or {}),
     )
 
 
@@ -176,6 +177,7 @@ async def list_files(
             emission_date=record.emission_date,
             confidence=record.confidence,
             updated_at=record.updated_at,
+            optional_fields=dict(record.optional_fields or {}),
         )
         for record in records
     ]
