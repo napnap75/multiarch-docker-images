@@ -378,6 +378,8 @@ class SQLiteFileRepository:
             period=period,
             confidence=confidence,
             updated_at=updated_at,
+            emission_date=emission_date,
+            additional_fields=additional_fields,
         )
         query = "SELECT COUNT(*) FROM files"
         if conditions:
