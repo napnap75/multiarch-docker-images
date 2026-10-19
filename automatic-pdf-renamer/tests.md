@@ -195,3 +195,12 @@ Until the harness is implemented, this document is a design guide rather than a 
 - When an additional-field column is visible, render a filter control beneath that column and verify its value is sent as `additional_field__<stable-field-key>`.
 - Verify additional-field filtering uses the stored JSON field value and does not match a different field with a similar name.
 - Verify date/additional-field filters remain active when the column picker is changed, and “select all filtered” bulk edits respect these filters across pagination.
+
+## Bulk edit form interaction requirements
+
+- The first table-header checkbox is the sole checkbox for selecting currently loaded rows; do not render a duplicate “select loaded rows” checkbox above the table.
+- Bulk edit uses the same option lists as `document.html` for template, period format, company, document type, and additional-field names/values.
+- Leaving a field on “Keep unchanged” must preserve its value on every selected document.
+- The user can add multiple additional-field rows, choose an existing field/value, clear a field explicitly, and remove a pending row before applying.
+- The confirmation summarizes the target count and all requested changes before submitting.
+- The server applies changes through the same single-document edit path, including derived period/key recalculation and collision handling.
