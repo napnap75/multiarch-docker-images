@@ -28,6 +28,7 @@ class FileListItem(BaseModel):
     emission_date: str | None = None
     confidence: float | None = None
     updated_at: str | None = None
+    optional_fields: dict[str, Any] = Field(default_factory=dict)
 
 
 class FileDetail(FileListItem):
