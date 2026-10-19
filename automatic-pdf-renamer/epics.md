@@ -575,3 +575,31 @@ Completes the remaining Epic 4 capabilities and Epic 5, including consistency re
 ## 7. Open Decisions to Resolve Before the Affected Stories
 
 2. **ML field extraction:** specify which field groups use ML in v1 and what evaluation threshold is required before enabling the shared extractor. Classification and deterministic validation must remain usable independently.
+
+## New dashboard epic — Configurable list and bulk metadata editing
+
+### Story: Configure visible columns
+As the owner, I want to choose which metadata columns appear on the home page, including configured additional fields, so that I can tailor the table to the task at hand.
+
+Acceptance criteria:
+- Default visible order is Status, Document (filename), Company, Document type, Period, Last modified.
+- Users can add/remove available columns, including additional fields identified by stable field keys.
+- Empty values are rendered consistently; hiding a column does not delete or change its data.
+
+### Story: Select documents
+As the owner, I want to select rows or every document matching the current filters, including across pagination, so that I can perform a batch operation efficiently.
+
+Acceptance criteria:
+- Each row has a selection control; page selection and all-filtered selection are distinct.
+- The UI displays the selected count and clearly communicates the selection scope.
+- Filter changes cannot leave a misleading stale selection.
+
+### Story: Bulk edit metadata
+As the owner, I want to change company, document type, and additional-field values for multiple selected documents in one operation, so that I can correct repeated classification mistakes efficiently.
+
+Acceptance criteria:
+- Each editable field defaults to unchanged; additional fields support set/replace and clear.
+- A confirmation step summarizes the operation and affected count.
+- The server validates each document using the single-document rules, recomputes derived period and target key, and safely handles rename collisions.
+- Sidecars remain authoritative, SQLite is synchronized, and an event is recorded for every successful change.
+- Partial failures are reported per document; successful documents are not silently reprocessed on retry.
