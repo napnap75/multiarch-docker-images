@@ -20,7 +20,7 @@ const columnDefinitions = {
   period: { label: 'Period', filter: 'period', sortable: true },
   updated_at: { label: 'Last modified', filter: 'updated_at', sortable: true },
   template_name: { label: 'Template', filter: 'template', sortable: true },
-  emission_date: { label: 'Emission date', filter: null, sortable: false },
+  emission_date: { label: 'Emission date', filter: 'emission_date', sortable: false, inputType: 'date' },
   confidence: { label: 'Confidence', filter: 'confidence', sortable: true },
 };
 let visibleColumns = (() => {
@@ -53,15 +53,17 @@ const renderColumnPicker = () => {
 };
 const renderTableHead = () => {
   const header = (key) => {
-    const def = columnDefinitions[key] || { label: key.replace(/^additional:/, ''), filter: null, sortable: false };
+    const def = columnDefinitions[key] || { label: key.replace(/^additional:/, ''), filter: `additional_field__${key.slice(11)}`, sortable: false };
     return `<th scope="col" ${def.sortable ? `data-sort-column="${key}"` : ''}>${def.sortable ? `<button class="sort-button" data-sort="${key}">${escapeHtml(def.label)} <span></span></button>` : escapeHtml(def.label)}</th>`;
   };
+  const previousFilterValues = Object.fromEntries(columnFilters.map((filter) => [filter.dataset.filter, filter.value]));
   const filters = visibleColumns.map((key) => {
-    const def = columnDefinitions[key];
+    const def = columnDefinitions[key] || (key.startsWith('additional:') ? { label: key.slice(11), filter: `additional_field__${key.slice(11)}`, inputType: 'search' } : null);
     if (!def || !def.filter) return '<th></th>';
     const filterId = `column-filter-${def.filter}`;
     if (def.filter === 'status') return `<th><label class="visually-hidden" for="${filterId}">Filter status</label><select id="${filterId}" data-filter="status"><option value="">All</option><option value="processed">Processed</option><option value="validated">Validated</option><option value="not processed">Not processed</option><option value="unknown">Unknown</option></select></th>`;
-    return `<th><label class="visually-hidden" for="${filterId}">Filter ${escapeHtml(def.label)}</label><input id="${filterId}" data-filter="${def.filter}" type="${def.filter === 'updated_at' ? 'date' : 'search'}" placeholder="${escapeHtml(def.label)}" /></th>`;
+    const inputType = def.inputType || (def.filter === 'updated_at' ? 'date' : 'search');
+    return `<th><label class="visually-hidden" for="${filterId}">Filter ${escapeHtml(def.label)}</label><input id="${filterId}" data-filter="${def.filter}" type="${inputType}" placeholder="${escapeHtml(def.label)}" value="${escapeHtml(previousFilterValues[def.filter] || '')}" /></th>`;
   }).join('');
   tableHead.innerHTML = `<tr><th><input type="checkbox" id="select-page-head" aria-label="Select loaded rows"/></th>${visibleColumns.map(header).join('')}</tr><tr class="column-filters"><th></th>${filters}</tr>`;
   columnFilters = [...tableHead.querySelectorAll('[data-filter]')];
