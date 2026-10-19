@@ -121,15 +121,21 @@ async def list_files(
     period: str | None = None,
     confidence: str | None = None,
     updated_at: str | None = None,
+    emission_date: str | None = None,
     sort_by: str = "updated_at",
     sort_order: str = "desc",
     page: int = 1,
 ) -> list[FileListItem]:
     """List documents and report filtered and global counts in response headers."""
     logger.debug("API GET /files: user=%s page=%s sort_by=%s sort_order=%s", (current_user or {}).get("username", "anonymous"), page, sort_by, sort_order)
-    logger.debug("API GET /files: active filters=%s", {key: value for key, value in {"status": status, "template": template, "period_format": period_format, "q": q, "current_key": current_key, "emitting_company": emitting_company, "document_type": document_type, "period": period, "confidence": confidence, "updated_at": updated_at}.items() if value is not None})
+    logger.debug("API GET /files: active filters=%s", {key: value for key, value in {"status": status, "template": template, "period_format": period_format, "q": q, "current_key": current_key, "emitting_company": emitting_company, "document_type": document_type, "period": period, "confidence": confidence, "updated_at": updated_at, "emission_date": emission_date, **{f"additional_field__{k}": v for k, v in additional_fields.items()}}.items() if value is not None})
     storage = _storage(request)
     db = _db(request)
+    additional_fields = {
+        key.removeprefix("additional_field__"): value
+        for key, value in request.query_params.items()
+        if key.startswith("additional_field__") and value
+    }
     filters = {
         "status": status,
         "template": template,
@@ -141,6 +147,8 @@ async def list_files(
         "period_format": period_format,
         "confidence": confidence,
         "updated_at": updated_at,
+        "emission_date": emission_date,
+        "additional_fields": additional_fields,
     }
 
     if db.count_files() == 0:
