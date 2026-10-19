@@ -55,6 +55,8 @@ class FileRecord:
             extracted_text=metadata.get("extracted_text"),
             created_at=created_at,
             updated_at=updated_at,
+            emission_date=emission_date,
+            additional_fields=additional_fields,
         )
 
     def to_row(self) -> tuple[Any, ...]:
@@ -246,6 +248,8 @@ class SQLiteFileRepository:
         period: str | None = None,
         confidence: str | None = None,
         updated_at: str | None = None,
+        emission_date: str | None = None,
+        additional_fields: dict[str, str] | None = None,
     ) -> tuple[list[str], list[Any]]:
         conditions: list[str] = []
         params: list[Any] = []
@@ -265,11 +269,17 @@ class SQLiteFileRepository:
             ("document_type", document_type),
             ("period", period),
             ("updated_at", updated_at),
+            ("emission_date", emission_date),
             ("period_format", period_format),
         ):
             if value:
                 conditions.append(f"LOWER({column}) LIKE ?")
                 params.append(f"%{value.lower()}%")
+        for field_name, field_value in (additional_fields or {}).items():
+            if field_value:
+                json_path = '$."' + field_name.replace('"', '\\"') + '"'
+                conditions.append("LOWER(COALESCE(json_extract(optional_fields, ?), '')) LIKE ?")
+                params.extend([json_path, f"%{field_value.lower()}%"])
         if confidence:
             confidence_filter = confidence.strip().removesuffix("%")
             if confidence_filter:
@@ -296,6 +306,8 @@ class SQLiteFileRepository:
         period: str | None = None,
         confidence: str | None = None,
         updated_at: str | None = None,
+        emission_date: str | None = None,
+        additional_fields: dict[str, str] | None = None,
         sort_by: str = "updated_at",
         sort_order: str = "desc",
         page: int = 1,
@@ -312,6 +324,8 @@ class SQLiteFileRepository:
             period=period,
             confidence=confidence,
             updated_at=updated_at,
+            emission_date=emission_date,
+            additional_fields=additional_fields,
         )
 
         query = "SELECT * FROM files"
@@ -350,6 +364,8 @@ class SQLiteFileRepository:
         period: str | None = None,
         confidence: str | None = None,
         updated_at: str | None = None,
+        emission_date: str | None = None,
+        additional_fields: dict[str, str] | None = None,
     ) -> int:
         conditions, params = self._file_conditions(
             status=status,
