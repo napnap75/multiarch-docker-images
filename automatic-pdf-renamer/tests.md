@@ -166,3 +166,46 @@ Once implemented, the repository should provide a single documented command to r
 The harness should never point at a developer's normal data directory or a production storage endpoint. It should fail early if its configuration appears to target a non-test database or external object storage.
 
 Until the harness is implemented, this document is a design guide rather than a runnable command reference. See [API.md](API.md) for the API contract and [arch.md](arch.md) for the architecture overview.
+
+## Additional test requirements — configurable columns and bulk editing
+
+### Home-page columns
+- Assert the six default columns and their exact order: status, document filename, company, document type, period, last modified.
+- Assert that adding/removing a configured additional-field column changes only the visible table configuration, not document metadata.
+- Assert stable column IDs and a consistent rendering contract for empty values.
+
+### Selection semantics
+- Select one row and multiple rows and verify the selected IDs.
+- Select the current page and verify that it does not claim to select every filtered record.
+- Select all filtered records across multiple pages; assert matching records outside the current page are included and nonmatching records are excluded.
+- Change or clear filters and verify stale selections are cleared or explicitly reconciled.
+
+### Bulk edits
+- Change company and document type for multiple records; preserve every field not explicitly changed.
+- Set, replace, and clear an additional field; reject attempts to clear a required/common field.
+- Validate invalid configured values and verify that each failure is reported without corrupting the record.
+- When relevant values change, assert period/key recomputation and safe rename/collision handling.
+- Inject storage and SQLite-sync failures to assert sidecar-first consistency and recoverability.
+- Retry a partially successful operation and verify successful items are not applied twice and outcomes remain explicit.
+- Assert per-document event history, counts, and error details in the response.
+
+## Additional filter-control tests
+
+- When the emission-date column is visible, render a filter control beneath it and verify the entered date is sent as `emission_date` and filters the list.
+- When an additional-field column is visible, render a filter control beneath that column and verify its value is sent as `additional_field__<stable-field-key>`.
+- Verify additional-field filtering uses the stored JSON field value and does not match a different field with a similar name.
+- Verify date/additional-field filters remain active when the column picker is changed, and “select all filtered” bulk edits respect these filters across pagination.
+
+## Bulk edit form interaction requirements
+
+- The first table-header checkbox is the sole checkbox for selecting currently loaded rows; do not render a duplicate “select loaded rows” checkbox above the table.
+- Bulk edit uses the same option lists as `document.html` for template, period format, company, document type, and additional-field names/values.
+- Leaving a field on “Keep unchanged” must preserve its value on every selected document.
+- The user can add multiple additional-field rows, choose an existing field/value, clear a field explicitly, and remove a pending row before applying.
+- The confirmation summarizes the target count and all requested changes before submitting.
+- The server applies changes through the same single-document edit path, including derived period/key recalculation and collision handling.
+
+## Bulk-edit status preservation
+
+- Bulk metadata edits must preserve each document's existing status (for example, `processed`, `validated`, or `unknown`) in both SQLite and the sidecar metadata.
+- Editing a single document through the normal edit endpoint may continue to mark it as `validated`; the bulk-edit endpoint must not implicitly validate documents.

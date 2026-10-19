@@ -561,6 +561,27 @@ def format_period_from_emission_date(
         raise ValueError(f"Unknown placeholder '{missing}' in format template: {format_template}")
 
 
+def get_period_key_values(
+    emission_date: str | date,
+    period_format: dict[str, Any],
+) -> dict[str, str]:
+    """Return period placeholders, preserving the source date's day of month."""
+    separator = "\x1f"
+    values = format_period_from_emission_date(
+        emission_date,
+        {**period_format, "format": separator.join(
+            ("{year}", "{month}", "{month_name}", "{day}")
+        )},
+    ).split(separator)
+    year, month, month_name, _ = values
+    return {
+        "year": year,
+        "month": month,
+        "month_name": month_name,
+        "day": f"{_parse_date_string(emission_date).day:02d}",
+    }
+
+
 def format_month_year(month: int, year: int, use_french: bool = True) -> str:
     """Format month and year as a human-readable string.
 

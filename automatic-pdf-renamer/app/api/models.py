@@ -28,6 +28,7 @@ class FileListItem(BaseModel):
     emission_date: str | None = None
     confidence: float | None = None
     updated_at: str | None = None
+    optional_fields: dict[str, Any] = Field(default_factory=dict)
 
 
 class FileDetail(FileListItem):
@@ -56,6 +57,15 @@ class DocumentEditRequest(BaseModel):
     document_type: str = Field(min_length=1)
     emission_date: date
     optional_fields: dict[str, Any] = Field(default_factory=dict)
+
+
+class BulkEditRequest(BaseModel):
+    """Apply explicit metadata changes to selected documents or filtered results."""
+
+    ids: list[str] = Field(default_factory=list)
+    all_matching: bool = False
+    filters: dict[str, Any] = Field(default_factory=dict)
+    changes: dict[str, Any] = Field(default_factory=dict)
 
 
 class ConfigUpdateRequest(BaseModel):

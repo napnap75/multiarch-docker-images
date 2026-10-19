@@ -277,3 +277,7 @@ This ensures consistency between the import script and the main service.
 ## License
 
 Same as the main project. See [../LICENSE](../LICENSE).
+
+## Dashboard list and bulk editing
+
+The dashboard's configurable columns and bulk metadata editing are API/UI features, not standalone scripts. Script authors must preserve the existing sidecar-source-of-truth model: any script that changes company, document type, or additional fields must use the application's validation and safe rename flow, recompute derived period/key values, append event history, and synchronize SQLite only after the sidecar is durable. Do not treat user-visible column preferences as document metadata.

@@ -79,3 +79,7 @@ As the owner, I want a standalone Python script that imports my existing paperle
 - Optional fields come solely from paperless labels. Labels are free-form in paperless; the template YAML schemas are not enforced at import, and labels colliding with common field names are dropped with a warning.
 - Document subtype mapping (paperless document types to the renamer template YAML document types) is identity on the name; if the template YAML later diverges, the consistency job surfaces mismatches.
 - The script lives in the repo as `scripts/import_paperless.py` with its own minimal dependencies (boto3, requests, python-dateutil, PyMuPDF), not in the container image.
+
+## Scope note — dashboard bulk editing
+
+The initial Paperless-ngx import story remains focused on importing and reconciling the initial corpus. Configurable home-page columns and bulk metadata edits are separate dashboard capabilities and must not change the import's identity, deduplication, or sidecar-source-of-truth rules. Any imported records must expose the same stable metadata and additional-field keys used by the dashboard once indexed.

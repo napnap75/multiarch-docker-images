@@ -23,6 +23,7 @@ from .config import (
 from .extractor import extract_document_text, is_text_empty, TextExtractionError
 from .period import (
     format_period_from_emission_date,
+    get_period_key_values,
 )
 from .sidecar import Sidecar, SidecarStatus, build_sidecar
 from .ml import LocalMLPipeline, ModelUnavailableError, AmbiguousPredictionError
@@ -225,18 +226,21 @@ class DocumentProcessor:
             key_pattern = self.registry.get_key_pattern(template_name)
             if key_pattern:
                 try:
-                    final_key = self._format_key_pattern(
-                        key_pattern,
-                        company=company,
-                        document_type=doc_type,
-                        emission_date=emission_date,
-                        period=period,
-                        template_name=template_name,
-                        period_format=period_format,
-                        emitting_company=company,
-                        original_filename=original_key.split("/")[-1],
+                    key_values = {
+                        "company": company,
+                        "document_type": doc_type,
+                        "emission_date": emission_date,
+                        "period": period,
+                        "template_name": template_name,
+                        "period_format": period_format,
+                        "emitting_company": company,
+                        "original_filename": original_key.split("/")[-1],
                         **optional_fields,
-                    )
+                        **get_period_key_values(
+                            emission_date, period_format_config.to_dict()
+                        ),
+                    }
+                    final_key = self._format_key_pattern(key_pattern, **key_values)
                 except Exception as e:
                     result.errors.append(f"Failed to format key pattern: {e}")
                     result.status = SidecarStatus.PENDING.value
@@ -288,6 +292,14 @@ class DocumentProcessor:
             logger.exception(f"Error processing document {original_key}")
 
         return result
+
+    def _format_key_pattern(self, pattern: str, **values: Any) -> str:
+        """Format a template key pattern with document and period values."""
+        try:
+            return pattern.format(**values)
+        except KeyError as exc:
+            placeholder = str(exc).strip("'")
+            raise ValueError(f"Unknown placeholder '{placeholder}' in key pattern") from exc
 
     def _extract_text(self, pdf_bytes: bytes) -> str | None:
         """Extract text from every page of the PDF.

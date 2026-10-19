@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.config import TemplateRegistry, load_templates
 from app.db import FileRecord, SQLiteFileRepository
-from app.period import format_period_from_emission_date
+from app.period import format_period_from_emission_date, get_period_key_values
 from app.pipeline import DocumentProcessor
 from app.storage import StorageBackend
 from app.model_manager import list_models, train_all_models
@@ -26,6 +26,7 @@ from .models import (
     FileListItem,
     ConfigUpdateRequest,
     DocumentEditRequest,
+    BulkEditRequest,
     HealthResponse,
     ValidationRequest,
     ValidationResponse,
@@ -92,6 +93,7 @@ def _as_file_item(file_id: str, metadata: dict[str, Any]) -> FileListItem:
         emission_date=metadata.get("emission_date"),
         confidence=metadata.get("confidence"),
         updated_at=metadata.get("updated_at"),
+        optional_fields=dict(metadata.get("optional_fields") or {}),
     )
 
 
@@ -119,15 +121,21 @@ async def list_files(
     period: str | None = None,
     confidence: str | None = None,
     updated_at: str | None = None,
+    emission_date: str | None = None,
     sort_by: str = "updated_at",
     sort_order: str = "desc",
     page: int = 1,
 ) -> list[FileListItem]:
     """List documents and report filtered and global counts in response headers."""
     logger.debug("API GET /files: user=%s page=%s sort_by=%s sort_order=%s", (current_user or {}).get("username", "anonymous"), page, sort_by, sort_order)
-    logger.debug("API GET /files: active filters=%s", {key: value for key, value in {"status": status, "template": template, "period_format": period_format, "q": q, "current_key": current_key, "emitting_company": emitting_company, "document_type": document_type, "period": period, "confidence": confidence, "updated_at": updated_at}.items() if value is not None})
     storage = _storage(request)
     db = _db(request)
+    additional_fields = {
+        key.removeprefix("additional_field__"): value
+        for key, value in request.query_params.items()
+        if key.startswith("additional_field__") and value
+    }
+    logger.debug("API GET /files: active filters=%s", {key: value for key, value in {"status": status, "template": template, "period_format": period_format, "q": q, "current_key": current_key, "emitting_company": emitting_company, "document_type": document_type, "period": period, "confidence": confidence, "updated_at": updated_at, "emission_date": emission_date, **{f"additional_field__{k}": v for k, v in additional_fields.items()}}.items() if value is not None})
     filters = {
         "status": status,
         "template": template,
@@ -139,6 +147,8 @@ async def list_files(
         "period_format": period_format,
         "confidence": confidence,
         "updated_at": updated_at,
+        "emission_date": emission_date,
+        "additional_fields": additional_fields,
     }
 
     if db.count_files() == 0:
@@ -175,6 +185,7 @@ async def list_files(
             emission_date=record.emission_date,
             confidence=record.confidence,
             updated_at=record.updated_at,
+            optional_fields=dict(record.optional_fields or {}),
         )
         for record in records
     ]
@@ -374,6 +385,9 @@ async def get_document_model_suggestions(
                     "additional_fields": ", ".join(str(value) for value in optional_fields.values()),
                     "original_filename": (record.original_key or "").rsplit("/", 1)[-1],
                 })
+                pattern_values.update(
+                    get_period_key_values(emission_date, period_config.to_dict())
+                )
                 for _ in range(20):
                     try:
                         calculated_key = key_pattern.format(**pattern_values).strip("/")
@@ -507,6 +521,9 @@ async def edit_file(
         "additional_fields": ", ".join(updated_optional_fields.values()),
         "original_filename": record.original_key.rsplit("/", 1)[-1],
     })
+    pattern_values.update(
+        get_period_key_values(payload.emission_date, period_config.to_dict())
+    )
     for _ in range(20):
         try:
             formatted_key = key_pattern.format(**pattern_values).strip("/")
@@ -594,7 +611,8 @@ async def edit_file(
         new_values["optional_fields"] = dict(updated_optional_fields)
     sidecar_metadata.update(new_values)
     sidecar_metadata["optional_fields"] = updated_optional_fields
-    sidecar_metadata["status"] = "validated"
+    preserve_status = bool(getattr(request.state, "preserve_document_status", False))
+    sidecar_metadata["status"] = record.status if preserve_status else "validated"
     sidecar_metadata["updated_at"] = updated_at
     events = sidecar_metadata.get("events")
     if not isinstance(events, list):
@@ -624,7 +642,8 @@ async def edit_file(
     record.period = period
     record.current_key = new_pdf_key
     record.optional_fields = updated_optional_fields
-    record.status = "validated"
+    if not preserve_status:
+        record.status = "validated"
     record.updated_at = updated_at
     db.upsert(record)
 
@@ -634,6 +653,81 @@ async def edit_file(
         storage.delete_object(source_pdf_key)
 
     return await get_file(request, record.id, current_user=current_user)
+
+
+@router.post("/files/bulk-edit")
+async def bulk_edit_files(
+    request: Request,
+    payload: BulkEditRequest,
+    current_user: dict[str, str] | None = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Apply company, document-type, and additional-field edits to selected files."""
+    db = _db(request)
+    if not payload.changes:
+        raise HTTPException(status_code=422, detail="At least one explicit change is required")
+    allowed = {"template_name", "period_format", "emitting_company", "document_type", "emission_date", "additional_fields"}
+    unknown = set(payload.changes) - allowed
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unsupported bulk fields: {', '.join(sorted(unknown))}")
+    if payload.all_matching:
+        if payload.ids:
+            raise HTTPException(status_code=422, detail="Specify ids or all_matching, not both")
+        filters = {key: value for key, value in payload.filters.items() if key in {
+            "status", "template", "period_format", "q", "current_key", "emitting_company",
+            "document_type", "period", "confidence", "updated_at", "emission_date"
+        }}
+        additional_fields = {
+            key.removeprefix("additional_field__"): value
+            for key, value in payload.filters.items()
+            if key.startswith("additional_field__") and value
+        }
+        records = db.list_files(**filters, additional_fields=additional_fields, page=1, page_size=100000)
+    else:
+        if not payload.ids:
+            raise HTTPException(status_code=422, detail="Select at least one document")
+        records = [record for file_id in dict.fromkeys(payload.ids) if (record := db.get_by_id(file_id)) is not None]
+    if not records:
+        raise HTTPException(status_code=404, detail="No matching documents found")
+
+    results: list[dict[str, Any]] = []
+    # Bulk metadata edits must not implicitly validate documents.
+    request.state.preserve_document_status = True
+    for record in records:
+        try:
+            if not record.template_name or not record.period_format or not record.emission_date:
+                raise HTTPException(status_code=422, detail="Document is missing template, period format, or emission date")
+            optional_fields = dict(record.optional_fields or {})
+            field_changes = payload.changes.get("additional_fields", {})
+            if field_changes is not None:
+                if not isinstance(field_changes, dict):
+                    raise HTTPException(status_code=422, detail="additional_fields must be an object")
+                for name, value in field_changes.items():
+                    if not str(name).strip():
+                        raise HTTPException(status_code=422, detail="Additional-field names cannot be empty")
+                    if value is None or value == {"operation": "clear"}:
+                        optional_fields.pop(str(name), None)
+                    elif isinstance(value, dict) and value.get("operation") == "set":
+                        optional_fields[str(name)] = value.get("value", "")
+                    else:
+                        optional_fields[str(name)] = value
+            edit_payload = DocumentEditRequest(
+                template_name=str(payload.changes.get("template_name", record.template_name)),
+                period_format=str(payload.changes.get("period_format", record.period_format)),
+                emitting_company=str(payload.changes.get("emitting_company", record.emitting_company or "")),
+                document_type=str(payload.changes.get("document_type", record.document_type or "")),
+                emission_date=payload.changes.get("emission_date", record.emission_date),
+                optional_fields=optional_fields,
+            )
+            updated = await edit_file(request, record.id, edit_payload, current_user=current_user)
+            results.append({"id": record.id, "success": True, "status": updated.status, "current_key": updated.current_key})
+        except HTTPException as error:
+            results.append({"id": record.id, "success": False, "status_code": error.status_code, "error": error.detail})
+        except Exception as error:
+            logger.exception("Bulk edit failed for file %s", record.id)
+            results.append({"id": record.id, "success": False, "status_code": 500, "error": str(error)})
+
+    succeeded = sum(1 for item in results if item["success"])
+    return {"requested": len(results), "succeeded": succeeded, "failed": len(results) - succeeded, "results": results}
 
 
 @router.post("/files/{file_id}/validate", response_model=ValidationResponse)

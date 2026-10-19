@@ -5,6 +5,7 @@ import unittest
 from types import SimpleNamespace
 
 from app.pipeline import DocumentProcessor
+from app.period import get_period_key_values
 
 
 class EmissionDateExtractionTests(unittest.TestCase):
@@ -39,6 +40,29 @@ class EmissionDateExtractionTests(unittest.TestCase):
         date, error = processor._extract_emission_date("Date: 01/02/2025")
         self.assertEqual(date, "")
         self.assertIsNotNone(error)
+
+
+class PeriodKeyPlaceholderTests(unittest.TestCase):
+    def test_key_values_use_the_computed_period_and_representative_day(self):
+        values = get_period_key_values(
+            "2026-01-20",
+            {"granularity": "month", "offset": "previous"},
+        )
+
+        self.assertEqual(
+            values,
+            {"year": "2025", "month": "12", "month_name": "Décembre", "day": "20"},
+        )
+
+    def test_key_pattern_renders_period_placeholders(self):
+        processor = object.__new__(DocumentProcessor)
+
+        key = processor._format_key_pattern(
+            "{year}/{month}/{month_name}/{day}/document.pdf",
+            **get_period_key_values("2026-09-20", {"granularity": "month"}),
+        )
+
+        self.assertEqual(key, "2026/09/Septembre/20/document.pdf")
 
 
 if __name__ == "__main__":

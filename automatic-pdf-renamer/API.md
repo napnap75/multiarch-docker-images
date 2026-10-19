@@ -476,3 +476,23 @@ The following are implementation details, not reasons to block the API contract:
 - Exact SQLite full-text search tokenizer and phrase/prefix matching semantics.
 - Whether PDF byte-range requests are supported by the chosen S3 client/viewer.
 - Exact representation of technical processing diagnostics after retries are exhausted.
+
+## 4.8 Configurable list and bulk-edit API contract (proposed)
+
+The file-list API must expose a stable metadata modification timestamp (last_modified) distinct from emission_date. List results must support the existing filter/search/sort contract and a stable row identity for selection.
+
+The frontend needs a server-side way to resolve all records matching the active filters, independently of the current page. Selection across filtered results must not be implemented by collecting only the currently loaded page's IDs. The exact transport may be an explicit select_all_matching operation or a bulk endpoint accepting the validated filter expression; it must reuse the same filter semantics as the list endpoint.
+
+A bulk-edit endpoint is required under /api/v1/files (exact route to be aligned with the existing router implementation). Its request contract must express:
+- an explicit set of document IDs or an all-matching selection plus the active filters;
+- explicit operations for emitting_company, document_type, and keyed additional_fields;
+- for each field, no-op/unchanged, set/replace, or clear (clear only for optional fields);
+- an idempotency key or equivalent retry-safe mechanism for partial outcomes.
+
+The response must include requested count, succeeded count, failed count, and per-document results with stable identity, status, and actionable validation/technical error details. Invalid input must never be treated as a successful no-op. Bulk requests must be bounded or processed as a background job when size requires it, with progress/status available to the UI.
+
+The backend must apply the same validation as single-document edits. It recalculates period and destination key server-side, writes authoritative sidecars before synchronizing SQLite, uses the established safe object-move sequence and collision policy, and appends a history event per successful document. period, current_key, status, and timestamps are server-managed and cannot be supplied as arbitrary client values.
+
+## Additional list-filter contract
+
+The document list accepts an `emission_date` filter and one filter per configured additional field. Additional-field filters use the query parameter prefix `additional_field__` followed by the field's stable key (for example, `additional_field__account=123`). Both are applied server-side using the same semantics for paginated list requests and “select all matching” bulk operations. The UI renders a filter control directly beneath every visible emission-date or additional-field column, and changing visible columns preserves any active filter values.

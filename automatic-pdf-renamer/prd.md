@@ -206,3 +206,28 @@ SQLite replica (rebuilt from sidecars):
 ### ML-only inference contract
 
 The runtime uses local model artifacts for emitting-company, document-type and emission-date extraction; additional-field-group selection from emitting company and document type; shared token-level additional-field span extraction; and independent `template_name` and `period_format` prediction from emitting company and document type. Configuration may define template key patterns and period arithmetic parameters, but it must not select classification outcomes. Missing models, invalid predictions, or confidence below `CONFIDENCE_THRESHOLD` route the document to `pending`. The `period` and final storage key remain deterministic calculations after model inference.
+
+## Change requirements — configurable document list and bulk editing
+
+### FR6.5 — Default columns
+The home page MUST show these columns by default and in this order: status, document (current filename), company (emitting company), document type, period, and last modified. “Last modified” MUST be a persisted metadata modification timestamp and MUST NOT be confused with emission date or object creation time.
+
+### FR6.6 — Configurable columns
+Users MUST be able to add and remove columns without changing the underlying records or filters. Available columns include all common/list fields and configured additional fields. Column IDs must be stable (additional fields use their field key, not their display label). A field with no value displays a consistent empty marker. The default column set is used when no user preference exists; if preferences are persisted, unavailable fields are safely ignored.
+
+### FR6.7 — Row and filtered-result selection
+Users MUST be able to select individual rows, clear selection, select all rows on the current page, and select all records matching the current filters across pagination. “Select all filtered” MUST use the server-side filter query rather than only the rows loaded in the browser. The UI MUST distinguish page selection from all-filtered selection and show the affected count. Changing filters MUST invalidate or explicitly reconcile a prior selection.
+
+### FR6.8 — Bulk metadata edit
+Users MUST be able to apply one or more changes to the selected documents: emitting company, document type, and any configured additional field. Each field in the bulk form supports “leave unchanged” as the default; additional fields can be set/replaced or explicitly cleared. No field changes unless the user explicitly chooses an operation. Show a review/confirmation step with selection scope, count, and proposed changes.
+
+### FR6.9 — Validation, persistence, and feedback
+Bulk changes MUST use the same validation and business rules as the single-document workflow. Company and document type must be configured/allowed values. Recompute derived period and destination key whenever relevant source fields change; period remains server-calculated and read-only. If a key changes, use the existing crash-safe copy → durable sidecar → delete-source sequence, collision policy, and sidecar-first SQLite synchronization. Preserve unchanged fields, record an event per document, and return per-document success/failure details. Partial failures must be visible and retryable without reapplying successful items unintentionally.
+
+### Acceptance criteria
+- Fresh users see exactly the six default columns above in the specified order.
+- A configured additional field can be added as a column and removed again.
+- “Select all filtered” includes matching records beyond the current page and excludes records outside the active filters.
+- Bulk editing can change company/type and set, replace, or clear an additional field while preserving all other values.
+- Derived period/key are recomputed where necessary; invalid edits do not corrupt sidecars, PDFs, or the SQLite replica.
+- The UI reports the number of selected records and per-document outcomes.

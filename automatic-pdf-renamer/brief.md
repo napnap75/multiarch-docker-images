@@ -91,3 +91,13 @@ Single user (personal use), technically proficient. Nominal flow:
 - Partial uploads (Nextcloud chunked uploads): poll-only keys with a stable size across two listing cycles and a `.part`/`.~lock` exclusion list.
 - Sidecar/object drift (sidecar missing or out of sync with SQLite): sidecars win; a consistency job rebuilds SQLite and flags orphaned or missing sidecars.
 - Garage version of S3 API: pin a Garage release and run a compatibility spike (listing, multipart, copy-object, versioning).
+
+## Dashboard list usability and bulk editing (change proposal)
+
+The home page is a configurable document table. Its default visible columns, in order, are **Status**, **Document** (current filename), **Company**, **Document type**, **Period**, and **Last modified**. “Last modified” is the document metadata's latest modification timestamp, not the PDF emission date or filesystem creation time.
+
+Users can show or hide available columns, including any configured additional field. Column configuration affects presentation only: it must not alter metadata or filters. Additional-field columns are labelled from their configured field definitions and render missing values clearly. The list retains existing filtering, search, sorting, and consistency indicators.
+
+Each row has a selection control. Users can select individual visible rows, select all rows on the current page, or select **all rows matching the active filters** across pagination. The UI must state which selection mode is active and the number of affected documents. A bulk-edit action applies explicitly chosen changes to the selected set: company, document type, and configured additional fields (set, replace, or clear a value). Unchanged fields are preserved. The user reviews the proposed changes and affected count before confirmation. Validation failures and per-document outcomes are reported; one invalid document must not silently hide failures for the others.
+
+Bulk edits use the existing metadata and validation rules, recompute derived period and destination key when relevant fields change, and safely rename/move objects when the target key changes. Sidecars remain authoritative; SQLite is synchronized after durable sidecar updates. Every change is auditable in the document event history. The feature must not silently invent company/type values or overwrite colliding objects.

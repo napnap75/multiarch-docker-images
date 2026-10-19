@@ -921,3 +921,62 @@ body {
   outline: 2px solid currentColor;
   outline-offset: 2px;
 }
+
+
+/* Configurable document list and bulk-edit controls */
+.list-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-bottom: 1px solid var(--border, #d9dee8);
+}
+.column-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.5rem;
+  min-width: min(32rem, 80vw);
+  padding: 0.75rem;
+}
+.column-options label,
+.list-tools > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.bulk-edit-form {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem;
+  border-bottom: 1px solid var(--border, #d9dee8);
+}
+.bulk-edit-form[hidden] { display: none; }
+.bulk-edit-form .field-group { max-width: 36rem; }
+.bulk-edit-form textarea { width: 100%; }
+#selection-count { font-weight: 600; }
+
+
+.bulk-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+.bulk-additional-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 0.75rem;
+}
+.bulk-additional-row .field-group { min-width: 0; }
+.bulk-edit-form .additional-data { margin-top: 0.5rem; }
+.bulk-edit-form .edit-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+.bulk-edit-form .edit-form-actions .action-status { margin: 0; }
+@media (max-width: 680px) {
+  .bulk-additional-row { grid-template-columns: 1fr; }
+}
