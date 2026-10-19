@@ -666,9 +666,14 @@ async def bulk_edit_files(
             raise HTTPException(status_code=422, detail="Specify ids or all_matching, not both")
         filters = {key: value for key, value in payload.filters.items() if key in {
             "status", "template", "period_format", "q", "current_key", "emitting_company",
-            "document_type", "period", "confidence", "updated_at"
+            "document_type", "period", "confidence", "updated_at", "emission_date"
         }}
-        records = db.list_files(**filters, page=1, page_size=100000)
+        additional_fields = {
+            key.removeprefix("additional_field__"): value
+            for key, value in payload.filters.items()
+            if key.startswith("additional_field__") and value
+        }
+        records = db.list_files(**filters, additional_fields=additional_fields, page=1, page_size=100000)
     else:
         if not payload.ids:
             raise HTTPException(status_code=422, detail="Select at least one document")
