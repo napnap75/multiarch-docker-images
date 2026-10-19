@@ -605,7 +605,8 @@ async def edit_file(
         new_values["optional_fields"] = dict(updated_optional_fields)
     sidecar_metadata.update(new_values)
     sidecar_metadata["optional_fields"] = updated_optional_fields
-    sidecar_metadata["status"] = "validated"
+    preserve_status = bool(getattr(request.state, "preserve_document_status", False))
+    sidecar_metadata["status"] = record.status if preserve_status else "validated"
     sidecar_metadata["updated_at"] = updated_at
     events = sidecar_metadata.get("events")
     if not isinstance(events, list):
@@ -635,7 +636,8 @@ async def edit_file(
     record.period = period
     record.current_key = new_pdf_key
     record.optional_fields = updated_optional_fields
-    record.status = "validated"
+    if not preserve_status:
+        record.status = "validated"
     record.updated_at = updated_at
     db.upsert(record)
 
@@ -682,6 +684,8 @@ async def bulk_edit_files(
         raise HTTPException(status_code=404, detail="No matching documents found")
 
     results: list[dict[str, Any]] = []
+    # Bulk metadata edits must not implicitly validate documents.
+    request.state.preserve_document_status = True
     for record in records:
         try:
             if not record.template_name or not record.period_format or not record.emission_date:
