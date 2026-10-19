@@ -166,3 +166,25 @@ Once implemented, the repository should provide a single documented command to r
 The harness should never point at a developer's normal data directory or a production storage endpoint. It should fail early if its configuration appears to target a non-test database or external object storage.
 
 Until the harness is implemented, this document is a design guide rather than a runnable command reference. See [API.md](API.md) for the API contract and [arch.md](arch.md) for the architecture overview.
+
+## Additional test requirements — configurable columns and bulk editing
+
+### Home-page columns
+- Assert the six default columns and their exact order: status, document filename, company, document type, period, last modified.
+- Assert that adding/removing a configured additional-field column changes only the visible table configuration, not document metadata.
+- Assert stable column IDs and a consistent rendering contract for empty values.
+
+### Selection semantics
+- Select one row and multiple rows and verify the selected IDs.
+- Select the current page and verify that it does not claim to select every filtered record.
+- Select all filtered records across multiple pages; assert matching records outside the current page are included and nonmatching records are excluded.
+- Change or clear filters and verify stale selections are cleared or explicitly reconciled.
+
+### Bulk edits
+- Change company and document type for multiple records; preserve every field not explicitly changed.
+- Set, replace, and clear an additional field; reject attempts to clear a required/common field.
+- Validate invalid configured values and verify that each failure is reported without corrupting the record.
+- When relevant values change, assert period/key recomputation and safe rename/collision handling.
+- Inject storage and SQLite-sync failures to assert sidecar-first consistency and recoverability.
+- Retry a partially successful operation and verify successful items are not applied twice and outcomes remain explicit.
+- Assert per-document event history, counts, and error details in the response.
