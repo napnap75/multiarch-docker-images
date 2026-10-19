@@ -55,8 +55,6 @@ class FileRecord:
             extracted_text=metadata.get("extracted_text"),
             created_at=created_at,
             updated_at=updated_at,
-            emission_date=emission_date,
-            additional_fields=additional_fields,
         )
 
     def to_row(self) -> tuple[Any, ...]:
