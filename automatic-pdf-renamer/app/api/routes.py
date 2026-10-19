@@ -657,7 +657,7 @@ async def bulk_edit_files(
     db = _db(request)
     if not payload.changes:
         raise HTTPException(status_code=422, detail="At least one explicit change is required")
-    allowed = {"emitting_company", "document_type", "additional_fields"}
+    allowed = {"template_name", "period_format", "emitting_company", "document_type", "emission_date", "additional_fields"}
     unknown = set(payload.changes) - allowed
     if unknown:
         raise HTTPException(status_code=422, detail=f"Unsupported bulk fields: {', '.join(sorted(unknown))}")
@@ -701,11 +701,11 @@ async def bulk_edit_files(
                     else:
                         optional_fields[str(name)] = value
             edit_payload = DocumentEditRequest(
-                template_name=record.template_name,
-                period_format=record.period_format,
+                template_name=str(payload.changes.get("template_name", record.template_name)),
+                period_format=str(payload.changes.get("period_format", record.period_format)),
                 emitting_company=str(payload.changes.get("emitting_company", record.emitting_company or "")),
                 document_type=str(payload.changes.get("document_type", record.document_type or "")),
-                emission_date=record.emission_date,
+                emission_date=payload.changes.get("emission_date", record.emission_date),
                 optional_fields=optional_fields,
             )
             updated = await edit_file(request, record.id, edit_payload, current_user=current_user)
