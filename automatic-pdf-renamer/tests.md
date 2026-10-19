@@ -204,3 +204,8 @@ Until the harness is implemented, this document is a design guide rather than a 
 - The user can add multiple additional-field rows, choose an existing field/value, clear a field explicitly, and remove a pending row before applying.
 - The confirmation summarizes the target count and all requested changes before submitting.
 - The server applies changes through the same single-document edit path, including derived period/key recalculation and collision handling.
+
+## Bulk-edit status preservation
+
+- Bulk metadata edits must preserve each document's existing status (for example, `processed`, `validated`, or `unknown`) in both SQLite and the sidecar metadata.
+- Editing a single document through the normal edit endpoint may continue to mark it as `validated`; the bulk-edit endpoint must not implicitly validate documents.
