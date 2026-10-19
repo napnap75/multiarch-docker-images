@@ -24,3 +24,15 @@ Fixtures are checked-in immutable inputs under `tests/e2e/fixtures/baseline/`. T
 ## Safety
 
 The suite always overrides storage and SQLite paths with paths inside its temporary workspace, and sets `APP_STORAGE_BACKEND=file`. It does not accept a production base URL or reuse a developer database. Do not modify the fixture source during a run.
+
+## Additional E2E scenarios: configurable columns and bulk operations
+
+The E2E suite should add API-level scenarios for the bulk-edit contract using isolated local storage and disposable SQLite state. The browser column chooser and row-selection interactions require frontend/browser tests; they are not covered by API-only E2E tests.
+
+Required scenarios:
+- List records with last_modified and verify it is distinct from emission_date.
+- Bulk-edit company/type and an additional field; inspect sidecars and SQLite after completion.
+- Select all matching filters across pagination and prove nonmatching records remain unchanged.
+- Verify validation errors and per-document partial outcomes.
+- Force a destination collision and a storage failure; verify no source object is lost and sidecar/SQLite state remains recoverable.
+- Retry a partially successful request using the same idempotency token and verify duplicate mutations are not introduced.
