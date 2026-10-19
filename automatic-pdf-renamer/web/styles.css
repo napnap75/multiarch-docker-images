@@ -772,12 +772,6 @@ body {
 }
 
 
-.model-management {
-  max-width: 1100px;
-  margin-bottom: 20px;
-}
-
-.model-section-heading,
 .model-card-heading {
   display: flex;
   align-items: flex-start;
@@ -785,12 +779,10 @@ body {
   gap: 16px;
 }
 
-.model-section-heading h3,
 .model-card-heading h4 {
   margin: 0 0 6px;
 }
 
-.model-section-heading p,
 .model-card-heading p,
 .model-help,
 .model-empty {
@@ -799,41 +791,8 @@ body {
   margin: 0;
 }
 
-.model-train-form {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 22px 0 12px;
-}
-
-.model-train-form label {
-  font-size: 0.9rem;
-  font-weight: 650;
-}
-
-.model-train-form select,
-.model-train-form input {
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  background: white;
-  color: var(--text);
-  font: inherit;
-}
-
-.model-train-form input[hidden],
-.model-train-form label[hidden] {
-  display: none;
-}
-
 .model-help {
   font-size: 0.85rem;
-  margin-bottom: 14px;
-}
-
-.model-management .action-status {
-  margin: 12px 0;
 }
 
 .models-list {
@@ -901,12 +860,6 @@ body {
 }
 
 @media (max-width: 820px) {
-  .model-train-form {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .model-section-heading,
   .model-card-heading {
     flex-direction: column;
   }
@@ -915,19 +868,34 @@ body {
 
 /* Compact, asynchronously loaded model proposals under editable document fields. */
 .model-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  box-sizing: border-box;
+  height: 1.6rem;
+  min-width: 0;
   margin-top: 0.25rem;
   color: var(--muted, #667085);
   font-size: 0.75rem;
   line-height: 1.35;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
-.model-suggestion[hidden] {
-  display: none;
+.model-suggestion[aria-hidden="true"] {
+  visibility: hidden;
+}
+
+.model-suggestion > span,
+.additional-field-proposal > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .model-suggestion button {
-  margin: 0 0 0 0.25rem;
+  flex: 0 0 auto;
+  margin: 0;
   padding: 0;
   border: 0;
   background: transparent;
@@ -935,6 +903,18 @@ body {
   font: inherit;
   text-decoration: underline;
   cursor: pointer;
+}
+
+#additional-field-suggestions {
+  overflow-x: auto;
+}
+
+.additional-field-proposal {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
 }
 
 .model-suggestion button:focus-visible {

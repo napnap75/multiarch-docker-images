@@ -54,28 +54,28 @@
                   <div class="field-group">
                     <label for="edit-template">Template</label>
                     <select id="edit-template" name="template_name" required></select>
-                    <div class="model-suggestion" id="suggestion-template_name" hidden></div>
+                    <div class="model-suggestion" id="suggestion-template_name" aria-hidden="true"></div>
                   </div>
                   <div class="field-group">
                     <label for="edit-period-format">Period format</label>
                     <select id="edit-period-format" name="period_format" required></select>
-                    <div class="model-suggestion" id="suggestion-period_format" hidden></div>
+                    <div class="model-suggestion" id="suggestion-period_format" aria-hidden="true"></div>
                   </div>
                   <div class="field-group">
                     <label for="edit-company">Company</label>
                     <select id="edit-company" name="emitting_company" required></select>
-                    <div class="model-suggestion" id="suggestion-emitting_company" hidden></div>
+                    <div class="model-suggestion" id="suggestion-emitting_company" aria-hidden="true"></div>
                   </div>
                   <div class="field-group">
                     <label for="edit-document-type">Document type</label>
                     <select id="edit-document-type" name="document_type" required></select>
-                    <div class="model-suggestion" id="suggestion-document_type" hidden></div>
+                    <div class="model-suggestion" id="suggestion-document_type" aria-hidden="true"></div>
                   </div>
                   <div class="field-group">
                     <label for="edit-emission-date">Emission date</label>
                     <input id="edit-emission-date" name="emission_date" type="text" inputmode="numeric" placeholder="dd/mm/yyyy" pattern="[0-9]{2}/[0-9]{2}/[0-9]{4}" aria-describedby="emission-date-hint" maxlength="10" required />
                     <small id="emission-date-hint" class="field-hint">Use dd/mm/yyyy</small>
-                    <div class="model-suggestion" id="suggestion-emission-date" hidden></div>
+                    <div class="model-suggestion" id="suggestion-emission-date" aria-hidden="true"></div>
                   </div>
                 </div>
                 <div class="edit-calculated-fields">
@@ -98,6 +98,7 @@
                   <h4>Additional fields</h4>
                   <button id="add-additional-field" class="secondary-btn" type="button">Add field</button>
                 </div>
+                <div id="additional-field-suggestions" class="model-suggestion" aria-live="polite" aria-hidden="true"></div>
                 <div id="additional-fields" class="additional-field-list"></div>
               </div>
             </section>

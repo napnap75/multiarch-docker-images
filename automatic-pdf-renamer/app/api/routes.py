@@ -18,7 +18,7 @@ from app.period import format_period_from_emission_date
 from app.pipeline import DocumentProcessor
 from app.storage import StorageBackend
 from app.model_manager import list_models, train_all_models
-from app.ml import AmbiguousPredictionError, LocalMLPipeline, ModelUnavailableError
+from app.ml import LocalMLPipeline
 
 from .deps import get_current_user
 from .models import (
@@ -277,7 +277,6 @@ async def get_document_model_suggestions(
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Return confidence-gated model suggestions without delaying document rendering."""
-    logger.debug("API POST /files/%s/suggestions: requested fields=%s", file_id, sorted(payload.keys()))
     db = _db(request)
     record = db.get_by_id(file_id)
     if record is None:
@@ -289,7 +288,27 @@ async def get_document_model_suggestions(
     text = record.extracted_text or ""
     company = str(payload.get("emitting_company") or record.emitting_company or "").strip()
     document_type = str(payload.get("document_type") or record.document_type or "").strip()
-    suggestions: dict[str, dict[str, Any]] = {}
+    current_fields = dict(record.optional_fields or {})
+    submitted_fields = payload.get("optional_fields")
+    if isinstance(submitted_fields, dict):
+        current_fields.update({
+            str(name): str(value)
+            for name, value in submitted_fields.items()
+            if value is not None and str(value).strip()
+        })
+    suggestions, field_decisions = ml.suggest_document_fields(
+        text,
+        company,
+        document_type,
+        current_fields,
+        registry.get_additional_fields(),
+    )
+    field_decisions = {
+        **field_decisions,
+        "emission_date": "unavailable: no valid configured date or stored date",
+        "period": "skipped: missing date or period format",
+        "current_key": "skipped: missing template or key pattern",
+    }
 
     # Recommend the first valid date matched in document order by configured regexes.
     # This is deterministic content extraction, not an ML prediction.
@@ -298,127 +317,60 @@ async def get_document_model_suggestions(
             registry, ml_pipeline=ml
         )._extract_emission_date(text)
         if not recommended_date:
-            logger.debug(
-                "Regex extraction returned no date for file_id=%s: %s",
-                file_id,
-                date_error,
-            )
             # The stored date was originally produced by the same configured
             # content-extraction pipeline. Keep it available as a recommendation
             # when the current extraction configuration cannot reproduce it.
             stored_date = str(getattr(record, "emission_date", "") or "").strip()
             if stored_date:
                 recommended_date = stored_date
-                logger.debug(
-                    "Using stored content-extracted emission date for file_id=%s",
-                    file_id,
-                )
+                field_decisions["emission_date"] = "content: using stored date"
         if recommended_date:
             suggestions["emission_date"] = {
                 "value": recommended_date,
                 "source": "content",
             }
-        else:
-            logger.debug(
-                "No emission date recommendation available for file_id=%s; extracted_text_length=%d",
-                file_id,
-                len(text),
-            )
-    except Exception:
-        logger.exception(
-            "Failed to extract recommended emission date from content for file_id=%s",
-            file_id,
-        )
+            field_decisions["emission_date"] = f"content: {recommended_date}"
+        elif date_error:
+            field_decisions["emission_date"] = f"unavailable: {date_error}"
+    except Exception as exc:
         stored_date = str(getattr(record, "emission_date", "") or "").strip()
         if stored_date:
             suggestions["emission_date"] = {
                 "value": stored_date,
                 "source": "content",
             }
+            field_decisions["emission_date"] = f"content: using stored date {stored_date}"
+        else:
+            field_decisions["emission_date"] = f"unavailable: extraction failed ({exc})"
 
-    def add_prediction(field: str, model_name: str, sample: str) -> None:
-        try:
-            value, confidence = ml._predict_label(model_name, sample)
-            suggestions[field] = {"value": value, "confidence": confidence, "source": "model"}
-        except (ModelUnavailableError) as exc:
-            logger.debug("Model '%s' is unavailable for file_id=%s with error: %s", model_name, file_id, exc)
-            return
-        except (AmbiguousPredictionError) as exc:
-            logger.debug("Model '%s' is ambiguous for file_id=%s with error: %s", model_name, file_id, exc)
-            return
-
-    add_prediction("emitting_company", "field_emitting_company", text)
-    add_prediction("document_type", "field_document_type", text)
-
-    suggested_company = suggestions.get("emitting_company", {}).get("value", company)
-    suggested_type = suggestions.get("document_type", {}).get("value", document_type)
-
-    # Follow the inference dependency order: groups, extracted values, then template/format.
-    if suggested_company and suggested_type:
-        try:
-            groups, _groups_confidence = ml.predict_additional_groups(suggested_company, suggested_type)
-            extracted_fields = ml.predict_additional_values(groups, text) if groups else {}
-            predicted_fields = {
-                name: value for name, (value, _confidence) in extracted_fields.items()
-            }
-            submitted_fields = payload.get("optional_fields")
-            if isinstance(submitted_fields, dict):
-                additional_fields = {
-                    str(name): str(value)
-                    for name, value in submitted_fields.items()
-                    if value is not None and str(value).strip()
-                }
-            else:
-                additional_fields = predicted_fields or dict(record.optional_fields or {})
-            template, template_confidence, period_format, period_confidence = (
-                ml.predict_template_and_period_format(
-                    suggested_company, suggested_type, additional_fields
-                )
-            )
-            suggestions["template_name"] = {
-                "value": template, "confidence": template_confidence, "source": "model"
-            }
-            suggestions["period_format"] = {
-                "value": period_format, "confidence": period_confidence, "source": "model"
-            }
-        except (ModelUnavailableError, AmbiguousPredictionError) as exc:
-            logger.debug(
-                "Template/period suggestions unavailable for file_id=%s: %s", file_id, exc
-            )
-
-    logger.debug("API POST /files/%s/suggestions: model predictions=%s", file_id, {k: v for k, v in suggestions.items() if v.get("source") == "model"})
-
-    suggested_template = payload.get("template_name") or suggestions.get("template_name", {}).get("value", record.template_name)
-    suggested_format = payload.get("period_format") or suggestions.get("period_format", {}).get("value", record.period_format)
+    derived_template = str(payload.get("template_name") or record.template_name or "")
+    derived_format = str(payload.get("period_format") or record.period_format or "")
 
     try:
         raw_date = str(payload.get("emission_date") or record.emission_date or "")
         emission_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
-        period_config = registry.get_period_format_config(str(suggested_format))
+        period_config = registry.get_period_format_config(derived_format)
         if period_config is not None:
             calculated_period = format_period_from_emission_date(emission_date, period_config.to_dict())
-            source_confidences = [
-                item["confidence"] for key, item in suggestions.items()
-                if key in {"template_name", "period_format", "emitting_company", "document_type"}
-            ]
             suggestions["period"] = {
                 "value": calculated_period,
                 "source": "derived",
             }
-            key_pattern = registry.get_key_pattern(str(suggested_template))
+            field_decisions["period"] = f"derived: {calculated_period}"
+            key_pattern = registry.get_key_pattern(derived_template)
             if key_pattern:
                 optional_fields = payload.get("optional_fields")
                 if not isinstance(optional_fields, dict):
                     optional_fields = record.optional_fields or {}
                 pattern_values = dict(optional_fields)
                 pattern_values.update({
-                    "company": suggested_company,
-                    "document_type": suggested_type,
+                    "company": company,
+                    "document_type": document_type,
                     "emission_date": emission_date.isoformat(),
                     "period": calculated_period,
-                    "period_format": suggested_format,
-                    "template_name": suggested_template,
-                    "emitting_company": suggested_company,
+                    "period_format": derived_format,
+                    "template_name": derived_template,
+                    "emitting_company": company,
                     "additional_fields": ", ".join(str(value) for value in optional_fields.values()),
                     "original_filename": (record.original_key or "").rsplit("/", 1)[-1],
                 })
@@ -439,10 +391,21 @@ async def get_document_model_suggestions(
                         "value": calculated_key,
                         "source": "derived",
                     }
-    except (TypeError, ValueError):
-        pass
+                    field_decisions["current_key"] = f"derived: {calculated_key}"
+                else:
+                    field_decisions["current_key"] = "unavailable: key pattern could not be formatted"
+            else:
+                field_decisions["current_key"] = "skipped: template has no key pattern"
+        else:
+            field_decisions["period"] = f"unavailable: unknown period format {derived_format!r}"
+    except (TypeError, ValueError) as exc:
+        field_decisions["period"] = f"unavailable: {exc}"
 
-    logger.debug("API POST /files/%s/suggestions: returning fields=%s threshold=%s", file_id, sorted(suggestions.keys()), threshold)
+    logger.debug(
+        "API POST /files/%s/suggestions decisions=%s",
+        file_id,
+        field_decisions,
+    )
     return {"suggestions": suggestions, "confidence_threshold": threshold}
 
 

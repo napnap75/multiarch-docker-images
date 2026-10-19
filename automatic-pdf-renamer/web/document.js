@@ -4,6 +4,7 @@ const content = document.getElementById('document-content');
 const technicalDataList = document.getElementById('technical-data');
 const additionalSection = document.getElementById('additional-section');
 const additionalFields = document.getElementById('additional-fields');
+const additionalFieldSuggestions = document.getElementById('additional-field-suggestions');
 const addAdditionalFieldButton = document.getElementById('add-additional-field');
 const historyList = document.getElementById('document-history');
 const extractedText = document.getElementById('extracted-text');
@@ -369,10 +370,71 @@ let suggestionAbortController = null;
 const hideModelSuggestions = () => {
   Object.values(suggestionElements).forEach((element) => {
     if (element) {
-      element.hidden = true;
+      element.setAttribute('aria-hidden', 'true');
       element.replaceChildren();
     }
   });
+  if (additionalFieldSuggestions) {
+    additionalFieldSuggestions.setAttribute('aria-hidden', 'true');
+    additionalFieldSuggestions.replaceChildren();
+  }
+};
+
+const renderAdditionalFieldSuggestions = (suggestion) => {
+  if (!additionalFieldSuggestions) return;
+  additionalFieldSuggestions.replaceChildren();
+  const predictedFields = suggestion?.value;
+  if (!predictedFields || typeof predictedFields !== 'object' || Array.isArray(predictedFields)) {
+    additionalFieldSuggestions.setAttribute('aria-hidden', 'true');
+    return;
+  }
+
+  const currentFields = getAdditionalFieldEntries();
+  Object.entries(predictedFields).forEach(([fieldName, rawValue]) => {
+    const value = String(rawValue ?? '').trim();
+    if (!fieldName.trim() || !value || currentFields[fieldName] === value) return;
+
+    const proposal = document.createElement('div');
+    proposal.className = 'additional-field-proposal';
+    const confidence = suggestion.confidence?.[fieldName];
+    const description = document.createElement('span');
+    const confidenceLabel = Number.isFinite(confidence)
+      ? ` (${Math.round(confidence * 100)}% confidence)`
+      : '';
+    const sourceLabel = suggestion.source === 'configured' ? 'Configured value found' : 'Model suggestion';
+    description.textContent = `${sourceLabel}: ${fieldName}: ${value}${confidenceLabel}`;
+    description.title = description.textContent;
+
+    const applyButton = document.createElement('button');
+    applyButton.type = 'button';
+    applyButton.textContent = Object.hasOwn(currentFields, fieldName) ? 'Use suggestion' : 'Add field';
+    applyButton.setAttribute('aria-label', `Apply suggested value for ${fieldName}`);
+    applyButton.addEventListener('click', () => {
+      const existingRow = [...additionalFields.querySelectorAll('.additional-field-row')]
+        .find((row) => row.querySelector('.additional-field-label')?.value === fieldName);
+      if (existingRow) {
+        const valueSelect = existingRow.querySelector('.additional-field-value');
+        if (![...valueSelect.options].some((option) => option.value === value)) {
+          const option = document.createElement('option');
+          option.value = value;
+          option.textContent = value;
+          valueSelect.append(option);
+        }
+        valueSelect.value = value;
+      } else {
+        additionalFields.querySelector('.additional-field-empty')?.remove();
+        additionalFields.append(buildAdditionalFieldRow(fieldName, value, fieldSuggestionState));
+      }
+      updateSaveButtonState();
+      scheduleModelSuggestions();
+    });
+    proposal.append(description, ' ', applyButton);
+    additionalFieldSuggestions.append(proposal);
+  });
+  additionalFieldSuggestions.setAttribute(
+    'aria-hidden',
+    String(!additionalFieldSuggestions.childElementCount),
+  );
 };
 
 const renderModelSuggestion = (fieldName, suggestion) => {
@@ -380,12 +442,13 @@ const renderModelSuggestion = (fieldName, suggestion) => {
   if (!container) return;
   container.replaceChildren();
   if (!suggestion || typeof suggestion.value !== 'string' || !suggestion.value.trim()) {
-    container.hidden = true;
+    container.setAttribute('aria-hidden', 'true');
     return;
   }
 
   const prefix = document.createElement('span');
   prefix.textContent = `Model suggestion: ${suggestion.value}`;
+  prefix.title = prefix.textContent;
   container.append(prefix);
 
   const controls = {
@@ -415,20 +478,21 @@ const renderModelSuggestion = (fieldName, suggestion) => {
     });
     container.append(' ', applyButton);
   }
-  container.hidden = false;
+  container.setAttribute('aria-hidden', 'false');
 };
 
 const renderEmissionDateSuggestion = (suggestion) => {
   if (!emissionDateSuggestion) return;
   emissionDateSuggestion.replaceChildren();
   if (!suggestion || typeof suggestion.value !== 'string' || !suggestion.value.trim()) {
-    emissionDateSuggestion.hidden = true;
+    emissionDateSuggestion.setAttribute('aria-hidden', 'true');
     return;
   }
 
   const recommendedDate = formatEmissionDateInput(suggestion.value);
   const label = document.createElement('span');
   label.textContent = `Content recommendation: ${recommendedDate}`;
+  label.title = label.textContent;
   emissionDateSuggestion.append(label);
 
   const applyButton = document.createElement('button');
@@ -443,7 +507,7 @@ const renderEmissionDateSuggestion = (suggestion) => {
     scheduleModelSuggestions();
   });
   emissionDateSuggestion.append(' ', applyButton);
-  emissionDateSuggestion.hidden = false;
+  emissionDateSuggestion.setAttribute('aria-hidden', 'false');
 };
 
 const scheduleModelSuggestions = () => {
@@ -494,6 +558,7 @@ const fetchModelSuggestions = async () => {
     Object.keys(suggestionElements).forEach((fieldName) => {
       renderModelSuggestion(fieldName, result.suggestions[fieldName]);
     });
+    renderAdditionalFieldSuggestions(result.suggestions.optional_fields);
     renderEmissionDateSuggestion(result.suggestions.emission_date);
     const calculatedPeriod = result.suggestions.period?.value;
     const calculatedKey = result.suggestions.current_key?.value;

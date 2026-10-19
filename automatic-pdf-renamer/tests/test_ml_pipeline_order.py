@@ -26,6 +26,18 @@ class FakeSharedValuesModel:
         return {field: (f"value-{field}", 0.95) for field in fields}
 
 
+class FakeGroupsModel:
+    def __init__(self, groups, confidence=0.95):
+        self.groups = groups
+        self.confidence = confidence
+
+    def predict(self, samples):
+        return [self.groups]
+
+    def predict_proba(self, samples):
+        return [[self.confidence, 1.0 - self.confidence]]
+
+
 class LocalMLPipelineTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -53,13 +65,45 @@ class LocalMLPipelineTests(unittest.TestCase):
         models = {
             "field_emitting_company": FakeModel("Example Energy"),
             "field_document_type": FakeModel("invoice"),
-            "field_emission_date": FakeModel("2026-10-17"),
         }
         pipeline = self.pipeline_with(models)
         fields = pipeline.extract_initial_fields("document text")
         self.assertEqual(fields["emitting_company"][0], "Example Energy")
         self.assertEqual(fields["document_type"][0], "invoice")
-        self.assertEqual(fields["emission_date"][0], "2026-10-17")
+        self.assertEqual(set(fields), {"emitting_company", "document_type"})
+
+    def test_predict_labels_keeps_successful_fields_when_another_is_ambiguous(self):
+        pipeline = self.pipeline_with({
+            "field_emitting_company": FakeModel("Example Energy", 0.4),
+            "field_document_type": FakeModel("invoice", 0.95),
+        })
+
+        predictions, errors = pipeline.predict_labels({
+            "emitting_company": ("field_emitting_company", "document text"),
+            "document_type": ("field_document_type", "document text"),
+        })
+
+        self.assertEqual(predictions, {"document_type": ("invoice", 0.95)})
+        self.assertIsInstance(errors["emitting_company"], AmbiguousPredictionError)
+
+    def test_extract_initial_fields_remains_strict(self):
+        pipeline = self.pipeline_with({
+            "field_emitting_company": FakeModel("Example Energy", 0.4),
+            "field_document_type": FakeModel("invoice", 0.95),
+        })
+
+        with self.assertRaises(AmbiguousPredictionError):
+            pipeline.extract_initial_fields("document text")
+
+    def test_additional_groups_are_predicted_with_confidence(self):
+        pipeline = self.pipeline_with({
+            "additional_field_groups": FakeGroupsModel(["appartement", "impots"]),
+        })
+
+        groups, confidence = pipeline.predict_additional_groups("Impots", "Avis")
+
+        self.assertEqual(groups, ["appartement", "impots"])
+        self.assertEqual(confidence, 0.95)
 
     def test_low_confidence_prediction_is_rejected(self):
         pipeline = self.pipeline_with({"field_document_type": FakeModel("invoice", 0.4)})
@@ -81,6 +125,27 @@ class LocalMLPipelineTests(unittest.TestCase):
         pipeline = self.pipeline_with({"additional_field_values": FakeSharedValuesModel()}, threshold=0.99)
         with self.assertRaises(AmbiguousPredictionError):
             pipeline.predict_additional_values(["invoice_number"], "document text")
+
+    def test_template_and_period_format_are_predicted_together(self):
+        pipeline = self.pipeline_with({
+            "template_name": FakeModel("invoice-template", 0.94),
+            "period_format": FakeModel("monthly", 0.91),
+        })
+
+        result = pipeline.predict_template_and_period_format(
+            "Example Energy", "invoice", {"invoice_number": "INV-123"}
+        )
+
+        self.assertEqual(result, ("invoice-template", 0.94, "monthly", 0.91))
+
+    def test_template_and_period_format_remain_strict(self):
+        pipeline = self.pipeline_with({
+            "template_name": FakeModel("invoice-template", 0.4),
+            "period_format": FakeModel("monthly", 0.91),
+        })
+
+        with self.assertRaises(AmbiguousPredictionError):
+            pipeline.predict_template_and_period_format("Example Energy", "invoice", {})
 
 
 if __name__ == "__main__":
