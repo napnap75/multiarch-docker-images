@@ -33,7 +33,6 @@ const updateSelectionUi = () => {
     ? `All ${total} filtered documents selected`
     : `${selectedIds.size} selected`;
   document.getElementById('bulk-edit-btn').disabled = selectedCount() === 0;
-  document.getElementById('select-page').checked = loadedItems.length > 0 && loadedItems.every((item) => selectedIds.has(item.id));
 };
 const renderColumnPicker = () => {
   const options = [...Object.entries(columnDefinitions).map(([key, value]) => [key, value.label]),
@@ -279,7 +278,6 @@ sortButtons.forEach((button) => {
   });
 });
 
-document.getElementById('select-page').addEventListener('change', (event) => selectLoadedRows(event.target.checked));
 document.getElementById('select-filtered-btn').addEventListener('click', () => {
   allFilteredSelection = true;
   selectedIds.clear();
@@ -288,30 +286,113 @@ document.getElementById('select-filtered-btn').addEventListener('click', () => {
 document.getElementById('clear-selection-btn').addEventListener('click', () => {
   selectedIds.clear(); allFilteredSelection = false; renderRows(loadedItems, false); updateSelectionUi();
 });
+const bulkOptions = { names: [], values: {} };
+const setBulkSelectOptions = (select, values, placeholder = 'Keep unchanged') => {
+  select.replaceChildren();
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = placeholder;
+  select.append(empty);
+  [...new Set((values || []).filter((value) => value !== null && value !== undefined && String(value).trim() !== ''))].sort((a,b) => String(a).localeCompare(String(b))).forEach((value) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    select.append(option);
+  });
+};
+const renderBulkAdditionalRow = (fieldName = '') => {
+  const host = document.getElementById('bulk-additional-fields');
+  const row = document.createElement('div');
+  row.className = 'additional-field-row bulk-additional-row';
+  const nameGroup = document.createElement('div');
+  nameGroup.className = 'field-group';
+  const nameLabel = document.createElement('label');
+  nameLabel.textContent = 'Additional field';
+  const name = document.createElement('select');
+  name.className = 'bulk-additional-name';
+  name.setAttribute('aria-label', 'Additional field');
+  setBulkSelectOptions(name, bulkOptions.names, 'Choose field');
+  if (fieldName && ![...name.options].some((option) => option.value === fieldName)) {
+    const option = document.createElement('option'); option.value = fieldName; option.textContent = fieldName; name.append(option);
+  }
+  name.value = fieldName;
+  nameGroup.append(nameLabel, name);
+
+  const valueGroup = document.createElement('div');
+  valueGroup.className = 'field-group';
+  const valueLabel = document.createElement('label');
+  valueLabel.textContent = 'Value';
+  const value = document.createElement('select');
+  value.className = 'bulk-additional-value';
+  value.setAttribute('aria-label', 'Additional field value');
+  const populateValues = () => {
+    setBulkSelectOptions(value, bulkOptions.values[name.value] || [], 'Choose value');
+    const clear = document.createElement('option');
+    clear.value = '__CLEAR_FIELD__';
+    clear.textContent = 'Clear field';
+    value.append(clear);
+  };
+  populateValues();
+  name.addEventListener('change', populateValues);
+  valueGroup.append(valueLabel, value);
+
+  const remove = document.createElement('button');
+  remove.type = 'button'; remove.className = 'secondary-btn small-btn'; remove.textContent = 'Remove';
+  remove.addEventListener('click', () => row.remove());
+  row.append(nameGroup, valueGroup, remove);
+  host.append(row);
+};
+fetch('/document-options').then((response) => response.ok ? response.json() : null).then((options) => {
+  if (!options) return;
+  bulkOptions.names = options.optional_field_names || [];
+  bulkOptions.values = options.optional_field_values || {};
+  setBulkSelectOptions(document.getElementById('bulk-template'), options.templates || []);
+  setBulkSelectOptions(document.getElementById('bulk-period-format'), options.period_formats || []);
+  setBulkSelectOptions(document.getElementById('bulk-company'), options.companies || []);
+  setBulkSelectOptions(document.getElementById('bulk-type'), options.document_types || []);
+}).catch((error) => console.error('Unable to load bulk edit options', error));
+document.getElementById('bulk-add-field').addEventListener('click', () => renderBulkAdditionalRow());
 document.getElementById('bulk-edit-btn').addEventListener('click', () => {
   document.getElementById('bulk-edit-form').hidden = false;
   document.getElementById('bulk-scope').textContent = allFilteredSelection
     ? `This will apply to all ${total} documents matching the active filters.`
     : `This will apply to ${selectedIds.size} selected documents.`;
+  document.getElementById('bulk-result').textContent = '';
 });
 document.getElementById('cancel-bulk-edit').addEventListener('click', () => { document.getElementById('bulk-edit-form').hidden = true; });
 document.getElementById('bulk-edit-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const changes = {};
-  const company = document.getElementById('bulk-company').value.trim();
-  const type = document.getElementById('bulk-type').value.trim();
-  if (company) changes.emitting_company = company;
-  if (type) changes.document_type = type;
-  const rawFields = document.getElementById('bulk-fields').value.trim();
-  if (rawFields) {
-    try { changes.additional_fields = JSON.parse(rawFields); }
-    catch { document.getElementById('bulk-result').textContent = 'Additional fields must be valid JSON.'; return; }
+  for (const [id, key] of [['bulk-template', 'template_name'], ['bulk-period-format', 'period_format'], ['bulk-company', 'emitting_company'], ['bulk-type', 'document_type']]) {
+    const value = document.getElementById(id).value;
+    if (value) changes[key] = value;
   }
-  if (!Object.keys(changes).length) { document.getElementById('bulk-result').textContent = 'Choose at least one change.'; return; }
+  const emissionDate = document.getElementById('bulk-emission-date').value;
+  if (emissionDate) changes.emission_date = emissionDate;
+  const additionalFields = {};
+  for (const row of document.querySelectorAll('.bulk-additional-row')) {
+    const name = row.querySelector('.bulk-additional-name').value;
+    const value = row.querySelector('.bulk-additional-value').value;
+    if (!name || !value) continue;
+    if (Object.prototype.hasOwnProperty.call(additionalFields, name)) {
+      document.getElementById('bulk-result').textContent = `Choose each additional field only once: ${name}`;
+      return;
+    }
+    additionalFields[name] = value === '__CLEAR_FIELD__' ? null : value;
+  }
+  if (Object.keys(additionalFields).length) changes.additional_fields = additionalFields;
+  if (!Object.keys(changes).length) {
+    document.getElementById('bulk-result').textContent = 'Choose at least one field to change.';
+    return;
+  }
   const payload = allFilteredSelection
     ? { all_matching: true, filters: Object.fromEntries(getListParams()), changes }
     : { ids: [...selectedIds], changes };
   const result = document.getElementById('bulk-result');
+  const summary = Object.entries(changes).map(([key, value]) => key === 'additional_fields'
+    ? `Additional fields: ${Object.entries(value).map(([field, fieldValue]) => `${field} → ${fieldValue === null ? 'clear' : fieldValue}`).join(', ')}`
+    : `${key}: ${value}`).join('; ');
+  if (!window.confirm(`Apply to ${allFilteredSelection ? total : selectedIds.size} document(s)?\n\n${summary}`)) return;
   result.textContent = 'Applying changes…';
   try {
     const response = await fetch('/files/bulk-edit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
