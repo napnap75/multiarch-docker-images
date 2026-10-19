@@ -33,6 +33,11 @@ const updateSelectionUi = () => {
     ? `All ${total} filtered documents selected`
     : `${selectedIds.size} selected`;
   document.getElementById('bulk-edit-btn').disabled = selectedCount() === 0;
+  const headerSelect = document.getElementById('select-page-head');
+  if (headerSelect) {
+    headerSelect.checked = loadedItems.length > 0 && loadedItems.every((item) => selectedIds.has(item.id));
+    headerSelect.indeterminate = !headerSelect.checked && loadedItems.some((item) => selectedIds.has(item.id));
+  }
 };
 const renderColumnPicker = () => {
   const options = [...Object.entries(columnDefinitions).map(([key, value]) => [key, value.label]),
