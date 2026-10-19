@@ -188,3 +188,10 @@ Until the harness is implemented, this document is a design guide rather than a 
 - Inject storage and SQLite-sync failures to assert sidecar-first consistency and recoverability.
 - Retry a partially successful operation and verify successful items are not applied twice and outcomes remain explicit.
 - Assert per-document event history, counts, and error details in the response.
+
+## Additional filter-control tests
+
+- When the emission-date column is visible, render a filter control beneath it and verify the entered date is sent as `emission_date` and filters the list.
+- When an additional-field column is visible, render a filter control beneath that column and verify its value is sent as `additional_field__<stable-field-key>`.
+- Verify additional-field filtering uses the stored JSON field value and does not match a different field with a similar name.
+- Verify date/additional-field filters remain active when the column picker is changed, and “select all filtered” bulk edits respect these filters across pagination.
