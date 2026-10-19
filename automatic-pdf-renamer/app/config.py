@@ -130,6 +130,7 @@ class MappingMatch:
 
     company: str | None = None
     document_type: str | None = None
+    additional_fields: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "MappingMatch":
@@ -139,18 +140,39 @@ class MappingMatch:
         return cls(
             company=data.get("company"),
             document_type=data.get("document_type"),
+            additional_fields=data.get("additional_fields", {}),
         )
 
-    def matches(self, company: str, document_type: str) -> bool:
-        """Check if this match criteria matches the given company and document type.
-        
-        Empty match (both None) matches everything.
-        company=None in match means match any company.
-        document_type=None in match means match any document type.
-        """
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize configured match criteria, including optional-field predicates."""
+        result: dict[str, Any] = {}
+        if self.company is not None:
+            result["company"] = self.company
+        if self.document_type is not None:
+            result["document_type"] = self.document_type
+        if self.additional_fields:
+            result["additional_fields"] = self.additional_fields.copy()
+        return result
+
+    def matches_identity(self, company: str, document_type: str) -> bool:
+        """Match company/document type independently of extracted optional fields."""
         company_match = self.company is None or (isinstance(self.company, list) and company in self.company) or self.company == company
         doc_type_match = self.document_type is None or (isinstance(self.document_type, list) and document_type in self.document_type) or self.document_type == document_type
         return company_match and doc_type_match
+
+    def matches(
+        self,
+        company: str,
+        document_type: str,
+        optional_fields: dict[str, Any] | None = None,
+    ) -> bool:
+        """Match document identity and, when configured, extracted field values."""
+        if not self.matches_identity(company, document_type):
+            return False
+        # Additional-field criteria are optional for backward compatibility.
+        # When configured, every named field must equal its expected value.
+        extracted = optional_fields or {}
+        return all(extracted.get(name) == expected for name, expected in self.additional_fields.items())
 
 
 @dataclass
@@ -215,9 +237,14 @@ class MappingRule:
             result["set"] = set_dict
         return result
 
-    def matches(self, company: str, document_type: str) -> bool:
-        """Check if this rule matches the given company and document type."""
-        return self.match.matches(company, document_type)
+    def matches(
+        self,
+        company: str,
+        document_type: str,
+        optional_fields: dict[str, Any] | None = None,
+    ) -> bool:
+        """Check if this rule matches document identity and extracted values."""
+        return self.match.matches(company, document_type, optional_fields)
 
 
 @dataclass
@@ -507,7 +534,12 @@ class TemplateRegistry:
         """
         return self._mappings
 
-    def resolve_mapping(self, company: str, document_type: str) -> dict[str, Any]:
+    def resolve_mapping(
+        self,
+        company: str,
+        document_type: str,
+        optional_fields: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Resolve the mapping for a specific (company, document_type) tuple.
         
         Processes all rules in order. For each matching rule, applies the set fields.
@@ -524,7 +556,7 @@ class TemplateRegistry:
         result: dict[str, Any] = {}
         
         for rule in self._mappings:
-            if rule.matches(company, document_type):
+            if rule.matches(company, document_type, optional_fields):
                 # Apply set fields, overriding previous values
                 if rule.set.template is not None:
                     result["template"] = rule.set.template

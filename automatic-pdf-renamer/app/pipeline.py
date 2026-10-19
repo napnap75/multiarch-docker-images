@@ -1,16 +1,12 @@
 """Processing pipeline module for Automatic PDF Renamer.
 
-Implements the document processing workflow:
-1. Load the first page and extract text using PyMuPDF
-2. Find the emission date using regex patterns from config (ordered list, first match wins)
-3. Find company and document_type using ML, validated against predefined lists in config
-   - Unknown values must route to review
-4. Look up the (company, document_type) tuple in mappings to get template, period_format, and additional_fields
-   - Mappings use match/set structure: match criteria (company, document_type, both, or neither)
-   - Rules are processed in order, later matches override earlier ones
-   - Empty match {} matches all documents (default rule)
-5. Apply period_format (with granularity, format template, and offset) to calculate the human-readable period string
-6. Apply template key_pattern to generate the final filename
+Implements the ordered ML and deterministic processing workflow:
+1. Predict emitting_company and document_type from extracted PDF text
+2. Extract emission_date using configured date_extraction regexes only
+3. Predict applicable additional-field groups from emitting_company and document_type
+4. Extract additional-field values from the full text
+5. Predict template_name and period_format from emitting_company, document_type, and additional fields
+6. Calculate period and current_key from the final predictions and configuration
 """
 
 import logging
@@ -29,6 +25,7 @@ from .period import (
     format_period_from_emission_date,
 )
 from .sidecar import Sidecar, SidecarStatus, build_sidecar
+from .ml import LocalMLPipeline, ModelUnavailableError, AmbiguousPredictionError
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +63,7 @@ class DocumentProcessor:
         self,
         registry: TemplateRegistry,
         min_text_length: int = 10,
+        ml_pipeline: LocalMLPipeline | None = None,
     ):
         """Initialize the document processor.
 
@@ -75,6 +73,7 @@ class DocumentProcessor:
         """
         self.registry = registry
         self.min_text_length = min_text_length
+        self.ml_pipeline = ml_pipeline or LocalMLPipeline()
 
     def process(
         self,
@@ -99,109 +98,116 @@ class DocumentProcessor:
         result = ProcessingResult(success=False)
 
         try:
-            # Step 1: Extract document text
+            # Preparation: Extract document text
             if extracted_text is None:
                 extracted_text = self._extract_text(pdf_bytes)
             
             if extracted_text is None:
                 result.errors.append("Failed to extract text from PDF")
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
 
-            # Step 2: Find emission date using regex patterns from config
+            # Step 1: Predict emitting_company and document_type from the full text.
+            try:
+                initial_fields = self.ml_pipeline.extract_initial_fields(extracted_text)
+                emitting_company = initial_fields["emitting_company"][0]
+                doc_type = initial_fields["document_type"][0]
+                initial_confidence = min(value[1] for value in initial_fields.values())
+            except (ModelUnavailableError, AmbiguousPredictionError) as exc:
+                result.errors.append(str(exc))
+                result.status = SidecarStatus.PENDING.value
+                return result
+
+            # Step 2: Extract the emission date using configured regexes only.
             emission_date, date_error = self._extract_emission_date(extracted_text)
             if date_error:
                 result.errors.append(date_error)
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
-
             result.emission_date = emission_date
 
-            # Step 3: Find company and document_type using ML
-            company, doc_type, ml_errors = self._extract_company_and_type(extracted_text)
-            
-            if ml_errors:
-                result.errors.extend(ml_errors)
-                result.status = SidecarStatus.NOT_PROCESSED.value
-                return result
-
-            result.company = company
+            result.company = emitting_company
             result.document_type = doc_type
-
-            # Validate company and document_type against config lists
-            # Strict validation: unknown values route to review
-            if not self.registry.is_valid_company(company):
+            company = emitting_company  # Compatibility alias for existing key-pattern placeholders.
+            if not self.registry.is_valid_company(emitting_company):
                 result.errors.append(
-                    f"Unknown company '{company}'. "
-                    f"Valid companies: {', '.join(self.registry.get_companies()[:10])}..."
+                    f"Unknown emitting company '{emitting_company}'. "
+                    f"Valid companies: {', '.join(self.registry.get_companies()[:10])}"
                 )
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
-
             if not self.registry.is_valid_document_type(doc_type):
                 result.errors.append(
                     f"Unknown document type '{doc_type}'. "
-                    f"Valid types: {', '.join(self.registry.get_document_types()[:10])}..."
+                    f"Valid types: {', '.join(self.registry.get_document_types()[:10])}"
                 )
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
 
-            # Step 4: Resolve mapping using match/set rules
-            # Rules are processed in order, later matches override earlier ones
-            resolved = self.registry.resolve_mapping(company, doc_type)
-            
-            if not resolved:
-                result.errors.append(
-                    f"No mapping found for company='{company}', "
-                    f"document_type='{doc_type}'. Routing to review."
-                )
-                result.status = SidecarStatus.NOT_PROCESSED.value
+            # Step 3: Determine the additional-field groups from emitting_company
+            # and document_type; the period format is not predicted at this stage.
+            # Template and period format are deliberately not consumed until this
+            # first-stage field extraction has completed.
+            try:
+                additional_field_groups, groups_confidence = self.ml_pipeline.predict_additional_groups(emitting_company, doc_type)
+            except (ModelUnavailableError, AmbiguousPredictionError) as exc:
+                result.errors.append(str(exc))
+                result.status = SidecarStatus.PENDING.value
                 return result
-            
-            # Extract resolved fields
-            template_name = resolved.get("template")
-            period_format = resolved.get("period_format")
-            additional_field_groups = resolved.get("additional_fields", [])
-            
+
+            # Step 4: Extract each selected additional-field value from the full text.
+            optional_fields: dict[str, str] = {}
+            field_confidences = [initial_confidence, groups_confidence]
+            if additional_field_groups:
+                try:
+                    extracted_additional_fields = self.ml_pipeline.predict_additional_values(
+                        additional_field_groups, extracted_text
+                    )
+                except (ModelUnavailableError, AmbiguousPredictionError) as exc:
+                    result.errors.append(str(exc))
+                    result.status = SidecarStatus.PENDING.value
+                    return result
+                for field_name, (field_value, field_confidence) in extracted_additional_fields.items():
+                    optional_fields[field_name] = field_value
+                    field_confidences.append(field_confidence)
+
+            # Step 5: Predict template and final period format using all extracted fields.
+            # Configuration validates that predicted identifiers can be executed downstream.
+            try:
+                template_name, template_confidence, period_format, period_confidence = (
+                    self.ml_pipeline.predict_template_and_period_format(emitting_company, doc_type, optional_fields)
+                )
+            except (ModelUnavailableError, AmbiguousPredictionError) as exc:
+                result.errors.append(str(exc))
+                result.status = SidecarStatus.PENDING.value
+                return result
+            field_confidences.extend([template_confidence, period_confidence])
             if not template_name:
                 result.errors.append(
                     f"No template resolved for company='{company}', "
                     f"document_type='{doc_type}'. Routing to review."
                 )
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
-            
-            result.template_name = template_name
-            result.period_format = period_format
-
-            # Step 4b: Extract additional fields from additional_fields lists
-            optional_fields = {}
-            for group_name in additional_field_groups:
-                field_value, field_error = self._extract_field_value(
-                    extracted_text, group_name
-                )
-                if field_error:
-                    result.errors.append(field_error)
-                    result.status = SidecarStatus.NOT_PROCESSED.value
-                    return result
-                if field_value:
-                    optional_fields[group_name] = field_value
-
-            # Step 5: Calculate period using period_format configuration
             if not period_format:
                 result.errors.append(
                     f"No period_format resolved for company='{company}', "
                     f"document_type='{doc_type}'. Routing to review."
                 )
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
+
+            result.template_name = template_name
+            result.period_format = period_format
+
+            # Step 6: Calculate period once using the final period-format configuration.
             
             period_format_config = self.registry.get_period_format_config(period_format)
             if period_format_config is None:
                 result.errors.append(
                     f"Period format '{period_format}' not found in configuration"
                 )
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
             
             try:
@@ -212,10 +218,10 @@ class DocumentProcessor:
                 result.period = period
             except Exception as e:
                 result.errors.append(f"Failed to compute period: {e}")
-                result.status = SidecarStatus.NOT_PROCESSED.value
+                result.status = SidecarStatus.PENDING.value
                 return result
 
-            # Step 6: Generate the final key using template's key_pattern
+            # Step 6: Generate current_key from the template and final field values.
             key_pattern = self.registry.get_key_pattern(template_name)
             if key_pattern:
                 try:
@@ -233,14 +239,14 @@ class DocumentProcessor:
                     )
                 except Exception as e:
                     result.errors.append(f"Failed to format key pattern: {e}")
-                    result.status = SidecarStatus.NOT_PROCESSED.value
+                    result.status = SidecarStatus.PENDING.value
                     return result
             else:
                 # Fallback: use a simple pattern
                 final_key = f"{template_name}/{period}/{company}/{doc_type}/{emission_date}_{original_key.split('/')[-1]}"
 
             # Step 7: Build the sidecar
-            confidence = 1.0  # Will be set by ML classifier
+            confidence = min(field_confidences)
             sidecar = build_sidecar(
                 sha256=sha256,
                 original_key=original_key,
@@ -284,7 +290,7 @@ class DocumentProcessor:
         return result
 
     def _extract_text(self, pdf_bytes: bytes) -> str | None:
-        """Extract first page text from PDF.
+        """Extract text from every page of the PDF.
 
         Args:
             pdf_bytes: The PDF content as bytes.
@@ -302,39 +308,55 @@ class DocumentProcessor:
             return None
 
     def _extract_emission_date(self, text: str) -> tuple[str, str | None]:
-        """Extract emission date from text using regex patterns from config.
-
-        Uses ordered list of regex patterns. Tries them in order and stops
-        at first match.
-
-        Args:
-            text: The extracted text from the PDF.
-
-        Returns:
-            Tuple of (date_string, error_message).
-            If successful, error_message is None.
-        """
+        """Return the earliest valid date matched by configured regexes only."""
         patterns = self.registry.get_date_extraction_compiled()
-        
-        if not patterns:
-            # Fallback: try to find any date-like pattern
-            return self._extract_emission_date_fallback(text)
+        matches: list[tuple[int, int, str]] = []
+        for pattern_index, pattern in enumerate(patterns):
+            for match in pattern.finditer(text):
+                # Try captured groups first, but do not let an unrelated/context
+                # capture prevent a valid full-match date from being considered.
+                candidates = [self._reconstruct_date(match.groups()), match.group(0)]
+                normalized = next(
+                    (
+                        parsed
+                        for candidate in candidates
+                        if candidate
+                        for parsed in [self._normalize_emission_date(candidate)]
+                        if parsed
+                    ),
+                    None,
+                )
+                if normalized:
+                    matches.append((match.start(), pattern_index, normalized))
+        if not matches:
+            return "", "Could not find a valid emission date matching configured date_extraction patterns"
+        matches.sort(key=lambda item: (item[0], item[1]))
+        return matches[0][2], None
 
-        # Try each pattern in order, first match wins
-        for idx, pattern in enumerate(patterns):
-            matches = pattern.finditer(text)
-            for match in matches:
-                # Get the first date-like match
-                groups = match.groups()
-                date_str = self._reconstruct_date(groups)
-                if date_str:
-                    # Validate it looks like a date
-                    if self._is_valid_date_string(date_str):
-                        return (date_str, None)
-
-        # If no patterns matched, try fallback
-        return self._extract_emission_date_fallback(text)
-
+    def _normalize_emission_date(self, value: str) -> str | None:
+        """Normalize a regex-captured date to YYYY-MM-DD."""
+        value = " ".join(value.strip().split()).casefold()
+        french_months = {
+            "janvier": "01", "fevrier": "02", "mars": "03", "avril": "04",
+            "mai": "05", "juin": "06", "juillet": "07", "aout": "08",
+            "septembre": "09", "octobre": "10", "novembre": "11", "decembre": "12",
+        }
+        for month_name, month_number in french_months.items():
+            value = re.sub(rf"\b{month_name}\b", month_number, value)
+        formats = (
+            "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d",
+            "%Y/%m", "%Y-%m", "%m/%Y", "%m-%Y",
+            "%d %m %Y", "%Y %m %d", "%m %Y", "%Y%m%d", "%Y",
+        )
+        for date_format in formats:
+            try:
+                parsed = datetime.strptime(value, date_format)
+                if date_format == "%Y" or date_format in {"%Y/%m", "%Y-%m", "%m/%Y", "%m-%Y"}:
+                    parsed = parsed.replace(month=1 if date_format == "%Y" else parsed.month, day=1)
+                return parsed.strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+        return None
     def _reconstruct_date(self, groups: tuple[str, ...]) -> str | None:
         """Reconstruct a date string from regex match groups.
 
@@ -350,214 +372,18 @@ class DocumentProcessor:
             return " ".join(non_empty) if len(non_empty) > 1 else non_empty[0]
         return None
 
-    def _is_valid_date_string(self, date_str: str) -> bool:
-        """Check if a string looks like a valid date.
-
-        Args:
-            date_str: The string to check.
-
-        Returns:
-            True if it looks like a valid date.
-        """
-        # Simple heuristic: contains digits and possibly separators
-        if not date_str:
-            return False
-        
-        # Check for common date patterns
-        date_patterns = [
-            r"\d{4}-\d{2}-\d{2}",  # YYYY-MM-DD
-            r"\d{2}/\d{2}/\d{4}",  # DD/MM/YYYY
-            r"\d{2}-\d{2}-\d{4}",  # DD-MM-YYYY
-            r"\d{4}",  # YYYY
-            r"\d{4}/\d{2}",  # YYYY/MM
-            r"\d{2}\s+[a-zA-Z]+\s+\d{4}",  # DD Month YYYY
-        ]
-        
-        for p in date_patterns:
-            if re.match(p, date_str.strip()):
-                return True
-        
-        return False
-
-    def _extract_emission_date_fallback(self, text: str) -> tuple[str, str | None]:
-        """Fallback method for extracting emission date.
-
-        Args:
-            text: The extracted text.
-
-        Returns:
-            Tuple of (date_string, error_message).
-        """
-        # Try common date patterns
-        fallback_patterns = [
-            r"(\d{4}-\d{2}-\d{2})",  # YYYY-MM-DD
-            r"(\d{2}/\d{2}/\d{4})",  # DD/MM/YYYY
-            r"(\d{2}-\d{2}-\d{4})",  # DD-MM-YYYY
-            r"(\d{4})",  # YYYY
-        ]
-        
-        for pattern in fallback_patterns:
-            matches = re.finditer(pattern, text)
-            for match in matches:
-                date_str = match.group(1)
-                if self._is_valid_date_string(date_str):
-                    return (date_str, None)
-        
-        return ("", "Could not find emission date in text")
-
     def _extract_company_and_type(self, text: str) -> tuple[str, str, list[str]]:
-        """Extract company and document type from text using ML.
-
-        This is a placeholder for the actual ML implementation.
-        For now, it tries to match company and document type names from config.
-
-        Args:
-            text: The extracted text.
-
-        Returns:
-            Tuple of (company, document_type, errors).
-        """
-        errors = []
-        
-        # Try to find company names from the config
-        companies = self.registry.get_companies()
-        for company in companies:
-            if company.lower() in text.lower():
-                # Try to find document type
-                doc_types = self.registry.get_document_types()
-                for doc_type in doc_types:
-                    if doc_type.lower() in text.lower():
-                        return (company, doc_type, errors)
-                
-                # If no document type found, use first one as default
-                if doc_types:
-                    return (company, doc_types[0], [f"Could not determine document type, using default: {doc_types[0]}"])
-        
-        # If no company found, return unknown
-        return ("", "", ["Could not determine company and document type"])
+        """Predict emitting company and document type with local ML models."""
+        try:
+            fields = self.ml_pipeline.extract_initial_fields(text)
+            return fields["emitting_company"][0], fields["document_type"][0], []
+        except (ModelUnavailableError, AmbiguousPredictionError) as exc:
+            return "", "", [str(exc)]
 
     def _extract_field_value(self, text: str, group_name: str) -> tuple[str, str | None]:
-        """Extract a field value from text using ML from predefined list.
-
-        For each additional field group in the mapping, the value should be found
-        using ML from the predefined list of possible values for that group.
-        
-        Strict validation: if value not found in predefined list, route to review.
-
-        Args:
-            text: The extracted text.
-            group_name: The name of the additional field group.
-
-        Returns:
-            Tuple of (field_value, error_message).
-            If successful, error_message is None.
-            If no value can be determined, error_message describes the issue.
-        """
-        # Get the predefined list of values for this additional field group
-        possible_values = self.registry.get_additional_field_values(group_name)
-        
-        if not possible_values:
-            return ("", f"No predefined values for additional field group '{group_name}'")
-        
-        # Try to find a value from the predefined list in the text
-        # This is a placeholder for ML-based extraction
-        # For now, we'll do simple string matching
-        text_lower = text.lower()
-        for value in possible_values:
-            if value.lower() in text_lower:
-                return (value, None)
-        
-        # Strict validation: if no value found in predefined list, route to review
-        return ("", f"Could not determine value for additional field '{group_name}' from predefined list")
-
-    def _format_key_pattern(
-        self,
-        pattern: str,
-        **kwargs: Any,
-    ) -> str:
-        """Format a key pattern with the provided values.
-
-        Args:
-            pattern: The key pattern with placeholders.
-            **kwargs: Values to substitute into the pattern.
-
-        Returns:
-            Formatted key string.
-        """
+        """Predict an additional-field value from text using a local ML model."""
         try:
-            return pattern.format(**kwargs)
-        except KeyError as e:
-            # If a placeholder is missing, use a default value
-            missing = str(e).strip("'")
-            kwargs[missing] = "unknown"
-            return pattern.format(**kwargs)
-
-
-class DateExtractor:
-    """Specialized class for extracting dates from text using config patterns."""
-
-    def __init__(self, registry: TemplateRegistry):
-        """Initialize the date extractor.
-
-        Args:
-            registry: TemplateRegistry with date extraction patterns.
-        """
-        self.registry = registry
-        self._patterns = registry.get_date_extraction_compiled()
-
-    def extract_first_date(self, text: str) -> str | None:
-        """Extract the first date found in text using configured patterns.
-
-        Args:
-            text: The text to search.
-
-        Returns:
-            The first date string found, or None.
-        """
-        if not self._patterns:
-            return None
-
-        for pattern in self._patterns:
-            match = pattern.search(text)
-            if match:
-                groups = match.groups()
-                date_str = " ".join([g for g in groups if g])
-                if date_str.strip():
-                    return date_str.strip()
-
-        return None
-
-    def extract_all_dates(self, text: str) -> list[str]:
-        """Extract all dates found in text using configured patterns.
-
-        Args:
-            text: The text to search.
-
-        Returns:
-            List of date strings found.
-        """
-        dates = []
-        if not self._patterns:
-            return dates
-
-        for pattern in self._patterns:
-            matches = pattern.finditer(text)
-            for match in matches:
-                groups = match.groups()
-                date_str = " ".join([g for g in groups if g])
-                if date_str.strip() and date_str.strip() not in dates:
-                    dates.append(date_str.strip())
-
-        return dates
-
-
-def create_processor(registry: TemplateRegistry) -> DocumentProcessor:
-    """Factory function to create a DocumentProcessor.
-
-    Args:
-        registry: TemplateRegistry with configuration.
-
-    Returns:
-        DocumentProcessor instance.
-    """
-    return DocumentProcessor(registry)
+            value, _confidence = self.ml_pipeline.predict_additional_value(group_name, text)
+            return value, None
+        except (ModelUnavailableError, AmbiguousPredictionError) as exc:
+            return "", str(exc)

@@ -4,6 +4,8 @@ import json
 import logging
 import os
 import re
+import threading
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,7 +15,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from app.config import TemplateRegistry, load_templates
 from app.db import FileRecord, SQLiteFileRepository
 from app.period import format_period_from_emission_date
+from app.pipeline import DocumentProcessor
 from app.storage import StorageBackend
+from app.model_manager import list_models, train_all_models
+from app.ml import LocalMLPipeline
 
 from .deps import get_current_user
 from .models import (
@@ -93,7 +98,10 @@ def _as_file_item(file_id: str, metadata: dict[str, Any]) -> FileListItem:
 @router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     """Service health checkpoint."""
-    return HealthResponse(status="ok", app="automatic-pdf-renamer")
+    logger.debug("API GET /health: health check requested")
+    result = HealthResponse(status="ok", app="automatic-pdf-renamer")
+    logger.debug("API GET /health: status=%s", result.status)
+    return result
 
 
 @router.get("/files", response_model=list[FileListItem])
@@ -116,6 +124,8 @@ async def list_files(
     page: int = 1,
 ) -> list[FileListItem]:
     """List documents and report filtered and global counts in response headers."""
+    logger.debug("API GET /files: user=%s page=%s sort_by=%s sort_order=%s", (current_user or {}).get("username", "anonymous"), page, sort_by, sort_order)
+    logger.debug("API GET /files: active filters=%s", {key: value for key, value in {"status": status, "template": template, "period_format": period_format, "q": q, "current_key": current_key, "emitting_company": emitting_company, "document_type": document_type, "period": period, "confidence": confidence, "updated_at": updated_at}.items() if value is not None})
     storage = _storage(request)
     db = _db(request)
     filters = {
@@ -149,6 +159,7 @@ async def list_files(
     )
     response.headers["X-Total-Count"] = str(db.count_files(**filters))
     response.headers["X-Status-Counts"] = json.dumps(db.get_status_counts())
+    logger.debug("API GET /files: returning %s records; filtered_total=%s; status_counts=%s", len(records), response.headers["X-Total-Count"], response.headers["X-Status-Counts"])
 
     return [
         FileListItem(
@@ -176,6 +187,7 @@ async def get_file(
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> FileDetail:
     """Return metadata and extracted text for a single file."""
+    logger.debug("API GET /files/%s: loading document metadata", file_id)
     storage = _storage(request)
     db = _db(request)
     record = db.get_by_id(file_id)
@@ -234,7 +246,7 @@ async def get_file(
         "history": sidecar_metadata.get("events", []),
     }
     item = _as_file_item(record.id, metadata)
-    return FileDetail(
+    result = FileDetail(
         id=item.id,
         status=item.status,
         current_key=item.current_key,
@@ -253,6 +265,148 @@ async def get_file(
         optional_fields=record.optional_fields,
         history=metadata["history"] if isinstance(metadata["history"], list) else [],
     )
+    logger.debug("API GET /files/%s: loaded status=%s current_key=%s optional_field_count=%s", file_id, result.status, result.current_key, len(result.optional_fields or {}))
+    return result
+
+
+@router.post("/files/{file_id}/suggestions")
+async def get_document_model_suggestions(
+    request: Request,
+    file_id: str,
+    payload: dict[str, Any],
+    current_user: dict[str, str] | None = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Return confidence-gated model suggestions without delaying document rendering."""
+    db = _db(request)
+    record = db.get_by_id(file_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"File '{file_id}' not found")
+
+    registry = _registry(request)
+    threshold = float(os.environ.get("CONFIDENCE_THRESHOLD", "0.8"))
+    ml = LocalMLPipeline(confidence_threshold=threshold)
+    text = record.extracted_text or ""
+    company = str(payload.get("emitting_company") or record.emitting_company or "").strip()
+    document_type = str(payload.get("document_type") or record.document_type or "").strip()
+    current_fields = dict(record.optional_fields or {})
+    submitted_fields = payload.get("optional_fields")
+    if isinstance(submitted_fields, dict):
+        current_fields.update({
+            str(name): str(value)
+            for name, value in submitted_fields.items()
+            if value is not None and str(value).strip()
+        })
+    suggestions, field_decisions = ml.suggest_document_fields(
+        text,
+        company,
+        document_type,
+        current_fields,
+        registry.get_additional_fields(),
+    )
+    field_decisions = {
+        **field_decisions,
+        "emission_date": "unavailable: no valid configured date or stored date",
+        "period": "skipped: missing date or period format",
+        "current_key": "skipped: missing template or key pattern",
+    }
+
+    # Recommend the first valid date matched in document order by configured regexes.
+    # This is deterministic content extraction, not an ML prediction.
+    try:
+        recommended_date, date_error = DocumentProcessor(
+            registry, ml_pipeline=ml
+        )._extract_emission_date(text)
+        if not recommended_date:
+            # The stored date was originally produced by the same configured
+            # content-extraction pipeline. Keep it available as a recommendation
+            # when the current extraction configuration cannot reproduce it.
+            stored_date = str(getattr(record, "emission_date", "") or "").strip()
+            if stored_date:
+                recommended_date = stored_date
+                field_decisions["emission_date"] = "content: using stored date"
+        if recommended_date:
+            suggestions["emission_date"] = {
+                "value": recommended_date,
+                "source": "content",
+            }
+            field_decisions["emission_date"] = f"content: {recommended_date}"
+        elif date_error:
+            field_decisions["emission_date"] = f"unavailable: {date_error}"
+    except Exception as exc:
+        stored_date = str(getattr(record, "emission_date", "") or "").strip()
+        if stored_date:
+            suggestions["emission_date"] = {
+                "value": stored_date,
+                "source": "content",
+            }
+            field_decisions["emission_date"] = f"content: using stored date {stored_date}"
+        else:
+            field_decisions["emission_date"] = f"unavailable: extraction failed ({exc})"
+
+    derived_template = str(payload.get("template_name") or record.template_name or "")
+    derived_format = str(payload.get("period_format") or record.period_format or "")
+
+    try:
+        raw_date = str(payload.get("emission_date") or record.emission_date or "")
+        emission_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+        period_config = registry.get_period_format_config(derived_format)
+        if period_config is not None:
+            calculated_period = format_period_from_emission_date(emission_date, period_config.to_dict())
+            suggestions["period"] = {
+                "value": calculated_period,
+                "source": "derived",
+            }
+            field_decisions["period"] = f"derived: {calculated_period}"
+            key_pattern = registry.get_key_pattern(derived_template)
+            if key_pattern:
+                optional_fields = payload.get("optional_fields")
+                if not isinstance(optional_fields, dict):
+                    optional_fields = record.optional_fields or {}
+                pattern_values = dict(optional_fields)
+                pattern_values.update({
+                    "company": company,
+                    "document_type": document_type,
+                    "emission_date": emission_date.isoformat(),
+                    "period": calculated_period,
+                    "period_format": derived_format,
+                    "template_name": derived_template,
+                    "emitting_company": company,
+                    "additional_fields": ", ".join(str(value) for value in optional_fields.values()),
+                    "original_filename": (record.original_key or "").rsplit("/", 1)[-1],
+                })
+                for _ in range(20):
+                    try:
+                        calculated_key = key_pattern.format(**pattern_values).strip("/")
+                        break
+                    except KeyError as error:
+                        pattern_values[str(error.args[0])] = "unknown"
+                else:
+                    calculated_key = ""
+                if calculated_key:
+                    if not calculated_key.startswith("files/"):
+                        calculated_key = f"files/{calculated_key}"
+                    if not calculated_key.lower().endswith(".pdf"):
+                        calculated_key = f"{calculated_key}.pdf"
+                    suggestions["current_key"] = {
+                        "value": calculated_key,
+                        "source": "derived",
+                    }
+                    field_decisions["current_key"] = f"derived: {calculated_key}"
+                else:
+                    field_decisions["current_key"] = "unavailable: key pattern could not be formatted"
+            else:
+                field_decisions["current_key"] = "skipped: template has no key pattern"
+        else:
+            field_decisions["period"] = f"unavailable: unknown period format {derived_format!r}"
+    except (TypeError, ValueError) as exc:
+        field_decisions["period"] = f"unavailable: {exc}"
+
+    logger.debug(
+        "API POST /files/%s/suggestions decisions=%s",
+        file_id,
+        field_decisions,
+    )
+    return {"suggestions": suggestions, "confidence_threshold": threshold}
 
 
 @router.get("/files/{file_id}/pdf")
@@ -262,6 +416,7 @@ async def get_file_pdf(
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> Response:
     """Stream a PDF by key from storage when present."""
+    logger.debug("API GET /files/%s/pdf: resolving PDF storage key", file_id)
     storage = _storage(request)
     db = _db(request)
     record = db.get_by_id(file_id)
@@ -301,6 +456,7 @@ async def edit_file(
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> FileDetail:
     """Recalculate and persist user-edited document metadata and its storage key."""
+    logger.debug("API POST /files/%s/edit: template=%s period_format=%s company=%s document_type=%s optional_fields=%s", file_id, payload.template_name, payload.period_format, payload.emitting_company, payload.document_type, sorted((payload.optional_fields or {}).keys()))
     storage = _storage(request)
     db = _db(request)
     registry = _registry(request)
@@ -545,12 +701,13 @@ async def validate_file(
     )
 
 
-@router.get("/api/document-options")
+@router.get("/document-options")
 async def document_edit_options(
     request: Request,
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Return configured templates and existing document values for edit suggestions."""
+    logger.debug("API GET /document-options: loading template and field options")
     registry = _registry(request)
     db = _db(request)
     records = db.list_files(page_size=10000)
@@ -606,7 +763,7 @@ async def document_edit_options(
     }
 
 
-@router.get("/api/config")
+@router.get("/config")
 async def get_config(
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> dict[str, str]:
@@ -618,7 +775,7 @@ async def get_config(
         raise HTTPException(status_code=500, detail="Unable to read the configured template file.") from error
 
 
-@router.put("/api/config")
+@router.put("/config")
 async def update_config(
     payload: ConfigUpdateRequest,
     request: Request,
@@ -663,37 +820,81 @@ async def list_templates(
     return items
 
 
-@router.post("/retrain")
-async def start_retrain(
+@router.get("/models")
+async def get_models(
+    current_user: dict[str, str] | None = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Report whether each model in the current complete set is available."""
+    result = list_models()
+    logger.debug("API GET /models: complete=%s", result.get("complete"))
+    return result
+
+
+@router.post("/models/train", status_code=202)
+async def train_models(
     request: Request,
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Start a retraining job. The current implementation records a job stub and returns its status."""
-    request.app.state.last_retrain_job = {
-        "job_id": "retrain-1",
-        "status": "queued",
-        "message": "Retrain job accepted. Replace with a subprocess-backed job in production.",
+    """Start one background job that replaces the complete model set."""
+    jobs = getattr(request.app.state, "model_training_jobs", None)
+    if jobs is None:
+        jobs = {}
+        request.app.state.model_training_jobs = jobs
+    if any(job.get("status") == "running" for job in jobs.values()):
+        raise HTTPException(status_code=409, detail="A full model retraining job is already running.")
+
+    records = _db(request).list_files(status="validated", page=1, page_size=100000)
+    job_id = uuid.uuid4().hex
+    jobs[job_id] = {
+        "job_id": job_id,
+        "status": "running",
+        "progress": 0,
+        "stage": "Starting model training",
+        "message": "Preparing validated documents",
     }
-    return request.app.state.last_retrain_job
+
+    def update_progress(progress: int, message: str) -> None:
+        jobs[job_id].update({
+            "progress": max(0, min(100, int(progress))),
+            "stage": message,
+            "message": message,
+        })
+
+    def run_training() -> None:
+        try:
+            result = train_all_models(records, progress_callback=update_progress)
+            jobs[job_id].update({
+                "status": "completed",
+                "progress": 100,
+                "stage": "Completed",
+                "message": "All models have been retrained and replaced.",
+                "result": result,
+            })
+        except Exception as error:
+            logger.exception("Full model retraining job %s failed", job_id)
+            jobs[job_id].update({
+                "status": "failed",
+                "stage": "Failed",
+                "message": str(error),
+            })
+
+    threading.Thread(target=run_training, name=f"model-training-{job_id[:8]}", daemon=True).start()
+    logger.debug("API POST /models/train: started full retraining job %s", job_id)
+    return {"job_id": job_id, "status": "running"}
 
 
-@router.get("/retrain/status")
-async def get_retrain_status(
+@router.get("/jobs/{job_id}")
+async def get_job_status(
     request: Request,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Read the active retraining status."""
-    job = getattr(request.app.state, "last_retrain_job", {"job_id": "retrain-1", "status": "idle"})
-    return job
-
-
-@router.post("/retrain/{job_id}/activate")
-async def activate_model(
     job_id: str,
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Activate a completed training model."""
-    return {"job_id": job_id, "status": "activated", "message": "Model activation accepted."}
+    """Return current progress for a background model-training job."""
+    jobs = getattr(request.app.state, "model_training_jobs", {})
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return dict(job)
 
 
 @router.get("/consistency")
@@ -702,6 +903,7 @@ async def list_consistency_flags(
     current_user: dict[str, str] | None = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Return consistency anomalies. In the current implementation, this is a lightweight placeholder."""
+    logger.debug("API GET /consistency: scanning storage and database consistency")
     storage = _storage(request)
     db = _db(request)
     anomalies: list[dict[str, Any]] = []
@@ -741,120 +943,3 @@ async def rebuild_consistency(
         "count": len(rebuilt),
     }
     return request.app.state.last_rebuild
-
-
-@router.get("/api/health")
-async def api_health() -> HealthResponse:
-    """Alias for /health."""
-    return await health()
-
-
-@router.get("/api/files", response_model=list[FileListItem])
-async def list_files_api(
-    request: Request,
-    response: Response,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-    status: str | None = None,
-    template: str | None = None,
-    period_format: str | None = None,
-    q: str | None = None,
-    current_key: str | None = None,
-    emitting_company: str | None = None,
-    document_type: str | None = None,
-    period: str | None = None,
-    confidence: str | None = None,
-    updated_at: str | None = None,
-    sort_by: str = "updated_at",
-    sort_order: str = "desc",
-    page: int = 1,
-) -> list[FileListItem]:
-    """Compatibility alias for /files."""
-    return await list_files(
-        request=request,
-        response=response,
-        current_user=current_user,
-        status=status,
-        template=template,
-        period_format=period_format,
-        q=q,
-        current_key=current_key,
-        emitting_company=emitting_company,
-        document_type=document_type,
-        period=period,
-        confidence=confidence,
-        updated_at=updated_at,
-        sort_by=sort_by,
-        sort_order=sort_order,
-        page=page,
-    )
-
-
-@router.get("/api/files/{file_id}", response_model=FileDetail)
-async def get_file_api(
-    request: Request,
-    file_id: str,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> FileDetail:
-    """Compatibility alias for /files/{file_id}."""
-    return await get_file(request=request, file_id=file_id, current_user=current_user)
-
-
-@router.post("/api/files/{file_id}/edit", response_model=FileDetail)
-async def edit_file_api(
-    request: Request,
-    file_id: str,
-    payload: DocumentEditRequest,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> FileDetail:
-    """Compatibility alias for POST /files/{file_id}/edit."""
-    return await edit_file(
-        request=request,
-        file_id=file_id,
-        payload=payload,
-        current_user=current_user,
-    )
-
-
-@router.get("/api/templates")
-async def list_templates_api(
-    request: Request,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> list[dict[str, Any]]:
-    """Compatibility alias for /templates."""
-    return await list_templates(request=request, current_user=current_user)
-
-
-@router.post("/api/retrain")
-async def start_retrain_api(
-    request: Request,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Compatibility alias for /retrain."""
-    return await start_retrain(request=request, current_user=current_user)
-
-
-@router.get("/api/retrain/status")
-async def get_retrain_status_api(
-    request: Request,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Compatibility alias for /retrain/status."""
-    return await get_retrain_status(request=request, current_user=current_user)
-
-
-@router.get("/api/consistency")
-async def list_consistency_flags_api(
-    request: Request,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> list[dict[str, Any]]:
-    """Compatibility alias for /consistency."""
-    return await list_consistency_flags(request=request, current_user=current_user)
-
-
-@router.post("/api/consistency/rebuild")
-async def rebuild_consistency_api(
-    request: Request,
-    current_user: dict[str, str] | None = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Compatibility alias for /consistency/rebuild."""
-    return await rebuild_consistency(request=request, current_user=current_user)

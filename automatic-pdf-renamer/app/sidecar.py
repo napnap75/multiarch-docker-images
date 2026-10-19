@@ -20,6 +20,7 @@ class SidecarStatus(Enum):
     """File processing status (PRD section 4)."""
 
     NOT_PROCESSED = "not processed"
+    PENDING = "pending"
     PROCESSED = "processed"
     VALIDATED = "validated"
 

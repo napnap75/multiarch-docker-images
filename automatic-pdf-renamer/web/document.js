@@ -4,6 +4,7 @@ const content = document.getElementById('document-content');
 const technicalDataList = document.getElementById('technical-data');
 const additionalSection = document.getElementById('additional-section');
 const additionalFields = document.getElementById('additional-fields');
+const additionalFieldSuggestions = document.getElementById('additional-field-suggestions');
 const addAdditionalFieldButton = document.getElementById('add-additional-field');
 const historyList = document.getElementById('document-history');
 const extractedText = document.getElementById('extracted-text');
@@ -18,6 +19,7 @@ const periodFormatSelect = document.getElementById('edit-period-format');
 const companyInput = document.getElementById('edit-company');
 const documentTypeInput = document.getElementById('edit-document-type');
 const emissionDateInput = document.getElementById('edit-emission-date');
+const emissionDateSuggestion = document.getElementById('suggestion-emission-date');
 const periodPreview = document.getElementById('period-preview');
 const keyPreview = document.getElementById('current-key-preview');
 const saveButton = document.getElementById('save-document-button');
@@ -83,7 +85,7 @@ const loadDocumentNavigation = async (fileId) => {
     while (true) {
       const params = new URLSearchParams(filters);
       params.set('page', String(page));
-      const response = await fetch(`/api/files?${params.toString()}`);
+      const response = await fetch(`/files?${params.toString()}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const items = await response.json();
       total = Number(response.headers.get('X-Total-Count')) || total;
@@ -96,7 +98,7 @@ const loadDocumentNavigation = async (fileId) => {
         if (!following && position < total) {
           const nextParams = new URLSearchParams(filters);
           nextParams.set('page', String(page + 1));
-          const nextResponse = await fetch(`/api/files?${nextParams.toString()}`);
+          const nextResponse = await fetch(`/files?${nextParams.toString()}`);
           if (!nextResponse.ok) throw new Error(`HTTP ${nextResponse.status}`);
           following = (await nextResponse.json())[0] || null;
         }
@@ -190,6 +192,7 @@ const buildAdditionalFieldRow = (label = '', value = '', suggestions = {}) => {
   removeButton.textContent = 'Remove';
   removeButton.addEventListener('click', () => {
     row.remove();
+    scheduleModelSuggestions();
     if (!additionalFields.querySelector('.additional-field-row')) {
       const empty = document.createElement('p');
       empty.className = 'additional-field-empty';
@@ -335,7 +338,6 @@ const renderDocument = (documentData, fileId) => {
 
   const technicalMetadata = [
     ['Status', documentData.status],
-    ['Confidence', documentData.confidence],
     ['Original key', documentData.original_key],
     ['Current key', documentData.current_key],
     ['SHA-256', documentData.id],
@@ -352,6 +354,219 @@ const renderDocument = (documentData, fileId) => {
   openPdf.href = pdfUrl;
   content.hidden = false;
   statusMessage.textContent = '';
+};
+
+const suggestionElements = {
+  template_name: document.getElementById('suggestion-template_name'),
+  period_format: document.getElementById('suggestion-period_format'),
+  emitting_company: document.getElementById('suggestion-emitting_company'),
+  document_type: document.getElementById('suggestion-document_type'),
+};
+
+let suggestionRequestSequence = 0;
+let suggestionTimer = null;
+let suggestionAbortController = null;
+
+const hideModelSuggestions = () => {
+  Object.values(suggestionElements).forEach((element) => {
+    if (element) {
+      element.setAttribute('aria-hidden', 'true');
+      element.replaceChildren();
+    }
+  });
+  if (additionalFieldSuggestions) {
+    additionalFieldSuggestions.setAttribute('aria-hidden', 'true');
+    additionalFieldSuggestions.replaceChildren();
+  }
+};
+
+const renderAdditionalFieldSuggestions = (suggestion) => {
+  if (!additionalFieldSuggestions) return;
+  additionalFieldSuggestions.replaceChildren();
+  const predictedFields = suggestion?.value;
+  if (!predictedFields || typeof predictedFields !== 'object' || Array.isArray(predictedFields)) {
+    additionalFieldSuggestions.setAttribute('aria-hidden', 'true');
+    return;
+  }
+
+  const currentFields = getAdditionalFieldEntries();
+  Object.entries(predictedFields).forEach(([fieldName, rawValue]) => {
+    const value = String(rawValue ?? '').trim();
+    if (!fieldName.trim() || !value || currentFields[fieldName] === value) return;
+
+    const proposal = document.createElement('div');
+    proposal.className = 'additional-field-proposal';
+    const confidence = suggestion.confidence?.[fieldName];
+    const description = document.createElement('span');
+    const confidenceLabel = Number.isFinite(confidence)
+      ? ` (${Math.round(confidence * 100)}% confidence)`
+      : '';
+    const sourceLabel = suggestion.source === 'configured' ? 'Configured value found' : 'Model suggestion';
+    description.textContent = `${sourceLabel}: ${fieldName}: ${value}${confidenceLabel}`;
+    description.title = description.textContent;
+
+    const applyButton = document.createElement('button');
+    applyButton.type = 'button';
+    applyButton.textContent = Object.hasOwn(currentFields, fieldName) ? 'Use suggestion' : 'Add field';
+    applyButton.setAttribute('aria-label', `Apply suggested value for ${fieldName}`);
+    applyButton.addEventListener('click', () => {
+      const existingRow = [...additionalFields.querySelectorAll('.additional-field-row')]
+        .find((row) => row.querySelector('.additional-field-label')?.value === fieldName);
+      if (existingRow) {
+        const valueSelect = existingRow.querySelector('.additional-field-value');
+        if (![...valueSelect.options].some((option) => option.value === value)) {
+          const option = document.createElement('option');
+          option.value = value;
+          option.textContent = value;
+          valueSelect.append(option);
+        }
+        valueSelect.value = value;
+      } else {
+        additionalFields.querySelector('.additional-field-empty')?.remove();
+        additionalFields.append(buildAdditionalFieldRow(fieldName, value, fieldSuggestionState));
+      }
+      updateSaveButtonState();
+      scheduleModelSuggestions();
+    });
+    proposal.append(description, ' ', applyButton);
+    additionalFieldSuggestions.append(proposal);
+  });
+  additionalFieldSuggestions.setAttribute(
+    'aria-hidden',
+    String(!additionalFieldSuggestions.childElementCount),
+  );
+};
+
+const renderModelSuggestion = (fieldName, suggestion) => {
+  const container = suggestionElements[fieldName];
+  if (!container) return;
+  container.replaceChildren();
+  if (!suggestion || typeof suggestion.value !== 'string' || !suggestion.value.trim()) {
+    container.setAttribute('aria-hidden', 'true');
+    return;
+  }
+
+  const prefix = document.createElement('span');
+  prefix.textContent = `Model suggestion: ${suggestion.value}`;
+  prefix.title = prefix.textContent;
+  container.append(prefix);
+
+  const controls = {
+    template_name: templateSelect,
+    period_format: periodFormatSelect,
+    emitting_company: companyInput,
+    document_type: documentTypeInput,
+  };
+  const control = controls[fieldName];
+  if (control) {
+    const applyButton = document.createElement('button');
+    applyButton.type = 'button';
+    applyButton.textContent = 'Use suggestion';
+    applyButton.setAttribute('aria-label', `Use model suggestion for ${fieldName.replaceAll('_', ' ')}`);
+    applyButton.addEventListener('click', () => {
+      const options = [...control.options].map((option) => option.value);
+      if (control.tagName === 'SELECT' && !options.includes(suggestion.value)) {
+        const option = document.createElement('option');
+        option.value = suggestion.value;
+        option.textContent = suggestion.value;
+        control.append(option);
+      }
+      control.value = suggestion.value;
+      control.dispatchEvent(new Event('change', { bubbles: true }));
+      updateSaveButtonState();
+      scheduleModelSuggestions();
+    });
+    container.append(' ', applyButton);
+  }
+  container.setAttribute('aria-hidden', 'false');
+};
+
+const renderEmissionDateSuggestion = (suggestion) => {
+  if (!emissionDateSuggestion) return;
+  emissionDateSuggestion.replaceChildren();
+  if (!suggestion || typeof suggestion.value !== 'string' || !suggestion.value.trim()) {
+    emissionDateSuggestion.setAttribute('aria-hidden', 'true');
+    return;
+  }
+
+  const recommendedDate = formatEmissionDateInput(suggestion.value);
+  const label = document.createElement('span');
+  label.textContent = `Content recommendation: ${recommendedDate}`;
+  label.title = label.textContent;
+  emissionDateSuggestion.append(label);
+
+  const applyButton = document.createElement('button');
+  applyButton.type = 'button';
+  applyButton.textContent = 'Use recommendation';
+  applyButton.setAttribute('aria-label', 'Use recommended emission date extracted from document content');
+  applyButton.addEventListener('click', () => {
+    emissionDateInput.value = recommendedDate;
+    emissionDateInput.dispatchEvent(new Event('input', { bubbles: true }));
+    emissionDateInput.dispatchEvent(new Event('change', { bubbles: true }));
+    updateSaveButtonState();
+    scheduleModelSuggestions();
+  });
+  emissionDateSuggestion.append(' ', applyButton);
+  emissionDateSuggestion.setAttribute('aria-hidden', 'false');
+};
+
+const scheduleModelSuggestions = () => {
+  if (!currentFileId) return;
+  hideModelSuggestions();
+  suggestionRequestSequence += 1;
+  if (suggestionAbortController) suggestionAbortController.abort();
+  if (suggestionTimer) clearTimeout(suggestionTimer);
+  suggestionTimer = setTimeout(() => {
+    fetchModelSuggestions();
+  }, 250);
+};
+
+const fetchModelSuggestions = async () => {
+  if (!currentFileId) return;
+  const sequence = ++suggestionRequestSequence;
+  if (suggestionAbortController) suggestionAbortController.abort();
+  suggestionAbortController = new AbortController();
+
+  const payload = {
+    template_name: templateSelect.value,
+    period_format: periodFormatSelect.value,
+    emitting_company: companyInput.value.trim(),
+    document_type: documentTypeInput.value.trim(),
+    emission_date: parseEmissionDateInput(emissionDateInput.value),
+    optional_fields: getAdditionalFieldEntries(),
+  };
+  try {
+    const response = await fetch(`/files/${encodeURIComponent(currentFileId)}/suggestions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: suggestionAbortController.signal,
+    });
+    if (!response.ok) {
+      console.debug(
+        `Document suggestions request failed (HTTP ${response.status}) for file ${currentFileId}.`,
+      );
+      return;
+    }
+    const result = await response.json();
+    if (sequence !== suggestionRequestSequence || !result || !result.suggestions) return;
+    if (!result.suggestions.emission_date) {
+      console.debug(
+        `No emission date recommendation returned for file ${currentFileId}; keeping any stored content-extracted date visible.`,
+      );
+    }
+    Object.keys(suggestionElements).forEach((fieldName) => {
+      renderModelSuggestion(fieldName, result.suggestions[fieldName]);
+    });
+    renderAdditionalFieldSuggestions(result.suggestions.optional_fields);
+    renderEmissionDateSuggestion(result.suggestions.emission_date);
+    const calculatedPeriod = result.suggestions.period?.value;
+    const calculatedKey = result.suggestions.current_key?.value;
+    periodPreview.textContent = calculatedPeriod || '—';
+    keyPreview.textContent = calculatedKey || '—';
+  } catch (error) {
+    if (error.name !== 'AbortError') console.debug('Document model suggestions are unavailable.', error);
+  }
 };
 
 const saveDocument = async (event) => {
@@ -372,7 +587,7 @@ const saveDocument = async (event) => {
     optional_fields: getAdditionalFieldEntries(),
   };
   try {
-    const response = await fetch(`/api/files/${encodeURIComponent(currentFileId)}/edit`, {
+    const response = await fetch(`/files/${encodeURIComponent(currentFileId)}/edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -380,6 +595,7 @@ const saveDocument = async (event) => {
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
     renderDocument(result, currentFileId);
+    scheduleModelSuggestions();
     editStatus.textContent = 'Changes saved. The document is validated.';
     updateSaveButtonState();
     await loadDocumentNavigation(currentFileId);
@@ -397,13 +613,26 @@ if (addAdditionalFieldButton) {
     if (emptyState) emptyState.remove();
     additionalFields.append(buildAdditionalFieldRow('', '', fieldSuggestionState));
     updateSaveButtonState();
+    scheduleModelSuggestions();
   });
 }
 
-editForm.addEventListener('input', updateSaveButtonState);
-editForm.addEventListener('change', updateSaveButtonState);
-additionalFields.addEventListener('input', updateSaveButtonState);
-additionalFields.addEventListener('change', updateSaveButtonState);
+editForm.addEventListener('input', () => {
+  updateSaveButtonState();
+  scheduleModelSuggestions();
+});
+editForm.addEventListener('change', () => {
+  updateSaveButtonState();
+  scheduleModelSuggestions();
+});
+additionalFields.addEventListener('input', () => {
+  updateSaveButtonState();
+  scheduleModelSuggestions();
+});
+additionalFields.addEventListener('change', () => {
+  updateSaveButtonState();
+  scheduleModelSuggestions();
+});
 
 const loadDocument = async () => {
   const fileId = new URLSearchParams(window.location.search).get('id');
@@ -415,8 +644,8 @@ const loadDocument = async () => {
 
   try {
     const [documentResponse, optionsResponse] = await Promise.all([
-      fetch(`/api/files/${encodeURIComponent(fileId)}`),
-      fetch('/api/document-options'),
+      fetch(`/files/${encodeURIComponent(fileId)}`),
+      fetch('/document-options'),
     ]);
     if (!documentResponse.ok) throw new Error(`HTTP ${documentResponse.status}`);
     if (!optionsResponse.ok) throw new Error(`Unable to load edit options (HTTP ${optionsResponse.status})`);
@@ -434,7 +663,15 @@ const loadDocument = async () => {
     setSelectOptions(documentTypeInput, options.document_types || [], documentData.document_type);
     renderDocument(documentData, fileId);
     renderAdditionalFields(documentData.optional_fields || {}, fieldSuggestionState);
+    // Show the date already extracted during ingestion immediately; the async
+    // suggestions response will replace it if a fresh regex extraction succeeds.
+    renderEmissionDateSuggestion(
+      documentData.emission_date
+        ? { value: documentData.emission_date, source: 'content' }
+        : null,
+    );
     updateSaveButtonState();
+    scheduleModelSuggestions();
     await loadDocumentNavigation(fileId);
   } catch (error) {
     title.textContent = 'Unable to load document';

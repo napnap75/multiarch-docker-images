@@ -28,6 +28,19 @@
         </header>
 
         <section class="maintenance-actions" aria-label="Maintenance actions">
+          <article class="maintenance-action" aria-labelledby="models-heading">
+            <div>
+              <h3 id="models-heading">Machine learning models</h3>
+              <p>Retrain the complete model set from validated documents.</p>
+              <p id="models-inventory-status" class="action-status" role="status" aria-live="polite"></p>
+            </div>
+            <button id="train-model-button" class="secondary-btn" type="button">Retrain all models</button>
+            <div id="model-training-operation" class="maintenance-operation" hidden>
+              <progress id="model-training-progress" max="100" value="0" aria-label="Model retraining progress"></progress>
+              <p id="models-status" class="action-status" role="status" aria-live="polite">Waiting to start…</p>
+            </div>
+          </article>
+
           <article class="maintenance-action">
             <div>
               <h3>Rebuild database</h3>

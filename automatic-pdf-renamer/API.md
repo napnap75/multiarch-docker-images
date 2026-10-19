@@ -1,7 +1,7 @@
 # API — Automatic PDF Renamer
 
 Version: 1.0 (design specification)  
-Base path: `/api/v1`  
+Base path: `/`  
 Backend: FastAPI; storage: Garage S3-compatible bucket; metadata source of truth: per-file sidecars; query index: SQLite.
 
 This document defines the HTTP API consumed by the local web dashboard and the operational API used to observe ingestion, recover the index, and run maintenance jobs. The API is a local, same-origin interface; it does not expose the S3 credentials or bypass the sidecar-as-source-of-truth rule.
@@ -9,10 +9,10 @@ This document defines the HTTP API consumed by the local web dashboard and the o
 ## 1. API principles
 
 - **Nextcloud/S3 remains the upload interface.** A user uploads a PDF to the configured `inbox/` prefix through Nextcloud or an S3 client. The API does not accept PDF uploads in v1.
-- **Ingestion is server-side and automatic.** The poller discovers stable PDF objects in `inbox/`, extracts text from every page, applies deterministic rules, validates fields, and either renames the file or moves it to `pending/`.
+- **Ingestion is server-side and automatic.** The poller discovers stable PDF objects in `inbox/`, extracts text from every page, follows the ordered local-ML and configured-regex pipeline in Section 10, validates fields, and either renames the file or moves it to `pending/`.
 - **Sidecars are authoritative.** For a mutation, persist the sidecar first, then synchronize SQLite. SQLite is used for list/search and consistency diagnostics, and can be rebuilt from sidecars.
 - **Business statuses are exactly** `pending`, `processed`, and `validated`. Technical job state is separate and must not be represented as a business status.
-- **The initial release is deterministic.** API responses may include a nullable confidence/model section for forward compatibility, but the rules-only release must not fabricate ML scores.
+- **Classification is local and model-driven.** Company, document type, additional fields, template, and period format are predicted by local models. Emission dates are extracted only by configured regular expressions; period and storage key are calculated deterministically. Unavailable or low-confidence required predictions are routed to review.
 - **No rename undo endpoint exists.** Renames are recorded for audit, not reversed by a user-facing API.
 - The API and processing pipeline remain offline except for the configured local Garage endpoint.
 
@@ -73,12 +73,9 @@ This convention applies to HTTP error responses from every endpoint. Successful 
 | GET | `/ingestion/status` | Inspect poller status and recent activity |
 | GET | `/config` | Retrieve the current JSONC configuration file |
 | PUT | `/config` | Validate and save a modified JSONC configuration file |
-| GET | `/models` | Post-v1: list model versions |
-| POST | `/retrain` | Post-v1: start local model training |
-| POST | `/retrain/{job_id}/activate` | Post-v1: activate a trained model |
-| POST | `/retrain/{job_id}/discard` | Post-v1: discard a candidate model |
-
-The endpoints in the models/retraining section are post-v1 capabilities. They may be omitted from the first deterministic release without affecting the core API.
+| GET | `/models` | Report whether the current complete model set is available |
+| POST | `/models/train` | Start full model retraining and replace the active set on success |
+The model-maintenance API is described in [Section 10](#10-local-model-maintenance).
 
 ## 4. Configuration file
 
@@ -191,7 +188,7 @@ Query parameters:
 | `sort_by` | string | Allowlisted: `emission_date`, `period`, `current_key`, `status`, `template_name`, `document_type`, `emitting_company`, `created_at`, `updated_at` |
 | `sort_order` | string | `asc` or `desc` |
 
-Example: `GET /api/v1/files?status=pending&q=EDF&page=1&page_size=25`
+Example: `GET /files?status=pending&q=EDF&page=1&page_size=25`
 
 Response:
 
@@ -288,7 +285,7 @@ All mutation endpoints must validate the requested state, recompute the period f
 ```
 
 - `template_name`, `emission_date`, `emitting_company`, and `document_type` must conform to the selected template's schema.
-- The server selects the applicable period rules from the configured mapping for the company and document type, calculates `period` from `emission_date`, and never accepts a client-supplied period or period format.
+- The server validates the model-selected template and final `period_format` against configuration, calculates `period` from `emission_date` exactly once, and never accepts a client-supplied derived `period` or `current_key` as authoritative.
 - `optional_fields` may contain only fields declared by the selected template. Empty optional fields are allowed where the schema permits them.
 - The server must never trust a target key supplied by the browser; it calculates the target key itself.
 
@@ -411,17 +408,53 @@ Returns job status for consistency scan, SQLite rebuild, or other asynchronous m
 
 Allowed job statuses are technical job states such as `queued`, `running`, `succeeded`, and `failed`; these are not document business statuses. This generic endpoint reports maintenance and retraining jobs. If the process restarts and in-memory job state is lost, the API should report the job as interrupted/unknown and use persisted status files or database state where available.
 
-## 10. Post-v1 model endpoints
+## 10. Local model maintenance
 
-These routes are future extensions; they are not required for the deterministic initial release.
+The Maintenance page exposes **one model action only**: retrain the complete model set. There are no per-model training actions, model activation controls, or model-history/version selection in the UI.
 
-- `GET /models`: list locally stored model versions and identify the active model.
-- `POST /retrain`: start training using the initial corpus plus eligible `validated` documents. Returns `202` and a job ID.
-- `GET /jobs/{job_id}`: show training state, dataset/model version, accuracy, confusion matrix, warnings, and output artifact.
-- `POST /retrain/{job_id}/activate`: atomically activate a successfully evaluated candidate.
-- `POST /retrain/{job_id}/discard`: discard a candidate without changing the active model.
+- `POST /models/train`: start a background job that retrains all required models in dependency order from indexed documents with business status `validated`. The request has no `model_name` parameter. Return a job identifier.
+- `GET /jobs/{job_id}`: report job state, current stage, progress percentage, and a user-readable status message. The UI displays a progress bar using the same job-progress mechanism as SQLite rebuild and consistency check.
+- `GET /models` may remain as a read-only diagnostic endpoint to report whether the complete active model set is present, but it must not expose a model-version history or offer activation.
 
-Training and activation must remain local. Failed training must not replace the active model. ML confidence and candidate scores are absent or null when no model was used.
+Retraining covers all ML-supported stages: `field_emitting_company`, `field_document_type`, `additional_field_groups`, `additional_field_values`, `template_name`, and `period_format`. There is **no `field_emission_date` model**: emission dates are extracted only with the ordered regexes in `config.jsonc` under `date_extraction`.
+
+Training labels come from validated sidecar values. Additional-field value labels are usable only when the value appears in the saved extracted text. The shared `additional_field_values` model uses one token-level classifier for all eligible additional fields.
+
+The replacement policy is **replace, do not version**. Train the full replacement set in a staging location; report progress for the complete job; only after all required models train successfully, replace the active set and delete the previous artifacts. If training fails, report a failed job and keep the previous complete model set usable. No historical versions are retained after a successful replacement. Model artifacts are trusted local joblib files; loading them can execute code.
+
+### Required inference order
+
+1. Predict `emitting_company` and `document_type` from the complete extracted PDF text.
+2. Extract `emission_date` with regex only, using the patterns in the `date_extraction` configuration section. Choose the earliest valid match in document order; if matches begin at the same position, use the order in the configuration. Normalize to `YYYY-MM-DD`. No ML model may predict the emission date.
+3. Predict only the applicable additional-field list/group from `emitting_company` and `document_type`. Do not predict `period_format` at this stage.
+4. Predict each additional-field value from the complete extracted PDF text with the shared token-level extraction model.
+5. Predict `template_name` and `period_format` from `emitting_company`, `document_type`, and the extracted `additional_fields`.
+6. Calculate `period` once from the emission date and final period-format configuration; calculate `current_key` from the selected template's key pattern and final values. These are deterministic derived values, not model predictions.
+
+Any required ML result that is missing or below the configured confidence threshold is unresolved and must follow the existing pending/review behavior; do not substitute a hard-coded mapping.
+
+
+### POST `/files/{sha256}/suggestions`
+
+Returns asynchronous, confidence-gated proposals for the document detail page. The browser first renders the saved document, then requests suggestions in the background and refreshes them after edits to template, period format, company, document type, emission date, or additional fields. Model-backed proposals are omitted when the model is unavailable or its confidence is below `CONFIDENCE_THRESHOLD`. Additional-field proposals are limited to complete configured values found in the document; ambiguous matches and values absent from the configured list are omitted. The response includes `template_name`, `period_format`, `emitting_company`, and `document_type` when confident, plus `optional_fields` containing canonical configured matches, and derived `period` and `current_key` values when the corresponding inputs can be calculated. Derived values are recalculated from the current form values and are not independent ML predictions.
+
+Example response:
+
+```json
+{
+  "suggestions": {
+    "template_name": {"value": "invoice", "confidence": 0.94, "source": "model"},
+    "period_format": {"value": "monthly", "confidence": 0.91, "source": "model"},
+    "emitting_company": {"value": "Example Energy", "confidence": 0.97, "source": "model"},
+    "document_type": {"value": "invoice", "confidence": 0.96, "source": "model"},
+    "period": {"value": "2026-09", "confidence": 0.91, "source": "derived"},
+    "current_key": {"value": "files/example/2026-09/invoice.pdf", "confidence": 0.91, "source": "derived"}
+  },
+  "confidence_threshold": 0.8
+}
+```
+
+The frontend debounces changes and cancels stale requests. A suggestion is shown only when the corresponding prediction meets the confidence threshold. Users can apply model-backed suggestions to editable controls; calculated period and key previews remain derived from the current values and are recalculated on save.
 
 ## 11. Consistency and implementation rules
 

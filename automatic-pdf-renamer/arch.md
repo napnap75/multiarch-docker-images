@@ -19,7 +19,7 @@ flowchart TD
   poll["Inbox poller (asyncio task)"]
   s3["Garage S3 bucket"]
   db[("SQLite replica (WAL)")]
-  worker["Subprocess jobs: retrain / consistency / rebuild"]
+  worker["Background jobs: retrain / consistency / rebuild"]
   model[("Model registry on disk")]
 
   user --> dash
@@ -52,13 +52,13 @@ flowchart TD
 | Text extraction | PyMuPDF | Fastest option; AGPL acceptable for a personal offline tool. Wrapped behind a small extractor interface so it remains swappable (PRD open question resolved). |
 | S3 client | boto3 | Most complete API coverage (copy-object, versioning, ETag), mature Garage compatibility. Wrapped behind a thin storage interface; v1 ships one implementation. |
 | SQLite access | SQLAlchemy ORM, WAL mode | Declared replica schema, typed models, migrations via Alembic. Sidecar remains authoritative; ORM layer only reads/writes the mirror. |
-| Initial classification | Configured deterministic rules and reference data | Initial release must work without ML; TF-IDF + Logistic Regression is a post-v1 enhancement. |
+| ML inference | Local model artifacts for field extraction, additional-field group selection, template prediction, and period-format prediction | No predefined mappings decide classification outcomes; missing or low-confidence predictions route to `pending`. |
 | Fuzzy matching | rapidfuzz | PRD FR4.2, counterparty gazetteer. |
 | Dates | python-dateutil | PRD FR4.2, emission date parsing and period computation. |
 | Frontend | React + Vite, react-pdf viewer | NFR7; built to static assets served by FastAPI. |
 | Process model | API, poller, and background jobs in one container | Single-user tool; a process manager is unnecessary complexity. |
 | Inbox poller | asyncio background task inside the FastAPI process | Lightweight, no queue infrastructure; restart scan (FR1.3) covers crash recovery. |
-| Long jobs (retrain, consistency, rebuild) | Subprocesses launched and monitored by the API | Keeps the event loop responsive; status exposed via the existing endpoints (FR9, FR10). |
+| Long jobs (retrain, consistency, rebuild) | Background worker or subprocess, depending on operation | Keeps the event loop responsive; status and progress are exposed through job endpoints (FR9, FR10). |
 | Dashboard auth | Username + password (single account, env-var credentials, session cookie) | Local network but not fully trusted; cheap to implement. |
 | Testing | Unit tests only, pytest | Single-user offline tool; the storage layer is behind interfaces so mocks are cheap. Integration/CI coverage deferred. |
 
@@ -70,7 +70,7 @@ One Python process runs:
 
 - FastAPI app: serves the API, the static dashboard, and the PDF streaming proxy.
 - Poller task: asyncio loop, configurable interval, lists the `inbox/` prefix.
-- Job supervisor: spawns subprocesses for retrain, consistency scan, and SQLite rebuild; tracks their status in memory and in SQLite.
+- Job supervisor: runs full model retraining in a background worker and launches subprocesses for consistency scan and SQLite rebuild; tracks current job state for the API.
 
 On startup, the process recovers interrupted technical operations and discovers eligible objects in `inbox/`. The `pending/` prefix is reconciled for metadata and anomalies; documents awaiting manual correction are not automatically reclassified or renamed until corrected/requested.
 
@@ -87,13 +87,22 @@ app/
   period.py          # period computation from emission date + period format config
   templates.py       # JSONC template registry (slots, period rules, key patterns)
   rename.py          # copy-then-delete move + event logging
-  jobs/              # poller, consistency scan, retrain subprocess, rebuild
-  api/               # routes: files, templates, retrain, consistency, auth
+  jobs/              # poller, consistency scan, rebuild
+  api/               # routes: files, templates, model retraining, consistency, auth
 web/                 # React + Vite app (built to static assets)
-models/              # versioned model registry (initial + trained)
+models/              # current model set; prior artifacts removed after successful replacement
 ```
 
 ### 4.3 Processing pipeline
+
+The ingestion pipeline follows this strict analysis order. Model predictions that are unavailable or below the configured confidence threshold are treated as unresolved; the document is routed to `pending/` rather than silently substituting a deterministic mapping.
+
+1. **Company and document type:** ML models predict `emitting_company` and `document_type` from the complete extracted PDF text.
+2. **Emission date:** no ML model is used. Scan the extracted text for dates matching the regular expressions listed in the `date_extraction` section of `config.jsonc`. Select the earliest matching date by its position in the document; use configuration order to resolve matches starting at the same position. Normalize the captured date to `YYYY-MM-DD`. If no valid match exists, the date is unresolved.
+3. **Additional-field list:** an ML model predicts the applicable list/group of additional fields using `emitting_company` and `document_type`. The period format is not predicted at this stage.
+4. **Additional-field values:** the shared token-level ML extractor predicts each configured additional-field value from the complete extracted PDF text, conditioned on the field name/group as represented by the model.
+5. **Template and final period format:** ML models predict `template_name` and `period_format` using `emitting_company`, `document_type`, and the extracted `additional_fields`. The period format is predicted only at this stage.
+6. **Derived values:** calculate `period` once from the emission date and final `period_format` definition; calculate `current_key` from the selected template's key pattern and final field values. Neither `period` nor `current_key` is an ML prediction or an independently editable input.
 
 One ingestion run, fully synchronous within the poller task:
 
@@ -103,13 +112,15 @@ flowchart TD
   dl --> tx["Extract text from every PDF page (PyMuPDF)"]
   tx --> empty{"Text empty?"}
   empty -- yes --> pending["Move to pending/ (reason: empty text)"]
-  empty -- no --> cls["Classify using deterministic rules"]
-  cls --> unamb{"Exactly one unambiguous rule match?"}
-  unamb -- no --> pending
-  unamb -- yes --> fill["Fill fields: regexes, companies list, additional fields from groups, period from emission date"]
-  fill --> valid{"Fields valid?"}
+  empty -- no --> company["1. ML: emitting_company + document_type from text"]
+  company --> date["2. Regex: first matching emission date from config date_extraction"]
+  date --> groups["3. ML: additional-field list from emitting_company/document_type"]
+  groups --> values["4. ML: additional-field values from full document text"]
+  values --> final["5. ML: template + period_format from emitting_company/document_type/fields"]
+  final --> derived["6. Calculate period + current_key from config"]
+  derived --> valid{"Required predictions and derived values valid?"}
   valid -- no --> pending
-  valid -- yes --> rename["Compute key and copy object to target"]
+  valid -- yes --> rename["Copy object to target key"]
   rename --> sidecar["Persist sidecar with target key and event"]
   sidecar --> delete["Delete source only after sidecar is durable"]
   delete --> sqlite["Synchronize SQLite replica"]
@@ -344,10 +355,10 @@ sequenceDiagram
 | Inbox poll | Interval (configurable, default from PRD) | asyncio task, in-process |
 | Stability check | Two consecutive listings, same size + ETag | Poller state kept in memory |
 | Consistency scan | Periodic (configurable) + on demand | Subprocess |
-| Retrain | Dashboard action | Subprocess; writes a new versioned model dir; activation is an atomic pointer swap, no restart (AC6) |
+| Retrain all models | Single Maintenance dashboard action | One background worker trains every required model in dependency order; the API exposes job state and percentage progress. On success, an atomic active-set pointer switch replaces the previous set and old artifacts are deleted. |
 | SQLite rebuild | Dashboard action or CLI | Subprocess |
 
-Subprocesses report progress and metrics by writing a status JSON consumed by the API's status endpoints. Only one job of each kind runs at a time; the API refuses a duplicate start.
+Subprocess-based jobs report progress and metrics by writing a status JSON consumed by the API's status endpoints. Model retraining reports in-memory job state and progress through the API. Only one retraining job runs at a time; the API refuses a duplicate start. Model retraining is one atomic maintenance operation: there are no per-model train/activate controls and no model-version history. The existing model set must remain usable if training fails before the replacement set is complete; once the replacement succeeds, remove the previous artifacts.
 
 ## 7. Configuration and Secrets
 
@@ -360,7 +371,7 @@ Subprocesses report progress and metrics by writing a status JSON consumed by th
 - Ingestion: classify errors as transient/retryable technical failures, permanent technical failures, or document/business validation failures. Retry transient failures up to 3 times after the initial attempt, with delays of 5 seconds, 30 seconds, and 2 minutes, using idempotent recovery. After the final retry fails, stop processing that item without another retry or review workflow. Do not set business status `pending` solely because a technical operation failed. Record technical state and error details separately from business status, and continue processing other objects.
 - Rename: copy to the target key, persist the sidecar with the new current key and event, then delete the old key; synchronize SQLite after the authoritative sidecar is durable. If a crash occurs before deletion, recovery follows the sidecar's current key and safely removes or reconciles the stale copy.
 - Sidecar/SQLite: sidecar first; drift repaired by the consistency job; rebuild is always possible from sidecars alone.
-- Retrain: trained models land in a new versioned directory; activation swaps an active-model pointer; a failed training run leaves the current model untouched.
+- Retrain: train the complete model set in staging, then replace all active artifacts as one maintenance operation. A failed training run leaves the current model set usable; a successful run deletes all previous artifacts and retains no history.
 - All object-not-found conditions during processing are treated as consistency anomalies and flagged (FR5.3).
 
 ## 9. Deployment
@@ -384,8 +395,13 @@ Subprocesses report progress and metrics by writing a status JSON consumed by th
 | Garage quirks in copy-object/versioning | Storage interface isolates the client. |
 | Corpus too small for reliable classification | Low-confidence routing to pending; retrain on validated files grows the corpus. |
 | SQLite drift after crash | Sidecar-first ordering + consistency job + full rebuild path. |
-| Single-process blast radius | Long jobs are subprocesses; the poller catches per-file exceptions. |
+| Single-process blast radius | Model retraining runs in a background worker; consistency/rebuild use subprocesses; the poller catches per-file exceptions. |
 
 ## 12. Traceability to PRD
 
-Every epic maps to a component: ingestion (jobs/poller), extraction and classification (pipeline), data model and validation (templates, period, gazetteer, pipeline), renaming and logging (rename, sidecar), dashboards (web + api), JSONC configuration editing (config), retraining (jobs/retrain + models), consistency and recovery (jobs/consistency, replica/rebuild). Acceptance criteria AC1-AC12 are covered by the components above; AC8-AC10 by section 8, AC9 by section 4.5.
+Every epic maps to a component: ingestion (jobs/poller), extraction and classification (pipeline), data model and validation (templates, period, gazetteer, pipeline), renaming and logging (rename, sidecar), dashboards (web + api), JSONC configuration editing (config), retraining (API background job + model_manager), consistency and recovery (jobs/consistency, replica/rebuild). Acceptance criteria AC1-AC12 are covered by the components above; AC8-AC10 by section 8, AC9 by section 4.5.
+
+
+### Local ML inference
+
+The runtime loads trusted, locally stored model artifacts from `MODEL_DIR`. The analysis order is mandatory: (1) predict `emitting_company` and `document_type` from extracted text; (2) extract `emission_date` using the configured `date_extraction` regexes only, selecting the earliest valid match in document order (no date ML model); (3) predict only the applicable additional-field groups from `emitting_company` and `document_type`; (4) extract each additional-field value from the full text using one shared token-level model; (5) predict `template_name` and `period_format` from `emitting_company`, `document_type`, and additional fields; and (6) calculate `period` once from the emission date and final period format, and calculate `current_key` from the template key pattern and final values. Training labels come from validated sidecar values, and additional-field values are trained only when they appear in the saved extracted text. Predictions are confidence-gated; missing or uncertain required predictions route to `pending`. Templates and period-format definitions provide calculation/formatting rules, not hard-coded classification mappings.

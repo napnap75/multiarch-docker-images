@@ -770,3 +770,154 @@ body {
     justify-content: flex-start;
   }
 }
+
+
+.model-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.model-card-heading h4 {
+  margin: 0 0 6px;
+}
+
+.model-card-heading p,
+.model-help,
+.model-empty {
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.model-help {
+  font-size: 0.85rem;
+}
+
+.models-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.model-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  min-width: 0;
+}
+
+.model-card-heading {
+  margin-bottom: 12px;
+}
+
+.model-card-heading h4 {
+  overflow-wrap: anywhere;
+}
+
+.model-card-heading p {
+  font-size: 0.84rem;
+}
+
+.model-count {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.model-versions {
+  border-top: 1px solid var(--border);
+}
+
+.model-version {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.model-version:last-child {
+  border-bottom: 0;
+}
+
+.model-version code {
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+}
+
+.model-active-tag {
+  display: inline-block;
+  color: var(--success);
+  background: #e9f7ef;
+  border-radius: 999px;
+  padding: 3px 7px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+@media (max-width: 820px) {
+  .model-card-heading {
+    flex-direction: column;
+  }
+}
+
+
+/* Compact, asynchronously loaded model proposals under editable document fields. */
+.model-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  box-sizing: border-box;
+  height: 1.6rem;
+  min-width: 0;
+  margin-top: 0.25rem;
+  color: var(--muted, #667085);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.model-suggestion[aria-hidden="true"] {
+  visibility: hidden;
+}
+
+.model-suggestion > span,
+.additional-field-proposal > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-suggestion button {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent, #3157a4);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+#additional-field-suggestions {
+  overflow-x: auto;
+}
+
+.additional-field-proposal {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.model-suggestion button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}

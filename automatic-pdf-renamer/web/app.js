@@ -131,7 +131,7 @@ const loadDocuments = async ({ append = false } = {}) => {
   params.set('page', String(page));
 
   try {
-    const response = await fetch(`/api/files?${params.toString()}`);
+    const response = await fetch(`/files?${params.toString()}`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
