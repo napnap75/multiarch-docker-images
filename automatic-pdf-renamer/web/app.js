@@ -20,7 +20,7 @@ const columnDefinitions = {
   period: { label: 'Period', filter: 'period', sortable: true },
   updated_at: { label: 'Last modified', filter: 'updated_at', sortable: true },
   template_name: { label: 'Template', filter: 'template', sortable: true },
-  emission_date: { label: 'Emission date', filter: 'emission_date', sortable: false, inputType: 'date' },
+  emission_date: { label: 'Emission date', filter: 'emission_date', sortable: true, inputType: 'date' },
   confidence: { label: 'Confidence', filter: 'confidence', sortable: true },
 };
 let visibleColumns = (() => {
@@ -57,7 +57,7 @@ const renderColumnPicker = () => {
 };
 const renderTableHead = () => {
   const header = (key) => {
-    const def = columnDefinitions[key] || { label: key.replace(/^additional:/, ''), filter: `additional_field__${key.slice(11)}`, sortable: false };
+    const def = columnDefinitions[key] || { label: key.replace(/^additional:/, ''), filter: `additional_field__${key.slice(11)}`, sortable: true };
     return `<th scope="col" ${def.sortable ? `data-sort-column="${key}"` : ''}>${def.sortable ? `<button class="sort-button" data-sort="${key}">${escapeHtml(def.label)} <span></span></button>` : escapeHtml(def.label)}</th>`;
   };
   const previousFilterValues = Object.fromEntries(columnFilters.map((filter) => [filter.dataset.filter, filter.value]));
@@ -73,8 +73,11 @@ const renderTableHead = () => {
   columnFilters = [...tableHead.querySelectorAll('[data-filter]')];
   columnFilters.forEach((filter) => filter.addEventListener('input', () => { selectedIds.clear(); allFilteredSelection = false; updateSelectionUi(); loadDocuments(); }));
   tableHead.querySelectorAll('[data-sort]').forEach((button) => button.addEventListener('click', () => {
-    if (sortBy === button.dataset.sort) sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
-    else { sortBy = button.dataset.sort; sortOrder = 'asc'; }
+    const selectedSort = button.dataset.sort.startsWith('additional:')
+      ? `additional_field__${button.dataset.sort.slice(11)}`
+      : button.dataset.sort;
+    if (sortBy === selectedSort) sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+    else { sortBy = selectedSort; sortOrder = 'asc'; }
     updateSortIndicators(); loadDocuments();
   }));
   const selectHead = tableHead.querySelector('#select-page-head');
@@ -250,7 +253,10 @@ const loadDocuments = async ({ append = false } = {}) => {
 const updateSortIndicators = () => {
   sortButtons = [...document.querySelectorAll('[data-sort]')];
   document.querySelectorAll('[data-sort-column]').forEach((header) => {
-    const active = header.dataset.sortColumn === sortBy;
+    const columnSort = header.dataset.sortColumn.startsWith('additional:')
+      ? `additional_field__${header.dataset.sortColumn.slice(11)}`
+      : header.dataset.sortColumn;
+    const active = columnSort === sortBy;
     header.setAttribute('aria-sort', active ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none');
     const indicator = header.querySelector('.sort-button span');
     indicator.textContent = active ? (sortOrder === 'asc' ? '↑' : '↓') : '';

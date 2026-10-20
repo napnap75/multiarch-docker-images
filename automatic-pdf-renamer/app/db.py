@@ -337,10 +337,16 @@ class SQLiteFileRepository:
             "emitting_company": "emitting_company",
             "document_type": "document_type",
             "period": "period",
+            "emission_date": "emission_date",
             "confidence": "confidence",
             "updated_at": "updated_at",
         }
-        order_column = sortable_columns.get(sort_by, "updated_at")
+        if sort_by.startswith("additional_field__"):
+            field_name = sort_by.removeprefix("additional_field__")
+            order_column = "json_extract(optional_fields, ?)"
+            params.append('$.' + '"' + field_name.replace('"', '\\"') + '"')
+        else:
+            order_column = sortable_columns.get(sort_by, "updated_at")
         order_direction = "ASC" if sort_order.lower() == "asc" else "DESC"
         query += f" ORDER BY {order_column} {order_direction} LIMIT ? OFFSET ?"
         params.extend([page_size, (page - 1) * page_size])
