@@ -58,7 +58,7 @@ One row per processed PDF file:
 The append-only `document_events` collection is the single source of truth for a document's history; no history is stored on the `documents` record itself.
 
 ### `document_events`
-Append-only history: `document`, `event_type` (`classified`, `moved`, `corrected`, `validated`, `duplicate`), `payload` as JSON, `timestamp`.
+Append-only history: `document`, `event_type` (`classified`, `moved`, `corrected`, `validated`), `payload` as JSON, `timestamp`.
 
 
 ## 5. Configuration File (JSONC)
@@ -76,18 +76,18 @@ A `config.jsonc` file kept alongside the binary, reloaded on restart. Three sect
        - `set`: set the value of one field; fields accumulate as rules are applied in order
 	   - `stop`: stop rule evaluation; the fields set so far are kept and the usual validations still apply
 
-3. `templates`: named naming templates (e.g. `bank_statement: {sender}/{date}_{type}_{reference}.pdf`), with required-field validation — a template with a missing mandatory field renders the result invalid and routes the file to `pending/`. The template is chosen by the rules themselves: `template` is a regular field, set with `set` like any other (e.g. `set template = "bank_statement"` when `emittingCompany in ["BRED", "Fortunéo"]` and `documentType == "Relevé de compte"`). If no rule sets `template`, the special `default` template is used. A `template` value with no matching entry renders the result invalid and routes the file to `pending/`.
+3. `templates`: named naming templates (e.g. `bank_statement: {sender}/{date}_{type}_{reference}.pdf`), with required-field validation — a template with a missing mandatory field renders the result invalid and routes the file to `pending/`. The template is chosen by the rules themselves: `template` is a field declared in the `fields` section like any other and set with `set` (e.g. `set template = "bank_statement"` when `emittingCompany in ["BRED", "Fortunéo"]` and `documentType == "Relevé de compte"`). If no rule sets `template`, the special `default` template is used. A `template` value with no matching entry renders the result invalid and routes the file to `pending/`.
 
-Validation on load: JSON schema, regex compilation, `expr` expression compilation against a typed context (`Document{FirstPageText, ExtractedText, Fields}`). Full rejection if invalid, no partial processing.
+Validation on load: JSON schema, regex compilation, `expr` expression compilation against a typed context (`Document{FirstPageText, Fields}`). Full rejection if invalid, no partial processing.
 
 ## 6. Processing Pipeline
 
 Executed by the PocketBase cron job (configurable interval, e.g. every minute):
 
 1. **Poll**: list objects in `inbox/`; an object is a candidate only if no `documents` record references its key yet, and its size and ETag are stable across two consecutive polls (write-completion wait).
-2. **Download**: fetch the object into memory (streamed), no disk writes. The sha256 is computed during download; if a `documents` record with the same hash already exists, the object is a duplicate: the `inbox/` key is deleted (delete marker, data recoverable), a `duplicate` event is logged, and processing stops there.
+2. **Download**: fetch the object into memory (streamed), no disk writes. The sha256 is computed during download; if a `documents` record with the same hash already exists, the object is a duplicate: the `inbox/` key is deleted (delete marker, data recoverable), a message is logged in the application logs, and processing stops there.
 3. **Extraction**: first-page text (for rule evaluation) + full text (for FTS) via `ledongthuc/pdf`, including headers and footers
-4. **Rule evaluation**: rules evaluated in order against the extracted text and the fields set so far; full evaluation log written to the application logs (built-in dry-run mode for debugging from the dashboard).
+4. **Rule evaluation**: rules evaluated in order against the first-page text and the fields set so far; full evaluation log written to the application logs (built-in dry-run mode for debugging from the dashboard).
 5. **Validation**: a result is valid if and only if: all rules have been processed with no error, all mandatory fields are identified, and the naming template evaluated with no error. Otherwise: route directly to `pending/`.
 6. **Record**: create the `documents` record (sha256, original filename, current inbox key, extracted texts, fields, status) and add a `classified` event including the original filename. The record exists before any physical move, so an interrupted filing leaves a recoverable state.
 7. **Filing**:
