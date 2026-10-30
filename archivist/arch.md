@@ -86,10 +86,10 @@ Executed by the PocketBase cron job (configurable interval, e.g. every minute):
 2. **Download**: fetch the object into memory (streamed), no disk writes. The sha256 is computed during download; if a `documents` record with the same hash already exists, the object is a duplicate: the `inbox/` key is deleted (delete marker, data recoverable), a message is logged in the application logs, and processing stops there.
 3. **Extraction**: first-page text (for rule evaluation) + full text (for FTS) via `ledongthuc/pdf`, including headers and footers
 4. **Rule evaluation**: rules evaluated in order against the first-page text and the fields set so far; full evaluation log written to the application logs (built-in dry-run mode for debugging from the dashboard).
-5. **Validation**: a result is valid if and only if: all rules have been processed with no error, all mandatory fields are identified, and the naming template evaluated with no error. Otherwise: route directly to `pending/`.
+5. **Validation**: a result is valid if and only if: all rules have been processed with no error, all mandatory fields are identified, the selected template exists in the configuration, and the naming template evaluated with no error. Otherwise: route directly to `pending/`.
 6. **Record**: create the `documents` record (sha256, original filename, current inbox key, extracted texts, fields, status) and add a `classified` event including the original filename. The record exists before any physical move, so an interrupted filing leaves a recoverable state.
 7. **Filing**:
-   - valid → resolve the target name first: if a file with the same name already exists in the target prefix, append a number to the filename; then copy to the new key (prefix + templated name), verify the target object exists, and delete the `inbox/` key only after the copy is confirmed; finally update the `documents` record with the final, conflict-resolved filename (`file_key`, status `processed`, `moved` event).
+   - valid → resolve the target name first: if a file with the same name already exists in the target prefix, append a number to the filename; then copy to the new key (`files/` + rendered template — the template renders the full object path, there is no separate prefix), verify the target object exists, and delete the `inbox/` key only after the copy is confirmed; finally update the `documents` record with the final, conflict-resolved filename (`file_key`, status `processed`, `moved` event).
    - invalid → move to `pending/` (incremental suffix on name conflict); update `file_key`; status `pending`.
 
 The bucket is versioned: any `inbox/` object deletion creates a delete marker, the data remains recoverable.
@@ -100,8 +100,8 @@ Custom pages on the PocketBase instance:
 
 - File list: all files with status, filters, combined search over full text (FTS5) + metadata/fields.
 - Detail: PDF preview streamed from S3 through a dedicated route, along with extracted fields; debug mode adds detailed log lines explaining every rule evaluation and action performed.
-- Correction: forms to edit the extracted fields; correcting a `processed` file re-files it (copy to the new key, delete the old one, history preserved). A corrected `pending` file follows the same path: once validated, it is copied to its templated key in `files/` (incremental suffix on conflict) and removed from `pending/`.
-- Validation: transition to `validated`; `processed` files can also be validated. Validation is what takes a corrected `pending` file out of the review queue.
+- Correction: forms to edit the extracted fields. A save is only possible if the selected template can be evaluated without error; otherwise the form refuses the save. A successfully corrected file is re-filed (copy to the new key, delete the old one, incremental suffix on conflict) and takes the status `validated`, whatever its previous status; a corrected `pending` file is thereby removed from `pending/`. History is preserved.
+- Validation: transition from `processed` to `validated`. A `pending` file can only leave the review queue through a correction that can be saved, which itself sets the status to `validated`.
 - Rule management: config display and dry-run on an existing document. The configuration is reloaded only on restart; there is no runtime reload.
 
 Authentication: single account via PocketBase's standard auth.
