@@ -19,8 +19,8 @@ PDFs arrive continuously in an inbox S3 prefix (dropped via Nextcloud by the use
 
 - Ingestion by polling the `inbox/` prefix of a S3 bucket for new objects only. Nextcloud (External Storage app) is the user-facing interface to upload, download, and share files.
 - Extract the text from the first page of each PDF. All files are text-based; OCR for scanned/image-only documents is out of scope.
-- Deterministic template classification using configured rules, extracted text, and reference data (named constant lists declared in the configuration, e.g. a list of known banks); uncertain or insufficient results are routed to `pending/` for manual correction.
-- Fields to extract, extractors and template for renaming the file declared in configuration (JSONC format), not in code.
+- Deterministic template classification using configured rules, extracted text, and reference data (inline constant lists within rule expressions, e.g. a list of known banks); uncertain or insufficient results are routed to `pending/` for manual correction.
+- Fields to extract, rule-based extraction, and templates for renaming the file declared in configuration (JSONC format), not in code.
 - Storage: self-hosted S3-compatible with a single versioned bucket; objects addressed by S3 keys, no local filesystem for documents.
 - Local web dashboard: all processed files with status (pending / processed / validated), file detail page with PDF preview streamed from S3, template and field correction, validation, history, and full-text search across the entire extracted document in addition to metadata/field search.
 - Pre-existing files (the ~2000 already-named documents present in the bucket) are out of scope: no initial import or indexing.
