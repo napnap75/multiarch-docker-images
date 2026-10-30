@@ -50,9 +50,7 @@ One row per processed PDF file:
 - `extracted_text`: full text extracted from all pages (base of the FTS5 index)
 - `first_page_text`: first-page text (extraction base)
 - `size`: file size
-- `processed_at`: timestamp of the file initial process
 - `status`: `pending` | `processed` | `validated`
-- `updated_at`: timestamp of the last update to the file metadata
 + all the fields declared by the user in the configuration file
 
 The append-only `document_events` collection is the single source of truth for a document's history; no history is stored on the `documents` record itself.
@@ -91,7 +89,7 @@ Executed by the PocketBase cron job (configurable interval, e.g. every minute):
 5. **Validation**: a result is valid if and only if: all rules have been processed with no error, all mandatory fields are identified, and the naming template evaluated with no error. Otherwise: route directly to `pending/`.
 6. **Record**: create the `documents` record (sha256, original filename, current inbox key, extracted texts, fields, status) and add a `classified` event including the original filename. The record exists before any physical move, so an interrupted filing leaves a recoverable state.
 7. **Filing**:
-   - valid → copy to the new key (prefix + templated name), verify the target object exists, then delete the `inbox/` key only after the copy is confirmed; update `file_key`, set status `processed`, add a `moved` event. If a file with the same name already exists, append a number to the filename to avoid overwriting.
+   - valid → resolve the target name first: if a file with the same name already exists in the target prefix, append a number to the filename; then copy to the new key (prefix + templated name), verify the target object exists, and delete the `inbox/` key only after the copy is confirmed; finally update the `documents` record with the final, conflict-resolved filename (`file_key`, status `processed`, `moved` event).
    - invalid → move to `pending/` (incremental suffix on name conflict); update `file_key`; status `pending`.
 
 The bucket is versioned: any `inbox/` object deletion creates a delete marker, the data remains recoverable.
@@ -102,7 +100,7 @@ Custom pages on the PocketBase instance:
 
 - File list: all files with status, filters, combined search over full text (FTS5) + metadata/fields.
 - Detail: PDF preview streamed from S3 through a dedicated route, along with extracted fields; debug mode adds detailed log lines explaining every rule evaluation and action performed.
-- Correction: forms to edit fields, type, and sender; correcting a `processed` file re-files it (copy to the new key, delete the old one, history preserved). A corrected `pending` file follows the same path: once validated, it is copied to its templated key in `files/` (incremental suffix on conflict) and removed from `pending/`.
+- Correction: forms to edit the extracted fields; correcting a `processed` file re-files it (copy to the new key, delete the old one, history preserved). A corrected `pending` file follows the same path: once validated, it is copied to its templated key in `files/` (incremental suffix on conflict) and removed from `pending/`.
 - Validation: transition to `validated`; `processed` files can also be validated. Validation is what takes a corrected `pending` file out of the review queue.
 - Rule management: config display and dry-run on an existing document. The configuration is reloaded only on restart; there is no runtime reload.
 
@@ -111,6 +109,6 @@ Authentication: single account via PocketBase's standard auth.
 ## 8. Error Handling
 
 - Transient S3 error: retry with backoff, the object stays in `inbox/` and will be polled again.
-- Unreadable PDF: `pending` status, reason recorded.
+- Unreadable PDF: `pending` status, reason recorded in the payload of the `classified` event.
 - Target key conflict (two files renamed identically, whether filing to `files/` or moving to `pending/`): automatic incremental suffix, event logged.
 - Invalid config: error message displayed and the application does not start.
