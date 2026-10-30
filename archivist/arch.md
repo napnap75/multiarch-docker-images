@@ -46,6 +46,7 @@ One row per processed PDF file:
 
 - `sha256`: the sha256 is a primary key as the system will reject as duplicate any file with the same hash
 - `original_filename`: original file name in `inbox/`
+- `file_key`: current S3 key of the file
 - `extracted_text`: full text extracted from all pages (base of the FTS5 index)
 - `first_page_text`: first-page text (extraction base)
 - `size`: file size
@@ -57,7 +58,7 @@ One row per processed PDF file:
 The append-only `document_events` collection is the single source of truth for a document's history; no history is stored on the `documents` record itself.
 
 ### `document_events`
-Append-only history: `document`, `event_type` (`classified`, `moved`, `corrected`, `validated`), `payload` as JSON, `timestamp`.
+Append-only history: `document`, `event_type` (`classified`, `moved`, `corrected`, `validated`, `duplicate`), `payload` as JSON, `timestamp`.
 
 
 ## 5. Configuration File (JSONC)
@@ -70,29 +71,28 @@ A `config.jsonc` file kept alongside the binary, reloaded on restart. Three sect
    - `mandatory`: true | false
 
 2. `rules`: ordered list of rules that will be evaluated one after the other:
-   - `when`: an `expr-lang/expr` expression evaluated over the document text and the current field values; rules run in order and each `when` may reference fields set by earlier rules (e.g. `firstPageText contains "Relevé de compte"`, or `emittingCompany in lists.banks && documentType == "Relevé de compte"`)
+   - `when`: an `expr-lang/expr` expression evaluated over the document text and the current field values; rules run in order and each `when` may reference fields set by earlier rules (e.g. `firstPageText contains "Relevé de compte"`, or `emittingCompany in ["BRED", "Fortunéo"] && documentType == "Relevé de compte"`)
    - `actions`: 
        - `set`: set the value of one field; fields accumulate as rules are applied in order
 	   - `stop`: stop rule evaluation; the fields set so far are kept and the usual validations still apply
 
-3. `templates`: naming templates per document type (e.g. `{sender}/{date}_{type}_{reference}.pdf`), with required-field validation — a template with a missing field renders the result invalid and routes the file to `pending/`.
-4. `lists`: optional named constant lists (e.g. banks, account numbers) usable in `when` expressions as `lists.<name>`.
+3. `templates`: named naming templates (e.g. `bank_statement: {sender}/{date}_{type}_{reference}.pdf`), with required-field validation — a template with a missing mandatory field renders the result invalid and routes the file to `pending/`. The template is chosen by the rules themselves: `template` is a regular field, set with `set` like any other (e.g. `set template = "bank_statement"` when `emittingCompany in ["BRED", "Fortunéo"]` and `documentType == "Relevé de compte"`). If no rule sets `template`, the special `default` template is used. A `template` value with no matching entry renders the result invalid and routes the file to `pending/`.
 
-Validation on load: JSON schema, regex compilation, `expr` expression compilation against a typed context (`Document{FirstPageText, ExtractedText, Fields, Lists}`). Full rejection if invalid, no partial processing.
+Validation on load: JSON schema, regex compilation, `expr` expression compilation against a typed context (`Document{FirstPageText, ExtractedText, Fields}`). Full rejection if invalid, no partial processing.
 
 ## 6. Processing Pipeline
 
 Executed by the PocketBase cron job (configurable interval, e.g. every minute):
 
-1. **Poll**: list objects in `inbox/` not yet processed (detection by key recorded in the database). Write-completion wait: an object is a candidate only if its size and ETag are stable across two consecutive polls.
+1. **Poll**: list objects in `inbox/`; an object is a candidate only if no `documents` record references its key yet, and its size and ETag are stable across two consecutive polls (write-completion wait).
 2. **Download**: fetch the object into memory (streamed), no disk writes. The sha256 is computed during download; if a `documents` record with the same hash already exists, the object is a duplicate: the `inbox/` key is deleted (delete marker, data recoverable), a `duplicate` event is logged, and processing stops there.
 3. **Extraction**: first-page text (for rule evaluation) + full text (for FTS) via `ledongthuc/pdf`, including headers and footers
-4. **Rule evaluation**: rules evaluated in order against the extracted text and the fields set so far; full log stored in `rule_trace` (built-in dry-run mode for debugging from the dashboard).
+4. **Rule evaluation**: rules evaluated in order against the extracted text and the fields set so far; full evaluation log written to the application logs (built-in dry-run mode for debugging from the dashboard).
 5. **Validation**: a result is valid if and only if: all rules have been processed with no error, all mandatory fields are identified, and the naming template evaluated with no error. Otherwise: route directly to `pending/`.
-6. **Filing**:
-   - valid → copy to the new key (prefix + templated name), verify the target object exists, then delete the `inbox/` key only after the copy is confirmed; status `processed`. If a file with the same name already exists, append a number to the filename to avoid overwriting.
-   - invalid → move to `pending/` (incremental suffix on name conflict); status `pending`.
-7. **Indexing**: write the `documents` record, add an event to the file history including the original filename.
+6. **Record**: create the `documents` record (sha256, original filename, current inbox key, extracted texts, fields, status) and add a `classified` event including the original filename. The record exists before any physical move, so an interrupted filing leaves a recoverable state.
+7. **Filing**:
+   - valid → copy to the new key (prefix + templated name), verify the target object exists, then delete the `inbox/` key only after the copy is confirmed; update `file_key`, set status `processed`, add a `moved` event. If a file with the same name already exists, append a number to the filename to avoid overwriting.
+   - invalid → move to `pending/` (incremental suffix on name conflict); update `file_key`; status `pending`.
 
 The bucket is versioned: any `inbox/` object deletion creates a delete marker, the data remains recoverable.
 
@@ -101,7 +101,7 @@ The bucket is versioned: any `inbox/` object deletion creates a delete marker, t
 Custom pages on the PocketBase instance:
 
 - File list: all files with status, filters, combined search over full text (FTS5) + metadata/fields.
-- Detail: PDF preview streamed from S3 through a dedicated route, along with extracted fields and `rule_trace` visible in debug mode.
+- Detail: PDF preview streamed from S3 through a dedicated route, along with extracted fields; debug mode adds detailed log lines explaining every rule evaluation and action performed.
 - Correction: forms to edit fields, type, and sender; correcting a `processed` file re-files it (copy to the new key, delete the old one, history preserved). A corrected `pending` file follows the same path: once validated, it is copied to its templated key in `files/` (incremental suffix on conflict) and removed from `pending/`.
 - Validation: transition to `validated`; `processed` files can also be validated. Validation is what takes a corrected `pending` file out of the review queue.
 - Rule management: config display and dry-run on an existing document. The configuration is reloaded only on restart; there is no runtime reload.
