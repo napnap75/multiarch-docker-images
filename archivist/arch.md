@@ -68,15 +68,17 @@ A `config.jsonc` file kept alongside the binary, reloaded on restart. Three sect
    - `type`: `string` | `number` | `boolean`
    - `mandatory`: true | false
 
-2. `rules`: ordered list of rules that will be evaluated one after the other:
-   - `when`: an `expr-lang/expr` expression evaluated over the document text and the current field values; rules run in order and each `when` may reference fields set by earlier rules (e.g. `firstPageText contains "Relevé de compte"`, or `emittingCompany in ["BRED", "Fortunéo"] && documentType == "Relevé de compte"`)
-   - `actions`: 
-       - `set`: set the value of one field; fields accumulate as rules are applied in order
-	   - `stop`: stop rule evaluation; the fields set so far are kept and the usual validations still apply
+2. `rules`: an ordered tree of rules. Each rule contains four keys:
+   - `when` (required): an `expr-lang/expr` expression evaluated against the first-page text and the current field values; the rest of the rule runs only if it returns true (e.g. `firstPageText contains "Relevé de compte"`, or `emittingCompany in ["BRED", "Fortunéo"] && documentType == "Relevé de compte"`)
+   - `set`: list of assignments, evaluated in order — `{ "field": ..., "value": ... }` for a constant, `{ "field": ..., "eval": ... }` for an expression evaluated in the same context
+   - `delete`: list of field names to unset (they become undefined again for later rules and template rendering)
+   - `rules`: child rules, evaluated in order only if the parent `when` matched; nesting is recursive
 
-3. `templates`: named naming templates (e.g. `bank_statement: {sender}/{date}_{type}_{reference}.pdf`), with required-field validation — a template with a missing mandatory field renders the result invalid and routes the file to `pending/`. The template is chosen by the rules themselves: `template` is a field declared in the `fields` section like any other and set with `set` (e.g. `set template = "bank_statement"` when `emittingCompany in ["BRED", "Fortunéo"]` and `documentType == "Relevé de compte"`). If no rule sets `template`, the special `default` template is used. A `template` value with no matching entry renders the result invalid and routes the file to `pending/`.
+   The application registers a built-in helper in the expression environment: `firstMatch(regex)` returns the first match of the regex in the first-page text (first capture group when present), enabling dynamic extraction (dates, invoice numbers).
 
-Validation on load: JSON schema, regex compilation, `expr` expression compilation against a typed context (`Document{FirstPageText, Fields}`). Full rejection if invalid, no partial processing.
+3. `templates`: named naming templates (e.g. `bank_statement: {sender}/{date}_{type}_{reference}.pdf`), with required-field validation; the `{date}` placeholder is normalized to `yyyy-mm-dd` ("/" is not usable in a S3 key) — a template with a missing mandatory field renders the result invalid and routes the file to `pending/`. The template is chosen by the rules themselves: `template` is a field declared in the `fields` section like any other and set with `set` (e.g. `set template = "bank_statement"` when `emittingCompany in ["BRED", "Fortunéo"]` and `documentType == "Relevé de compte"`). If no rule sets `template`, the special `default` template is used. A `template` value with no matching entry renders the result invalid and routes the file to `pending/`.
+
+Validation on load: JSON schema, regex compilation, `expr` expression compilation (`when` and `eval`) against a typed context (`Document{FirstPageText, Fields}`) with the `firstMatch` helper, regex precompilation and caching. Full rejection if invalid, no partial processing.
 
 ## 6. Processing Pipeline
 
