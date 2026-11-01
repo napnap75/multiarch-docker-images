@@ -12,7 +12,7 @@
   "fields": [
     { "name": "emittingCompany", "type": "text", "mandatory": true  },
     { "name": "documentType",    "type": "enum", "mandatory": true  },
-    { "name": "date",            "type": "string", "mandatory": true  },
+    { "name": "date",            "type": "date",  "mandatory": true  },
     { "name": "template",        "type": "text", "mandatory": false },
     { "name": "bankAccount",     "type": "enum", "mandatory": false },
     { "name": "address",         "type": "text", "mandatory": false },
