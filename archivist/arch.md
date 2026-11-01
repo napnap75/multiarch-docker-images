@@ -61,7 +61,7 @@ Common payload keys:
 
 - `event_type`: `imported` | `corrected` | `validated`
 - `timestamp`: RFC 3339 date of the event
-- `before` / `after`: snapshots of the document state; `file_key` (the S3 key, unified with the `documents` record field) is always present; declared extraction fields appear only when they have a recognized value — a missing key means the value is unknown, there is no `null`
+- `before` / `after`: snapshots of the document state; `file_key` (the S3 key, unified with the `documents` record field) is always present; `status` appears only when the event changes it — at import the status does not exist before, so `before` carries no `status`; declared extraction fields appear only when they have a recognized value — a missing key means the value is unknown, there is no `null`
 
 Per event type:
 
@@ -69,10 +69,9 @@ Per event type:
 |---|---|---|---|
 | `event_type` | always | always | always |
 | `timestamp` | always | always | always |
-| `status` | always | — | — |
 | `errors` | on failure | — | — |
-| `before` | always | always | — |
-| `after` | always | always | — |
+| `before` | always | always | always |
+| `after` | always | always | always |
 
 `imported` — created after filing (valid or not), one event for the whole import + classification:
 
@@ -80,12 +79,12 @@ Per event type:
 {
   "event_type": "imported",
   "timestamp": "2026-01-15T14:23:07Z",
-  "status": "processed",
   "before": {
     "file_key": "inbox/scan_2026-01-15.pdf"
   },
   "after": {
     "file_key": "files/BRED/Decembre 2025_Relevé de compte_Compte Thomas.pdf",
+    "status": "processed",
     "emittingCompany": "BRED",
     "documentType": "Relevé de compte",
     "emissionDate": "2026-01-15T00:00:00Z",
@@ -101,13 +100,13 @@ On classification failure, the document is routed to `pending/` and the payload 
 {
   "event_type": "imported",
   "timestamp": "2026-01-15T14:23:07Z",
-  "status": "pending",
   "errors": ["mandatory field missing: emittingCompany"],
   "before": {
     "file_key": "inbox/scan_2026-01-15.pdf"
   },
   "after": {
     "file_key": "pending/scan_2026-01-15.pdf",
+    "status": "pending",
     "documentType": "Relevé de compte",
     "emissionDate": "2026-01-15T00:00:00Z",
     "template": "bank_statement"
@@ -115,7 +114,7 @@ On classification failure, the document is routed to `pending/` and the payload 
 }
 ```
 
-`corrected` — created after a dashboard correction is saved and the file re-filed; a correction always moves the document to `validated` whatever its previous status, so there is no `status` key:
+`corrected` — created after a dashboard correction is saved and the file re-filed; a correction always moves the document to `validated` whatever its previous status, so the status change is part of the snapshot diff:
 
 ```json
 {
@@ -123,12 +122,14 @@ On classification failure, the document is routed to `pending/` and the payload 
   "timestamp": "2026-01-18T09:41:52Z",
   "before": {
     "file_key": "pending/scan_2026-01-15.pdf",
+    "status": "pending",
     "emittingCompany": "BRED",
     "emissionDate": "2026-01-15T00:00:00Z",
     "bankAccount": "Compte Thomas"
   },
   "after": {
     "file_key": "files/Fortunéo/Janvier 2026_Relevé de compte_Compte Thomas.pdf",
+    "status": "validated",
     "emittingCompany": "Fortunéo",
     "emissionDate": "2026-02-15T00:00:00Z",
     "template": "bank_statement"
@@ -138,12 +139,18 @@ On classification failure, the document is routed to `pending/` and the payload 
 
 The diff is derived by comparing the two snapshots: a field present in `before` and absent from `after` was deleted (case of `bankAccount` above); the reverse means it was added (`template` above).
 
-`validated` — transition from `processed` to `validated` from the dashboard, no re-filing, no field change; the event type carries the whole information:
+`validated` — transition from `processed` to `validated` from the dashboard, no re-filing, no field change; only the status changes, so the snapshots carry it alone:
 
 ```json
 {
   "event_type": "validated",
-  "timestamp": "2026-01-20T16:05:11Z"
+  "timestamp": "2026-01-20T16:05:11Z",
+  "before": {
+    "status": "processed"
+  },
+  "after": {
+    "status": "validated"
+  }
 }
 ```
 
