@@ -45,10 +45,8 @@ Nextcloud mounts the bucket as external storage: it is the user-facing interface
 One row per processed PDF file:
 
 - `sha256`: the sha256 is a primary key as the system will reject as duplicate any file with the same hash
-- `original_filename`: original file name in `inbox/`
 - `file_key`: current S3 key of the file
 - `pages`: page-by-page extracted text as a JSON array (0-based, `pages[0]` = page 1); the FTS5 full-text index is built from the concatenation of all pages
-- `size`: file size
 - `status`: `pending` | `processed` | `validated`
 + all the fields declared by the user in the configuration file
 
@@ -90,7 +88,7 @@ Executed by the PocketBase cron job (configurable interval, e.g. every minute):
 3. **Extraction**: page-by-page text (one entry per page, for rule evaluation and the FTS index) via `ledongthuc/pdf`, including headers and footers
 4. **Rule evaluation**: rules evaluated in order against the document pages and the fields set so far; full evaluation log written to the application logs (built-in dry-run mode for debugging from the dashboard).
 5. **Validation**: a result is valid if and only if: all rules have been processed with no error, all mandatory fields are identified, the selected template exists in the configuration, and the naming template evaluated with no error. Otherwise: route directly to `pending/`.
-6. **Record**: create the `documents` record (sha256, original filename, current inbox key, extracted texts, fields, status) and add a `classified` event including the original filename. The record exists before any physical move, so an interrupted filing leaves a recoverable state.
+6. **Record**: create the `documents` record (sha256, current inbox key, pages, fields, status) and add a `classified` event including the original filename. The record exists before any physical move, so an interrupted filing leaves a recoverable state.
 7. **Filing**:
    - valid → resolve the target name first: if a file with the same name already exists in the target prefix, append a number to the filename; then copy to the new key (`files/` + rendered template — the template renders the full object path, there is no separate prefix), verify the target object exists, and delete the `inbox/` key only after the copy is confirmed; finally update the `documents` record with the final, conflict-resolved filename (`file_key`, status `processed`, `moved` event).
    - invalid → move to `pending/` (incremental suffix on name conflict); update `file_key`; status `pending`.
