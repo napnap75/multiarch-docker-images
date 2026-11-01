@@ -10,13 +10,13 @@
   // "template" is a regular field: rules select the naming template with it.
   // ==========================================================================
   "fields": [
-    { "name": "emittingCompany", "type": "string", "mandatory": true  },
-    { "name": "documentType",    "type": "string", "mandatory": true  },
+    { "name": "emittingCompany", "type": "text", "mandatory": true  },
+    { "name": "documentType",    "type": "enum", "mandatory": true  },
     { "name": "date",            "type": "string", "mandatory": true  },
-    { "name": "template",        "type": "string", "mandatory": false },
-    { "name": "bankAccount",     "type": "string", "mandatory": false },
-    { "name": "address",         "type": "string", "mandatory": false },
-    { "name": "reference",       "type": "string", "mandatory": false }
+    { "name": "template",        "type": "text", "mandatory": false },
+    { "name": "bankAccount",     "type": "enum", "mandatory": false },
+    { "name": "address",         "type": "text", "mandatory": false },
+    { "name": "reference",       "type": "text", "mandatory": false }
   ],
 
   // ==========================================================================
@@ -35,8 +35,11 @@
   //   rules : child rules, evaluated in order only if the parent "when"
   //           matched; nesting is recursive
   //
-  // Built-in helper: firstMatch(regex) returns the first match of the regex
+  // Built-in helpers: firstMatch(regex) returns the first match of the regex
   // in the first-page text (first capture group when present).
+  // parseDate(value, layout) parses a string into a native date (Go layout,
+  // e.g. `02/01/2006` for 15/01/2026); the format is carried by the rule so
+  // it can differ per document type.
   // ==========================================================================
   "rules": [
     // --- Generic extraction, runs for every document -------------------------
@@ -44,7 +47,7 @@
     {
       "when": "true",
       "set": [
-        { "field": "date", "eval": "firstMatch(`[0-9]{2}/[0-9]{2}/[0-9]{4}`)" }
+        { "field": "date", "eval": "parseDate(firstMatch(`[0-9]{2}/[0-9]{2}/[0-9]{4}`), `02/01/2006`)" }
       ]
     },
 
