@@ -35,11 +35,11 @@
   //   rules : child rules, evaluated in order only if the parent "when"
   //           matched; nesting is recursive
   //
-  // Built-in helpers: firstMatch(regex) returns the first match of the regex
+  // Built-in helper: firstMatch(regex) returns the first match of the regex
   // in the first-page text (first capture group when present).
-  // parseDate(value, layout) parses a string into a native date (Go layout,
-  // e.g. `02/01/2006` for 15/01/2026); the format is carried by the rule so
-  // it can differ per document type.
+  // Strings are parsed into native dates with expr's standard date(value,
+  // layout) builtin (Go layout, e.g. `02/01/2006` for 15/01/2026); the
+  // format is carried by the rule so it can differ per document type.
   // ==========================================================================
   "rules": [
     // --- Generic extraction, runs for every document -------------------------
@@ -47,7 +47,7 @@
     {
       "when": "true",
       "set": [
-        { "field": "date", "eval": "parseDate(firstMatch(`[0-9]{2}/[0-9]{2}/[0-9]{4}`), `02/01/2006`)" }
+        { "field": "date", "eval": "date(firstMatch(`[0-9]{2}/[0-9]{2}/[0-9]{4}`), `02/01/2006`)" }
       ]
     },
 
