@@ -56,7 +56,7 @@ Acceptance criteria:
 
 - Given the `document_events` collection does not exist, when the application starts, then it is created with the columns `document` (relation to `documents`, cascade delete with the record), `event_type` (select: `imported`, `corrected`, `validated`), `payload` (JSON), `timestamp` (date).
 - Given the collection exists, when the application starts, then its schema is verified and left unchanged.
-- Given any API request that tries to update or delete a `document_events` record, when it is served, then it is rejected by the collection's API rules.
+- Given any API request that tries to update or delete a `document_events` record, when it is served, then it is rejected by the application's request hooks (`OnRecordUpdateRequest` / `OnRecordDeleteRequest` for the collection, bound to superusers as well). API rules alone cannot enforce this: superusers bypass all API rules, and no rule value blocks everyone (`null` = superusers only, empty string = public).
 - Given a record is appended, when the write succeeds, then it is never modified afterwards by the application itself.
 
 ### US-05 — Refuse to serve on invalid configuration
@@ -200,7 +200,7 @@ Acceptance criteria:
 
 - Given the admin UI, when I open `document_events`, then I can sort by `timestamp` and filter by `document` or `event_type`.
 - Given an event, when I open it, then the `payload` JSON is displayed and readable, matching the section-4 format.
-- Given the collection, when I try to edit or delete a record from the UI, then the operation is rejected by the API rules (US-04).
+- Given the collection, when I try to edit or delete a record from the UI, then the operation is rejected by the application's request hooks (US-04) — including for the superuser account the admin UI uses.
 
 ## Stories deferred to later epics
 
