@@ -12,7 +12,7 @@
   "fields": [
     { "name": "emittingCompany", "type": "text", "mandatory": true  },
     { "name": "documentType",    "type": "enum", "mandatory": true  },
-    { "name": "date",            "type": "date",  "mandatory": true  },
+    { "name": "emissionDate",    "type": "date",  "mandatory": true  },
     { "name": "template",        "type": "text", "mandatory": false },
     { "name": "bankAccount",     "type": "enum", "mandatory": false },
     { "name": "address",         "type": "text", "mandatory": false },
@@ -43,11 +43,13 @@
   // ==========================================================================
   "rules": [
     // --- Generic extraction, runs for every document -------------------------
-    // Emission date, e.g. "Paris, le 15/01/2026" -> "15/01/2026"
+    // Emission date, e.g. "Paris, le 15/01/2026" -> "15/01/2026" (parsed
+    // into a native date; named emissionDate to avoid clashing with the
+    // expr date() builtin)
     {
       "when": "true",
       "set": [
-        { "field": "date", "eval": "date(firstMatch(`[0-9]{2}/[0-9]{2}/[0-9]{4}`), `02/01/2006`)" }
+        { "field": "emissionDate", "eval": "date(firstMatch(`[0-9]{2}/[0-9]{2}/[0-9]{4}`), `02/01/2006`)" }
       ]
     },
 
@@ -145,16 +147,19 @@
 
   // ==========================================================================
   // templates: named naming templates, selected by the "template" field.
-  // The rendered template is the full object path under files/.
-  // {date} is rendered as yyyy-mm-dd when set (normalized; "/" is not usable
-  // in a S3 key). A field that no rule has set renders as an empty string.
+  // A template is a literal string containing {expr} placeholders: the
+  // inside of each placeholder is an expr-lang/expr expression evaluated in
+  // the document context (fields, helpers, builtins) and replaced by its
+  // result, e.g. {emissionDate.Format(`2006-01-02`)} or
+  // {upper(emittingCompany)}. Unset optional fields evaluate to an empty
+  // string. The rendered template is the full object path under files/.
   // If no rule sets "template", the "default" template is used.
   // ==========================================================================
   "templates": {
-    "bank_statement":     "{emittingCompany}/{date}_{documentType}_{bankAccount}.pdf",
-    "tax_notice_housing": "Impots/{date}_{documentType}_{address}.pdf",
-    "tax_notice_income":  "Impots/{date}_{documentType}.pdf",
-    "invoice":            "Factures/{date}_{emittingCompany}_{reference}.pdf",
+    "bank_statement":     "{emittingCompany}/{emissionDate.Format(`2006-01-02`)}_{documentType}_{bankAccount}.pdf",
+    "tax_notice_housing": "Impots/{emissionDate.Format(`2006-01-02`)}_{documentType}_{address}.pdf",
+    "tax_notice_income":  "Impots/{emissionDate.Format(`2006-01-02`)}_{documentType}.pdf",
+    "invoice":            "Factures/{emissionDate.Format(`2006-01-02`)}_{emittingCompany}_{reference}.pdf",
     "default":            "Divers/{documentType}.pdf"
   }
 }
