@@ -65,8 +65,10 @@ A `config.jsonc` file kept alongside the binary, reloaded on restart. Three sect
 
 1. `fields`: declaration of fields to extract from the files:
    - `name`: name of the field
-   - `type`: `string` | `number` | `boolean`
+   - `type`: `text` | `number` | `date` | `boolean` | `enum`
    - `mandatory`: true | false
+
+   Type semantics in rule expressions: `number` and `boolean` expose native values, `date` exposes a native Go `time.Time` (comparable, arithmetic via `duration()`, usable with the `date()`/`now()` builtins), `text` and `enum` expose strings. `enum` does not declare its values: the application builds the field's vocabulary from the constants the rules assign to it; the dashboard correction form offers this vocabulary as a dropdown, with free entry allowed. Assigning a value that does not match the field type (e.g. a raw string to a `date` field, a non-numeric value to a `number` field) is a rule error and routes the document to `pending/`.
 
 2. `rules`: an ordered tree of rules. Each rule contains four keys:
    - `when` (required): an `expr-lang/expr` expression evaluated against the first-page text and the current field values; the rest of the rule runs only if it returns true (e.g. `firstPageText contains "Relevé de compte"`, or `emittingCompany in ["BRED", "Fortunéo"] && documentType == "Relevé de compte"`)
@@ -74,11 +76,11 @@ A `config.jsonc` file kept alongside the binary, reloaded on restart. Three sect
    - `delete`: list of field names to unset (they become undefined again for later rules and template rendering)
    - `rules`: child rules, evaluated in order only if the parent `when` matched; nesting is recursive
 
-   The application registers a built-in helper in the expression environment: `firstMatch(regex)` returns the first match of the regex in the first-page text (first capture group when present), enabling dynamic extraction (dates, invoice numbers).
+   The application registers built-in helpers in the expression environment: `firstMatch(regex)` returns the first match of the regex in the first-page text (first capture group when present), and `parseDate(value, layout)` parses a string into a native `time.Time` using a Go date layout — the format is carried by the parsing rule, so it can differ per document type.
 
-3. `templates`: named naming templates (e.g. `bank_statement: {sender}/{date}_{type}_{reference}.pdf`), with required-field validation; the `{date}` placeholder is normalized to `yyyy-mm-dd` ("/" is not usable in a S3 key) — a template with a missing mandatory field renders the result invalid and routes the file to `pending/`. The template is chosen by the rules themselves: `template` is a field declared in the `fields` section like any other and set with `set` (e.g. `set template = "bank_statement"` when `emittingCompany in ["BRED", "Fortunéo"]` and `documentType == "Relevé de compte"`). If no rule sets `template`, the special `default` template is used. A `template` value with no matching entry renders the result invalid and routes the file to `pending/`.
+3. `templates`: named naming templates (e.g. `bank_statement: {sender}/{date}_{type}_{reference}.pdf`), with required-field validation; the `{date}` placeholder is rendered from the native date via Go's `Format("2006-01-02")` ("/" is not usable in a S3 key) — a template with a missing mandatory field renders the result invalid and routes the file to `pending/`. The template is chosen by the rules themselves: `template` is a field declared in the `fields` section like any other and set with `set` (e.g. `set template = "bank_statement"` when `emittingCompany in ["BRED", "Fortunéo"]` and `documentType == "Relevé de compte"`). If no rule sets `template`, the special `default` template is used. A `template` value with no matching entry renders the result invalid and routes the file to `pending/`.
 
-Validation on load: JSON schema, regex compilation, `expr` expression compilation (`when` and `eval`) against a typed context (`Document{FirstPageText, Fields}`) with the `firstMatch` helper, regex precompilation and caching. Full rejection if invalid, no partial processing.
+Validation on load: JSON schema, regex compilation, `expr` expression compilation (`when` and `eval`) against a typed context (`Document{FirstPageText, Fields}`) with the `firstMatch` and `parseDate` helpers, regex precompilation and caching. Full rejection if invalid, no partial processing.
 
 ## 6. Processing Pipeline
 
@@ -102,7 +104,7 @@ Custom pages on the PocketBase instance:
 
 - File list: all files with status, filters, combined search over full text (FTS5) + metadata/fields.
 - Detail: PDF preview streamed from S3 through a dedicated route, along with extracted fields; debug mode adds detailed log lines explaining every rule evaluation and action performed.
-- Correction: forms to edit the extracted fields. A save is only possible if the selected template can be evaluated without error; otherwise the form refuses the save. A successfully corrected file is re-filed (copy to the new key, delete the old one, incremental suffix on conflict) and takes the status `validated`, whatever its previous status; a corrected `pending` file is thereby removed from `pending/`. History is preserved.
+- Correction: forms to edit the extracted fields. A save is only possible if the selected template can be evaluated without error; otherwise the form refuses the save. A successfully corrected file is re-filed (copy to the new key, delete the old one, incremental suffix on conflict) and takes the status `validated`, whatever its previous status; a corrected `pending` file is thereby removed from `pending/`. Enum fields are offered as a dropdown built from the rules' vocabulary, with free entry allowed; date fields use a native date picker. History is preserved.
 - Validation: transition from `processed` to `validated`. A `pending` file can only leave the review queue through a correction that can be saved, which itself sets the status to `validated`.
 - Rule management: config display and dry-run on an existing document. The configuration is reloaded only on restart; there is no runtime reload.
 
