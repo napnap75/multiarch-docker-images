@@ -37,11 +37,12 @@
   //           matched; nesting is recursive
   //
   // Built-in helpers:
-  //   firstMatch(regex, pages?) returns the first match of the regex
-  //   in the document text (first capture group when present); pages?: a
-  //   number searches that page (1-based), [a, b] searches pages a to b
-  //   inclusive, a longer list searches exactly those pages, omitted =
-  //   the whole document.
+  //   firstMatch(regex, texts?) returns the first match of the regex
+  //   in the document text (first capture group when present); texts? is an
+  //   expression evaluated to the text(s) to search: pages[0] searches
+  //   the first page, pages[0:3] searches pages 1 to 3 (expr slice
+  //   syntax, end exclusive), any list of strings works; omitted = the
+  //   whole document.
   //   period(value, unit, shift, layout?) renders a period instead of a
   //   raw date: unit = `month`|`quarter`|`half`|`year`, shift = -1/0/+1
   //   for the previous / containing / next period (rent receipt: 0,
@@ -62,7 +63,7 @@
     {
       "when": "true",
       "set": [
-        { "field": "emissionDate", "eval": "date(firstMatch(`[0-9]{2}/[0-9]{2}/[0-9]{4}`, 1), `02/01/2006`)" }
+        { "field": "emissionDate", "eval": "date(firstMatch(`[0-9]{2}/[0-9]{2}/[0-9]{4}`, pages[0]), `02/01/2006`)" }
       ]
     },
 
