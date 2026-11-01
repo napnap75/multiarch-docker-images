@@ -35,8 +35,17 @@
   //   rules : child rules, evaluated in order only if the parent "when"
   //           matched; nesting is recursive
   //
-  // Built-in helper: firstMatch(regex) returns the first match of the regex
-  // in the first-page text (first capture group when present).
+  // Built-in helpers:
+  //   firstMatch(regex) returns the first match of the regex in the
+  //   first-page text (first capture group when present).
+  //   period(value, unit, shift, layout?) renders a period instead of a
+  //   raw date: unit = `month`|`quarter`|`half`|`year`, shift = -1/0/+1
+  //   for the previous / containing / next period (rent receipt: 0,
+  //   end-of-quarter charges call: +1, bank statement: -1). Returns a
+  //   French string (`Janvier 2026`, `T2 2026`, `S1 2026`, `2026`); the
+  //   optional layout is a Go reference-date layout applied to the
+  //   period's first day with French month names; ignored for
+  //   quarter/half (fixed formats).
   // Strings are parsed into native dates with expr's standard date(value,
   // layout) builtin (Go layout, e.g. `02/01/2006` for 15/01/2026); the
   // format is carried by the rule so it can differ per document type.
@@ -156,7 +165,8 @@
   // If no rule sets "template", the "default" template is used.
   // ==========================================================================
   "templates": {
-    "bank_statement":     "{emittingCompany}/{emissionDate.Format(`2006-01-02`)}_{documentType}_{bankAccount}.pdf",
+    // A bank statement covers the month before its emission date.
+    "bank_statement":     "{emittingCompany}/{period(emissionDate, `month`, -1)}_{documentType}_{bankAccount}.pdf",
     "tax_notice_housing": "Impots/{emissionDate.Format(`2006-01-02`)}_{documentType}_{address}.pdf",
     "tax_notice_income":  "Impots/{emissionDate.Format(`2006-01-02`)}_{documentType}.pdf",
     "invoice":            "Factures/{emissionDate.Format(`2006-01-02`)}_{emittingCompany}_{reference}.pdf",
