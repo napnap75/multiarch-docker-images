@@ -29,7 +29,7 @@ func RunPoll(app *core.App, cfg *config.Config, s3 *storage.Client) {
 	ctx := context.Background()
 
 	// US-11: recover interrupted filings first.
-	recoverStuck(app, s3, ctx)
+	recoverStuck(app, cfg, s3, ctx)
 
 	objects, err := s3.ListInbox(ctx)
 	if err != nil {
@@ -155,7 +155,7 @@ func fileDocument(s3 *storage.Client, ctx context.Context, record *core.Record, 
 
 // recoverStuck completes interrupted filings: records whose file_key is still
 // under inbox/ (US-11).
-func recoverStuck(app *core.App, s3 *storage.Client, ctx context.Context) {
+func recoverStuck(app *core.App, cfg *config.Config, s3 *storage.Client, ctx context.Context) {
 	stuck, err := app.FindRecordsByFilter("documents", "file_key ~ {:p}", "", 100, 0, dbx.Params{"p": "inbox/"})
 	if err != nil {
 		log.Printf("recovery: %v", err)
@@ -169,8 +169,17 @@ func recoverStuck(app *core.App, s3 *storage.Client, ctx context.Context) {
 			if tplName == "" {
 				tplName = "default"
 			}
-		_loop:
-			_ = tplName
+			tpl, ok := cfg.Templates[tplName]
+			if !ok {
+				log.Printf("recovery: record %s: unknown template %q", record.Id, tplName)
+				continue
+			}
+			var err error
+			rendered, err = tpl.Render(pbapp.FieldsFromRecord(cfg, record), nil)
+			if err != nil {
+				log.Printf("recovery: record %s: %v", record.Id, err)
+				continue
+			}
 		}
 		newKey, err := fileDocument(s3, ctx, record, rendered)
 		if err != nil {
