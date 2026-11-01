@@ -20,8 +20,9 @@
   ],
 
   // ==========================================================================
-  // rules: an ordered tree evaluated against the first-page text
-  // (firstPageText) and the fields already set or deleted by earlier rules.
+  // rules: an ordered tree evaluated against the document pages
+  // (pages array, pages[0] = page 1) and the fields already set or deleted
+  // by earlier rules.
   //
   // Each rule contains four keys:
   //   when  (required): expr-lang expression; the rest of the rule runs only
@@ -36,8 +37,11 @@
   //           matched; nesting is recursive
   //
   // Built-in helpers:
-  //   firstMatch(regex) returns the first match of the regex in the
-  //   first-page text (first capture group when present).
+  //   firstMatch(regex, pages?) returns the first match of the regex
+  //   in the document text (first capture group when present); pages?: a
+  //   number searches that page (1-based), [a, b] searches pages a to b
+  //   inclusive, a longer list searches exactly those pages, omitted =
+  //   the whole document.
   //   period(value, unit, shift, layout?) renders a period instead of a
   //   raw date: unit = `month`|`quarter`|`half`|`year`, shift = -1/0/+1
   //   for the previous / containing / next period (rent receipt: 0,
@@ -58,13 +62,13 @@
     {
       "when": "true",
       "set": [
-        { "field": "emissionDate", "eval": "date(firstMatch(`[0-9]{2}/[0-9]{2}/[0-9]{4}`), `02/01/2006`)" }
+        { "field": "emissionDate", "eval": "date(firstMatch(`[0-9]{2}/[0-9]{2}/[0-9]{4}`, 1), `02/01/2006`)" }
       ]
     },
 
     // --- Bank statements (relevés de compte) ----------------------------------
     {
-      "when": "firstPageText contains `Relevé de compte`",
+      "when": "pages[0] contains `Relevé de compte`",
       "set": [
         { "field": "documentType", "value": "Relevé de compte" },
         { "field": "template",     "value": "bank_statement" }
@@ -72,24 +76,24 @@
       "rules": [
         // Issuing bank
         {
-          "when": "firstPageText contains `BRED`",
+          "when": "pages[0] contains `BRED`",
           "set": [ { "field": "emittingCompany", "value": "BRED" } ]
         },
         {
-          "when": "firstPageText contains `Fortunéo`",
+          "when": "pages[0] contains `Fortunéo`",
           "set": [ { "field": "emittingCompany", "value": "Fortunéo" } ]
         },
         {
-          "when": "firstPageText contains `Crédit Mutuel`",
+          "when": "pages[0] contains `Crédit Mutuel`",
           "set": [ { "field": "emittingCompany", "value": "Crédit Mutuel" } ]
         },
         // Personal accounts, matched on the account number printed on page 1
         {
-          "when": "firstPageText contains `12345678901`",
+          "when": "pages[0] contains `12345678901`",
           "set": [ { "field": "bankAccount", "value": "Compte Thomas" } ]
         },
         {
-          "when": "firstPageText contains `98765432109`",
+          "when": "pages[0] contains `98765432109`",
           "set": [ { "field": "bankAccount", "value": "Compte joint" } ]
         }
       ]
@@ -97,7 +101,7 @@
 
     // --- Taxe d'habitation, one child rule per address ------------------------
     {
-      "when": "firstPageText contains `Taxe d'habitation`",
+      "when": "pages[0] contains `Taxe d'habitation`",
       "set": [
         { "field": "documentType",    "value": "Taxe d'habitation" },
         { "field": "emittingCompany", "value": "DGFiP" },
@@ -105,11 +109,11 @@
       ],
       "rules": [
         {
-          "when": "firstPageText contains `12 rue des Lilas`",
+          "when": "pages[0] contains `12 rue des Lilas`",
           "set": [ { "field": "address", "value": "12 rue des Lilas, Paris" } ]
         },
         {
-          "when": "firstPageText contains `34 avenue Jean Jaurès`",
+          "when": "pages[0] contains `34 avenue Jean Jaurès`",
           "set": [ { "field": "address", "value": "34 avenue Jean Jaurès, Bordeaux" } ]
         }
       ]
@@ -117,7 +121,7 @@
 
     // --- Avis d'impôt sur le revenu --------------------------------------------
     {
-      "when": "firstPageText contains `Impôt sur le revenu` && firstPageText contains `avis d'imposition`",
+      "when": "pages[0] contains `Impôt sur le revenu` && pages[0] contains `avis d'imposition`",
       "set": [
         { "field": "documentType",    "value": "Avis d'impôt sur le revenu" },
         { "field": "emittingCompany", "value": "DGFiP" },
@@ -127,7 +131,7 @@
 
     // --- Generic invoices (e-commerce and others) -----------------------------
     {
-      "when": "firstPageText contains `Facture` && firstPageText contains `TVA`",
+      "when": "pages[0] contains `Facture` && pages[0] contains `TVA`",
       "set": [
         { "field": "documentType", "value": "Facture" },
         { "field": "template",     "value": "invoice" },
@@ -139,15 +143,15 @@
       "delete": [ "bankAccount", "address" ],
       "rules": [
         {
-          "when": "firstPageText contains `Amazon`",
+          "when": "pages[0] contains `Amazon`",
           "set": [ { "field": "emittingCompany", "value": "Amazon" } ]
         },
         {
-          "when": "firstPageText contains `LDLC`",
+          "when": "pages[0] contains `LDLC`",
           "set": [ { "field": "emittingCompany", "value": "LDLC" } ]
         },
         {
-          "when": "firstPageText contains `Cdiscount`",
+          "when": "pages[0] contains `Cdiscount`",
           "set": [ { "field": "emittingCompany", "value": "Cdiscount" } ]
         }
       ]
