@@ -53,7 +53,99 @@ One row per processed PDF file:
 The append-only `document_events` collection is the single source of truth for a document's history; no history is stored on the `documents` record itself.
 
 ### `document_events`
-Append-only history: `document`, `event_type` (`classified`, `moved`, `corrected`, `validated`), `payload` as JSON, `timestamp`.
+Append-only history: `document`, `event_type` (`imported`, `corrected`, `validated`), `payload` as JSON, `timestamp`.
+
+The payload is self-contained: each event carries its own type, its own timestamp and the document state before and after, so a document's full history is reconstructed from this collection alone. All dates are RFC 3339; all S3 keys are complete, prefix included.
+
+Common payload keys:
+
+- `event_type`: `imported` | `corrected` | `validated`
+- `timestamp`: RFC 3339 date of the event
+- `before` / `after`: snapshots of the document state; `file_key` (the S3 key, unified with the `documents` record field) is always present; declared extraction fields appear only when they have a recognized value — a missing key means the value is unknown, there is no `null`
+
+Per event type:
+
+| Key | imported | corrected | validated |
+|---|---|---|---|
+| `event_type` | always | always | always |
+| `timestamp` | always | always | always |
+| `status` | always | — | — |
+| `errors` | on failure | — | — |
+| `before` | always | always | — |
+| `after` | always | always | — |
+
+`imported` — created after filing (valid or not), one event for the whole import + classification:
+
+```json
+{
+  "event_type": "imported",
+  "timestamp": "2026-01-15T14:23:07Z",
+  "status": "processed",
+  "before": {
+    "file_key": "inbox/scan_2026-01-15.pdf"
+  },
+  "after": {
+    "file_key": "files/BRED/Decembre 2025_Relevé de compte_Compte Thomas.pdf",
+    "emittingCompany": "BRED",
+    "documentType": "Relevé de compte",
+    "emissionDate": "2026-01-15T00:00:00Z",
+    "template": "bank_statement",
+    "bankAccount": "Compte Thomas"
+  }
+}
+```
+
+On classification failure, the document is routed to `pending/` and the payload adds `errors` (one entry per cause: missing mandatory field, rule error, missing template, naming-template error) while `after` still lists the fields recognized before the failure — this is what the correction form pre-fills:
+
+```json
+{
+  "event_type": "imported",
+  "timestamp": "2026-01-15T14:23:07Z",
+  "status": "pending",
+  "errors": ["mandatory field missing: emittingCompany"],
+  "before": {
+    "file_key": "inbox/scan_2026-01-15.pdf"
+  },
+  "after": {
+    "file_key": "pending/scan_2026-01-15.pdf",
+    "documentType": "Relevé de compte",
+    "emissionDate": "2026-01-15T00:00:00Z",
+    "template": "bank_statement"
+  }
+}
+```
+
+`corrected` — created after a dashboard correction is saved and the file re-filed; a correction always moves the document to `validated` whatever its previous status, so there is no `status` key:
+
+```json
+{
+  "event_type": "corrected",
+  "timestamp": "2026-01-18T09:41:52Z",
+  "before": {
+    "file_key": "pending/scan_2026-01-15.pdf",
+    "emittingCompany": "BRED",
+    "emissionDate": "2026-01-15T00:00:00Z",
+    "bankAccount": "Compte Thomas"
+  },
+  "after": {
+    "file_key": "files/Fortunéo/Janvier 2026_Relevé de compte_Compte Thomas.pdf",
+    "emittingCompany": "Fortunéo",
+    "emissionDate": "2026-02-15T00:00:00Z",
+    "template": "bank_statement"
+  }
+}
+```
+
+The diff is derived by comparing the two snapshots: a field present in `before` and absent from `after` was deleted (case of `bankAccount` above); the reverse means it was added (`template` above).
+
+`validated` — transition from `processed` to `validated` from the dashboard, no re-filing, no field change; the event type carries the whole information:
+
+```json
+{
+  "event_type": "validated",
+  "timestamp": "2026-01-20T16:05:11Z"
+}
+```
 
 
 ## 5. Configuration File (JSONC)
@@ -88,9 +180,9 @@ Executed by the PocketBase cron job (configurable interval, e.g. every minute):
 3. **Extraction**: page-by-page text (one entry per page, for rule evaluation and the FTS index) via `ledongthuc/pdf`, including headers and footers
 4. **Rule evaluation**: rules evaluated in order against the document pages and the fields set so far; full evaluation log written to the application logs (built-in dry-run mode for debugging from the dashboard).
 5. **Validation**: a result is valid if and only if: all rules have been processed with no error, all mandatory fields are identified, the selected template exists in the configuration, and the naming template evaluated with no error. Otherwise: route directly to `pending/`.
-6. **Record**: create the `documents` record (sha256, current inbox key, pages, fields, status) and add a `classified` event including the original filename. The record exists before any physical move, so an interrupted filing leaves a recoverable state.
+6. **Record**: create the `documents` record (sha256, current inbox key, pages, fields, status) and add an `imported` event including the original key (`before.file_key`). The record exists before any physical move, so an interrupted filing leaves a recoverable state.
 7. **Filing**:
-   - valid → resolve the target name first: if a file with the same name already exists in the target prefix, append a number to the filename; then copy to the new key (`files/` + rendered template — the template renders the full object path, there is no separate prefix), verify the target object exists, and delete the `inbox/` key only after the copy is confirmed; finally update the `documents` record with the final, conflict-resolved filename (`file_key`, status `processed`, `moved` event).
+   - valid → resolve the target name first: if a file with the same name already exists in the target prefix, append a number to the filename; then copy to the new key (`files/` + rendered template — the template renders the full object path, there is no separate prefix), verify the target object exists, and delete the `inbox/` key only after the copy is confirmed; finally update the `documents` record with the final, conflict-resolved filename (`file_key`, status `processed`); the whole import is recorded as the single `imported` event of section 4.
    - invalid → move to `pending/` (incremental suffix on name conflict); update `file_key`; status `pending`.
 
 The bucket is versioned: any `inbox/` object deletion creates a delete marker, the data remains recoverable.
@@ -110,6 +202,6 @@ Authentication: single account via PocketBase's standard auth.
 ## 8. Error Handling
 
 - Transient S3 error: retry with backoff, the object stays in `inbox/` and will be polled again.
-- Unreadable PDF: `pending` status, reason recorded in the payload of the `classified` event.
+- Unreadable PDF: `pending` status, reason recorded in the `errors` key of the `imported` event payload.
 - Target key conflict (two files renamed identically, whether filing to `files/` or moving to `pending/`): automatic incremental suffix, event logged.
 - Invalid config: error message displayed and the application does not start.
