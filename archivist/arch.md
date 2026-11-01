@@ -76,11 +76,11 @@ A `config.jsonc` file kept alongside the binary, reloaded on restart. Three sect
    - `delete`: list of field names to unset (they become undefined again for later rules and template rendering)
    - `rules`: child rules, evaluated in order only if the parent `when` matched; nesting is recursive
 
-   The application registers built-in helpers in the expression environment: `firstMatch(regex)` returns the first match of the regex in the first-page text (first capture group when present), and `parseDate(value, layout)` parses a string into a native `time.Time` using a Go date layout — the format is carried by the parsing rule, so it can differ per document type.
+   The application registers one built-in helper in the expression environment: `firstMatch(regex)` returns the first match of the regex in the first-page text (first capture group when present). Parsing strings into native dates uses expr's standard `date(value, layout)` builtin (Go date layout, e.g. `date(`15/01/2026`, `02/01/2006`)`) — the format is carried by the parsing rule, so it can differ per document type.
 
 3. `templates`: named naming templates (e.g. `bank_statement: {sender}/{date}_{type}_{reference}.pdf`), with required-field validation; the `{date}` placeholder is rendered from the native date via Go's `Format("2006-01-02")` ("/" is not usable in a S3 key) — a template with a missing mandatory field renders the result invalid and routes the file to `pending/`. The template is chosen by the rules themselves: `template` is a field declared in the `fields` section like any other and set with `set` (e.g. `set template = "bank_statement"` when `emittingCompany in ["BRED", "Fortunéo"]` and `documentType == "Relevé de compte"`). If no rule sets `template`, the special `default` template is used. A `template` value with no matching entry renders the result invalid and routes the file to `pending/`.
 
-Validation on load: JSON schema, regex compilation, `expr` expression compilation (`when` and `eval`) against a typed context (`Document{FirstPageText, Fields}`) with the `firstMatch` and `parseDate` helpers, regex precompilation and caching. Full rejection if invalid, no partial processing.
+Validation on load: JSON schema, regex compilation, `expr` expression compilation (`when` and `eval`) against a typed context (`Document{FirstPageText, Fields}`) with the `firstMatch` helper, regex precompilation and caching. Full rejection if invalid, no partial processing.
 
 ## 6. Processing Pipeline
 
