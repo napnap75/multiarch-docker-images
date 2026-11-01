@@ -2,7 +2,7 @@
 
 ## 1. Vision
 
-A personal, 100% offline tool that watches the `inbox/` prefix of a self-hosted S3 bucket, identifies each incoming PDF (invoice, purchase order, contract, etc.) from the text content of its first page, applies the corresponding naming template by extracting fields, and files the object into an organized prefix structure. Nextcloud, which mounts the bucket as external storage, is the user-facing interface for uploading, downloading, and sharing. Files that cannot be classified with certainty go to `pending/` for review in a local web dashboard.
+A personal, 100% offline tool that watches the `inbox/` prefix of a self-hosted S3 bucket, identifies each incoming PDF (invoice, purchase order, contract, etc.) from the text content of its pages, applies the corresponding naming template by extracting fields, and files the object into an organized prefix structure. Nextcloud, which mounts the bucket as external storage, is the user-facing interface for uploading, downloading, and sharing. Files that cannot be classified with certainty go to `pending/` for review in a local web dashboard.
 
 ## 2. Problem and Context
 
@@ -10,7 +10,7 @@ PDFs arrive continuously in the inbox prefix via Nextcloud or upload automations
 
 ## 3. Objectives
 
-- Extract the emitting company, document type, additional fields, and emission date from the text content of the first page (including headers and footers), never from the current object name.
+- Extract the emitting company, document type, additional fields, and emission date from the document's text content (including headers and footers), never from the current object name.
 - Deterministic processing: unambiguous rules and valid fields → automatic filing. Anything uncertain or incomplete → status `pending` for human review in the dashboard.
 - Fully offline on self-hosted infrastructure: no cloud APIs, no data ever leaves the server.
 
