@@ -176,7 +176,7 @@ Acceptance criteria:
 
 ## Epic: Data visualization (standard PocketBase UI)
 
-The standard PocketBase collections UI is the read-only window on the data until the custom dashboard exists. Corrections and validations remain reserved to the application flows (custom dashboard, later epic): editing a field or a status directly in the collections UI bypasses re-filing and event tracking, and is not part of the nominal flow.
+The standard PocketBase collections UI is the nominal interface for reading and correcting documents. Field edits and status changes made through it (or through any PocketBase API client) are intercepted by the application's `OnRecordUpdateRequest` hook on `documents`, which performs the required side effects: template validation, re-filing, event tracking. The custom dashboard (later epic) adds search, PDF preview and dry-run on top of the same hook, not a separate correction flow.
 
 ### US-20 — Browse documents in the collections UI
 
@@ -202,7 +202,34 @@ Acceptance criteria:
 - Given an event, when I open it, then the `payload` JSON is displayed and readable, matching the section-4 format.
 - Given the collection, when I try to edit or delete a record from the UI, then the operation is rejected by the application's request hooks (US-04) — including for the superuser account the admin UI uses.
 
+### US-22 — Correct a document's fields from the standard PocketBase UI
+
+As the user,
+I want to edit a document's fields directly in the collections UI (or any PocketBase client) and have the application do the rest in the update hook,
+so that a file needing correction is re-filed and traced without any custom interface.
+
+Acceptance criteria:
+
+- Given a document, when I edit one or more fields in the collections UI and save, then the `OnRecordUpdateRequest` hook on `documents` evaluates the selected template with the new field values and refuses the save with an explicit error if the template is unknown or cannot be rendered (missing mandatory field, evaluation error); the record is left unchanged and no event is appended.
+- Given the save is valid, when the hook runs, then the file is re-filed: copy to the new key, delete the old key, incremental suffix on conflict; the record's `file_key` is updated to the final, conflict-resolved key.
+- Given the rendered name equals the current `file_key`, when the hook runs, then the copy and delete are skipped, the event is still appended, and the status still moves to `validated`.
+- Given the save is valid, when the record is persisted, then the status moves to `validated` whatever the previous status, and a `corrected` event is appended with `before`/`after` snapshots conforming to the section-4 format (`file_key` and `status` included in the diff when they change).
+- Given the previous status was `pending`, when the correction succeeds, then the `pending/` key is deleted and the file leaves the review queue.
+- Given the re-filing fails midway (S3 error), when the hook runs, then the save is rejected, the S3 state is restored (any partial copy is deleted), and the record and history are left unchanged.
+
+### US-23 — Validate a document from the standard PocketBase UI
+
+As the user,
+I want to change a document's status to `validated` directly in the collections UI,
+so that the validation is traced as a `validated` event without a custom interface.
+
+Acceptance criteria:
+
+- Given a `processed` document, when I set its status to `validated` in the collections UI and save, then the update hook appends a `validated` event with the section-4 payload (snapshots carrying the status change alone) and persists the new status.
+- Given any update that tries to change the status to something else than the allowed transition (`processed`→`validated` directly, any status→`validated` through a correction), when the hook runs, then the save is refused with an explicit error.
+- Given a status change to `validated`, when no field changed, then no re-filing occurs and the `file_key` is untouched.
+
 ## Stories deferred to later epics
 
-- US-3x (Custom review dashboard): file list with status, combined search (FTS5 + fields), detail with PDF preview streamed from S3, correction form with pre-filled fields and template check, validation, rule dry-run.
+- US-3x (Custom review dashboard): file list with status, combined search (FTS5 + fields), detail with PDF preview streamed from S3, correction form pre-filled from the last event snapshot, rule dry-run. Correction and validation semantics are those of US-22/US-23; the dashboard is a convenience layer over the same hook.
 - US-4x (FTS5): full-text index synchronization via hooks.
