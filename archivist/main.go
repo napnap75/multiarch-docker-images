@@ -9,6 +9,7 @@ import (
 	"github.com/napnap75/archivist/internal/pipeline"
 	"github.com/napnap75/archivist/internal/storage"
 	"github.com/pocketbase/pocketbase"
+	"github.com/pocketbase/pocketbase/core"
 )
 
 // EnvConfig is the technical configuration, from environment variables (US-01).
@@ -17,6 +18,7 @@ type EnvConfig struct {
 	S3AccessKey   string
 	S3SecretKey   string
 	S3Bucket      string
+	S3Region      string
 	S3UseSSL      bool
 	AdminEmail    string
 	AdminPassword string
@@ -54,6 +56,7 @@ func LoadEnvConfig() (*EnvConfig, error) {
 			log.Fatalf("missing mandatory environment variable %s", k)
 		}
 	}
+	c.S3Region = env("ARCHIVIST_S3_REGION", "garage")
 	c.S3UseSSL = env("ARCHIVIST_S3_USE_SSL", "true") != "false"
 	c.PollCron = env("ARCHIVIST_POLL_INTERVAL", "* * * * *")
 	c.HTTPAddr = env("ARCHIVIST_HTTP_ADDR", "0.0.0.0:8090")
@@ -77,7 +80,7 @@ func main() {
 		len(cfg.Fields), len(cfg.Rules), len(cfg.Templates))
 
 	// US-01: verify S3 reachability and versioning before anything else.
-	s3, err := storage.New(envCfg.S3Endpoint, envCfg.S3AccessKey, envCfg.S3SecretKey, envCfg.S3Bucket, envCfg.S3UseSSL)
+	s3, err := storage.New(envCfg.S3Endpoint, envCfg.S3AccessKey, envCfg.S3SecretKey, envCfg.S3Bucket, envCfg.S3Region, envCfg.S3UseSSL)
 	if err != nil {
 		log.Fatalf("S3 client: %v", err)
 	}
@@ -103,6 +106,18 @@ func main() {
 	// US-22 / US-23 / US-04: request hooks on documents and document_events.
 	pbapp.BindHooks(app, cfg, s3)
 
+	// Manual poll pass: a superuser-only route used by the E2E gate and the
+	// operator to trigger a pass without waiting for the cron (arch.md 10).
+	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
+		e.Router.POST("/api/archivist/poll", func(re *core.RequestEvent) error {
+			if !re.HasSuperuserAuth() {
+				return re.ForbiddenError("superusers only", nil)
+			}
+			pipeline.RunPoll(re.App, cfg, s3)
+			return re.JSON(200, map[string]any{"status": "ok"})
+		})
+		return e.Next()
+	})
 	// US-10..US-17: the poller, on the configured cron.
 	app.CronAdd(envCfg.PollCron, "archivist-poller", func() {
 		pipeline.RunPoll(app, cfg, s3)

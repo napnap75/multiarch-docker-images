@@ -226,4 +226,35 @@ Levels used:
 - `Warn`: a degraded but non-fatal state (versioning disabled, schema column removed, stuck record whose inbox object disappeared).
 - `Info`: pipeline outcomes (document imported, duplicate removed, interrupted filing recovered).
 - `Debug`: the per-rule evaluation trace of section 6, step 4.
+## 10. Testing
+
+A single E2E regression gate, run after building the image and before publishing it:
+
+```
+cd archivist
+E2E_IMAGE=<image-under-test> go test ./e2e -v -count=1
+```
+
+The whole harness lives in one file, `e2e/e2e_test.go`. TestMain orchestrates the containers itself over `docker` (no compose, no fixtures):
+
+- starts a disposable Garage (`dxflrs/garage` by default, `GARAGE_IMAGE` overrides) on a private docker network, bootstraps its layout, bucket and key, and publishes its S3 API on 127.0.0.1:3900;
+- starts the image under test with a minimal `config.jsonc` embedded in the test file and the cron disabled;
+- drives everything through the PocketBase HTTP API and the S3 API; test PDFs are generated in memory from a minimal one-page template, so the classification outcome is the proof that extraction works, without any fixture.
+
+The scenarios form one narrative; each subtest names the US it proves:
+
+1. Startup — health, collections migrated, versioning warning in the PocketBase logs (Garage has no versioning: the US-01 warning path is exercised for free), poll route refused without superuser auth (US-01, US-03, US-04).
+2. Import — a valid simulated statement is classified and filed to `files/` with its `imported` event (US-10 to US-17).
+3. Duplicate — the same content re-uploaded is deleted from `inbox/`, no record, no event (US-12).
+4. Pending — a missing mandatory date routes the document to `pending/` with `errors` in the imported event and the recognized fields kept (US-13 to US-15).
+5. Correction — a field PATCH through the API re-files and validates, `corrected` event appended (US-22).
+6. Validation — a status-only PATCH appends the `validated` event, `file_key` untouched (US-23).
+7. Append-only — PATCH and DELETE on `document_events` are refused (US-04).
+8. Recovery — a stuck record (`file_key` still under `inbox/`, created directly through the API) is completed by the next pass (US-11).
+9. Restart — the container restarts with all state intact.
+
+`POST /api/archivist/poll` (superuser only) runs one poll pass immediately. It exists so the gate and the operator trigger passes on demand instead of waiting for the cron; a fresh upload needs two calls because the poller waits for size/ETag stability across two passes (US-10).
+
+The gate is a regression detector for dependency upgrades (PocketBase, minio-go, ledongthuc/pdf, expr, Garage), not an acceptance proof: acceptance criteria are reviewed on the stories themselves. `E2E_KEEP=1` leaves the containers running after the run for debugging.
+
 

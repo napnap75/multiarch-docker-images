@@ -24,10 +24,11 @@ type Client struct {
 	StartupWarning string
 }
 
-func New(endpoint, accessKey, secretKey, bucket string, useSSL bool) (*Client, error) {
+func New(endpoint, accessKey, secretKey, bucket, region string, useSSL bool) (*Client, error) {
 	mc, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure: useSSL,
+		Region: region,
 	})
 	if err != nil {
 		return nil, err

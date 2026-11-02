@@ -13,7 +13,7 @@ so that the container starts with no configuration file for infrastructure and s
 Acceptance criteria:
 
 - Given the container starts with all mandatory variables set (`ARCHIVIST_S3_ENDPOINT`, `ARCHIVIST_S3_ACCESS_KEY`, `ARCHIVIST_S3_SECRET_KEY`, `ARCHIVIST_S3_BUCKET`, `ARCHIVIST_ADMIN_EMAIL`, `ARCHIVIST_ADMIN_PASSWORD`), when the application starts, then it connects to the S3 server, verifies the bucket is reachable, and starts serving HTTP on the configured port; when bucket versioning is disabled, a warning is emitted through the PocketBase logger (visible in the admin dashboard, Dashboard > Logs) recommending the user to enable it to reduce the risk of losing a file to a bug (the application starts anyway).
-- Given an optional variable is not set, when the application starts, then it uses its documented default (`ARCHIVIST_S3_USE_SSL=true`, `ARCHIVIST_POLL_INTERVAL=* * * * *`, `ARCHIVIST_HTTP_PORT=8090`).
+- Given an optional variable is not set, when the application starts, then it uses its documented default (`ARCHIVIST_S3_USE_SSL=true`, `ARCHIVIST_S3_REGION=garage`, `ARCHIVIST_POLL_INTERVAL=* * * * *`, `ARCHIVIST_HTTP_PORT=8090`).
 - Given a mandatory variable is missing or the S3 server is unreachable, when the application starts, then it exits with a non-zero code and a single explicit error message on stderr (visible in `docker logs`) naming the faulty variable or resource.
 - Given the admin account variables are set, when the application starts for the first time, then the PocketBase admin account is created with these credentials; on subsequent starts it is left unchanged unless the password differs, in which case it is updated.
 

@@ -58,6 +58,7 @@ The functional configuration is reloaded only when the container restarts.
 | `ARCHIVIST_S3_SECRET_KEY` | yes | S3 secret |
 | `ARCHIVIST_S3_BUCKET` | yes | Bucket name |
 | `ARCHIVIST_S3_USE_SSL` | no | `true` (default) for HTTPS, `false` for HTTP |
+| `ARCHIVIST_S3_REGION` | no | S3 region used for request signatures, default `garage` |
 | `ARCHIVIST_POLL_INTERVAL` | no | Cron expression for polling `inbox/`, default `* * * * *` (every minute) |
 | `ARCHIVIST_ADMIN_EMAIL` | yes | Admin account (dashboard and PocketBase) |
 | `ARCHIVIST_ADMIN_PASSWORD` | yes | Admin account password |
@@ -117,6 +118,17 @@ Mount the S3 bucket as Nextcloud external storage. Users drop files into `inbox/
 
 - Startup errors (missing environment variable, invalid `config.jsonc`) are written to the container's stderr: read them with `docker logs archivist`.
 - Runtime activity — imports, duplicates, recoveries, and the rule-evaluation trace at Debug level — is logged through PocketBase's logger and browsable from the admin dashboard: Dashboard > Logs, filterable by level and message. Retention and the minimum log level are configured from the standard PocketBase logs settings.
+
+## E2E tests
+
+A single-file end-to-end suite runs a built image against a disposable Garage container and follows documents through the whole pipeline (import, duplicate, pending, correction, validation, append-only, recovery, restart):
+
+```
+cd archivist
+E2E_IMAGE=archivist:e2e go test ./e2e -v -count=1
+```
+
+Without `E2E_IMAGE` the suite skips. The suite drives the poller through the superuser-only `POST /api/archivist/poll` route instead of waiting for the cron. `E2E_KEEP=1` leaves the containers running after the run for debugging; `GARAGE_IMAGE` overrides the Garage image (default `dxflrs/garage:latest`). See arch.md section 10.
 
 ## Troubleshooting
 
