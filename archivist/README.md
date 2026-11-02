@@ -117,6 +117,7 @@ Mount the S3 bucket as Nextcloud external storage. Users drop files into `inbox/
 
 - Startup errors (missing environment variable, invalid `config.jsonc`) are written to the container's stderr: read them with `docker logs archivist`.
 - Runtime activity — imports, duplicates, recoveries, and the rule-evaluation trace at Debug level — is logged through PocketBase's logger and browsable from the admin dashboard: Dashboard > Logs, filterable by level and message. Retention and the minimum log level are configured from the standard PocketBase logs settings.
+
 ## Troubleshooting
 
 - A file stays in `inbox/`: check the logs — admin dashboard, Dashboard > Logs (`docker logs archivist` shows startup errors). Frequent causes: unreadable PDF (goes to `pending/`), transient S3 error (retried on the next pass).
