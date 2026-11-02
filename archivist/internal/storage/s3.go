@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -38,13 +39,13 @@ func New(endpoint, accessKey, secretKey, bucket string, useSSL bool) (*Client, e
 	if !exists {
 		return nil, fmt.Errorf("bucket %q does not exist", bucket)
 	}
-	// US-01: the bucket must be versioned (delete markers keep data recoverable).
-	vc, err := mc.GetBucketVersioning(ctx, bucket)
-	if err != nil {
-		return nil, fmt.Errorf("versioning check: %w", err)
-	}
-	if vc.Status != "Enabled" {
-		return nil, fmt.Errorf("bucket %q is not versioned (status %q)", bucket, vc.Status)
+	// Versioning is not required, but recommended: without it, any deletion
+	// performed by the application (or by a bug) is final; with it, delete
+	// markers keep deleted objects recoverable.
+	if vc, err := mc.GetBucketVersioning(ctx, bucket); err != nil {
+		log.Printf("warning: could not check bucket versioning: %v", err)
+	} else if vc.Status != "Enabled" {
+		log.Printf("warning: bucket %q has versioning disabled; consider enabling it to reduce the risk of losing a file to a bug", bucket)
 	}
 	return c, nil
 }
