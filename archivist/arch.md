@@ -26,6 +26,7 @@ Everything runs offline on the server infrastructure: no cloud APIs, no outbound
 | Config validation | `santhosh-tekuri/jsonschema` (schema generated from structs via `invopop/jsonschema`) |
 | Database | SQLite (embedded in PocketBase) |
 | Full-text search | SQLite FTS5 index synchronized via hooks |
+| Logging | PocketBase `app.Logger()` (Dashboard > Logs); stderr before bootstrap |
 
 ## 3. S3 Layout
 
@@ -183,9 +184,9 @@ Validation on load: JSON schema, regex compilation, `expr` expression compilatio
 Executed by the PocketBase cron job (configurable interval, e.g. every minute):
 
 1. **Poll**: list objects in `inbox/`; an object is a candidate only if no `documents` record references its key yet, and its size and ETag are stable across two consecutive polls (write-completion wait). The same pass also picks up interrupted filings: any `documents` record whose `file_key` is still under `inbox/` (a filing that was interrupted between record creation and the physical move) is completed as described below.
-2. **Download**: fetch the object into memory (streamed), no disk writes. The sha256 is computed during download; if a `documents` record with the same hash already exists, the object is a duplicate: the `inbox/` key is deleted (a no-data-loss case — the original with the same content stays filed), a message is logged in the application logs, and processing stops there. By design, no `document_events` entry is recorded: the duplicate is not a document of its own, and the trace lives in the application logs only.
+2. **Download**: fetch the object into memory (streamed), no disk writes. The sha256 is computed during download; if a `documents` record with the same hash already exists, the object is a duplicate: the `inbox/` key is deleted (a no-data-loss case — the original with the same content stays filed), a message is logged via the PocketBase logger (section 9), and processing stops there. By design, no `document_events` entry is recorded: the duplicate is not a document of its own, and the trace lives in the PocketBase logs only.
 3. **Extraction**: page-by-page text (one entry per page, for rule evaluation and the FTS index) via `ledongthuc/pdf`, including headers and footers
-4. **Rule evaluation**: rules evaluated in order against the document pages and the fields set so far; full evaluation log written to the application logs (built-in dry-run mode for debugging from the dashboard).
+4. **Rule evaluation**: rules evaluated in order against the document pages and the fields set so far; full evaluation log written to the PocketBase logger at Debug level (section 9; the same trace feeds the built-in dry-run mode for debugging from the dashboard).
 5. **Validation**: a result is valid if and only if: all rules have been processed with no error, all mandatory fields are identified, the selected template exists in the configuration, and the naming template evaluated with no error. Otherwise: route directly to `pending/`.
 6. **Record**: create the `documents` record (sha256, current inbox key, pages, fields, status) and add an `imported` event including the original key (`before.file_key`). The record exists before any physical move, so an interrupted filing leaves a state the poller recovers automatically on its next pass.
 7. **Filing**:
@@ -212,3 +213,17 @@ Authentication: single account via PocketBase's standard auth.
 - Unreadable PDF: `pending` status, reason recorded in the `errors` key of the `imported` event payload.
 - Target key conflict (two files renamed identically, whether filing to `files/` or moving to `pending/`): automatic incremental suffix, event logged.
 - Invalid config: error message displayed and the application does not start.
+## 9. Logging
+
+Two channels, split by lifecycle:
+
+- Before the PocketBase application is bootstrapped (fatal startup errors: missing environment variable, invalid `config.jsonc`, unreachable S3; pre-bootstrap startup traces): stderr, so `docker logs` shows the cause under the `--restart unless-stopped` restart loop (US-05).
+- After the bootstrap: PocketBase's `app.Logger()` — structured records (message plus key/value attributes) stored in the PocketBase logs database, separate from the application data, browsable and filterable from the admin dashboard (Dashboard > Logs). Retention and minimum level are configured from the standard PocketBase logs settings panel.
+
+Levels used:
+
+- `Error`: a failed operation (S3 error, event append failure).
+- `Warn`: a degraded but non-fatal state (versioning disabled, schema column removed, stuck record whose inbox object disappeared).
+- `Info`: pipeline outcomes (document imported, duplicate removed, interrupted filing recovered).
+- `Debug`: the per-rule evaluation trace of section 6, step 4.
+

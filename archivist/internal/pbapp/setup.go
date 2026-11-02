@@ -5,7 +5,6 @@ package pbapp
 import (
 	"errors"
 	"fmt"
-	"log"
 
 	"github.com/napnap75/archivist/internal/config"
 	"github.com/pocketbase/pocketbase/core"
@@ -81,7 +80,7 @@ func ensureDocuments(app *core.App, cfg *config.Config) error {
 			continue
 		}
 		if _, declared := cfg.Fields[f.Name]; !declared && !isFixed(f.Name) {
-			log.Printf("documents: removing column %q (removed from config)", f.Name)
+			app.Logger().Warn("documents: column removed", "field", f.Name, "reason", "removed from config")
 			coll.Fields.RemoveByName(f.Name)
 		}
 	}

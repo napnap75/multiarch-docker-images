@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,6 +18,10 @@ import (
 type Client struct {
 	mc     *minio.Client
 	Bucket string
+	// StartupWarning is non-empty when the bucket runs without versioning
+	// (or its versioning state could not be read): the caller logs it once
+	// through the PocketBase logger after bootstrap (arch.md section 9).
+	StartupWarning string
 }
 
 func New(endpoint, accessKey, secretKey, bucket string, useSSL bool) (*Client, error) {
@@ -43,9 +46,9 @@ func New(endpoint, accessKey, secretKey, bucket string, useSSL bool) (*Client, e
 	// performed by the application (or by a bug) is final; with it, delete
 	// markers keep deleted objects recoverable.
 	if vc, err := mc.GetBucketVersioning(ctx, bucket); err != nil {
-		log.Printf("warning: could not check bucket versioning: %v", err)
+		c.StartupWarning = fmt.Sprintf("could not check bucket versioning: %v", err)
 	} else if vc.Status != "Enabled" {
-		log.Printf("warning: bucket %q has versioning disabled; consider enabling it to reduce the risk of losing a file to a bug", bucket)
+		c.StartupWarning = "bucket has versioning disabled; consider enabling it to reduce the risk of losing a file to a bug"
 	}
 	return c, nil
 }

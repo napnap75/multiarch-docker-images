@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/ledongthuc/pdf"
@@ -33,7 +32,7 @@ func RunPoll(app *core.App, cfg *config.Config, s3 *storage.Client) {
 
 	objects, err := s3.ListInbox(ctx)
 	if err != nil {
-		log.Printf("poll: list inbox: %v", err)
+		app.Logger().Error("poll: list inbox failed", "error", err)
 		return
 	}
 
@@ -50,7 +49,7 @@ func RunPoll(app *core.App, cfg *config.Config, s3 *storage.Client) {
 		}
 		delete(stable, o.Key)
 		if err := processOne(app, cfg, s3, ctx, o.Key); err != nil {
-			log.Printf("poll: process %s: %v", o.Key, err)
+			app.Logger().Error("poll: processing failed", "key", o.Key, "error", err)
 		}
 	}
 }
@@ -68,7 +67,7 @@ func processOne(app *core.App, cfg *config.Config, s3 *storage.Client, ctx conte
 		if err := s3.Remove(ctx, key); err != nil {
 			return fmt.Errorf("duplicate cleanup: %w", err)
 		}
-		log.Printf("duplicate %s (sha256 %s) removed from inbox, original is %s", key, hash, dup.GetString("file_key"))
+		app.Logger().Info("duplicate removed from inbox", "key", key, "sha256", hash, "original", dup.GetString("file_key"))
 		return nil
 	}
 
@@ -118,9 +117,9 @@ func processOne(app *core.App, cfg *config.Config, s3 *storage.Client, ctx conte
 
 	// US-16: the imported event, appended once the filing is done.
 	if err := pbapp.AppendImportedEvent(app, record.Id, key, newKey, valid, fields, errs); err != nil {
-		log.Printf("imported event for %s: %v", key, err)
+		app.Logger().Error("imported event append failed", "key", key, "error", err)
 	}
-	log.Printf("imported %s -> %s (status %s)", key, newKey, record.GetString("status"))
+	app.Logger().Info("document imported", "key", key, "file_key", newKey, "status", record.GetString("status"))
 	return nil
 }
 
@@ -158,7 +157,7 @@ func fileDocument(s3 *storage.Client, ctx context.Context, record *core.Record, 
 func recoverStuck(app *core.App, cfg *config.Config, s3 *storage.Client, ctx context.Context) {
 	stuck, err := app.FindRecordsByFilter("documents", "file_key ~ {:p}", "", 100, 0, dbx.Params{"p": "inbox/"})
 	if err != nil {
-		log.Printf("recovery: %v", err)
+		app.Logger().Error("recovery: query failed", "error", err)
 		return
 	}
 	for _, record := range stuck {
@@ -171,26 +170,26 @@ func recoverStuck(app *core.App, cfg *config.Config, s3 *storage.Client, ctx con
 			}
 			tpl, ok := cfg.Templates[tplName]
 			if !ok {
-				log.Printf("recovery: record %s: unknown template %q", record.Id, tplName)
+				app.Logger().Error("recovery: unknown template", "record", record.Id, "template", tplName)
 				continue
 			}
 			var err error
 			rendered, err = tpl.Render(pbapp.FieldsFromRecord(cfg, record), nil)
 			if err != nil {
-				log.Printf("recovery: record %s: %v", record.Id, err)
+				app.Logger().Error("recovery: render failed", "record", record.Id, "error", err)
 				continue
 			}
 		}
 		newKey, err := fileDocument(s3, ctx, record, rendered)
 		if err != nil {
-			log.Printf("recovery: record %s (%s): %v", record.Id, record.GetString("file_key"), err)
+			app.Logger().Error("recovery: filing failed", "record", record.Id, "file_key", record.GetString("file_key"), "error", err)
 			continue
 		}
 		if err := app.Save(record); err != nil {
-			log.Printf("recovery: save record %s: %v", record.Id, err)
+			app.Logger().Error("recovery: save failed", "record", record.Id, "error", err)
 			continue
 		}
-		log.Printf("recovery: record %s completed filing to %s", record.Id, newKey)
+		app.Logger().Info("recovery: filing completed", "record", record.Id, "file_key", newKey)
 	}
 }
 

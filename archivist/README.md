@@ -16,7 +16,7 @@ Duplicates (same sha256) are ignored: the `inbox/` copy is deleted, the original
 
 ## Prerequisites
 
-- An S3 bucket, with three prefixes: `inbox/`, `pending/`, `files/`. The prefixes are created on first startup if they do not exist. Versioning is not required, but it is strongly recommended: without it, a file deleted by the application or by a bug is lost for good; with it, deleted objects stay recoverable via delete markers. The application logs a warning at startup when versioning is disabled.
+- An S3 bucket, with three prefixes: `inbox/`, `pending/`, `files/`. The prefixes are created on first startup if they do not exist. Versioning is not required, but it is strongly recommended: without it, a file deleted by the application or by a bug is lost for good; with it, deleted objects stay recoverable via delete markers. The application logs a warning at startup when versioning is disabled (visible in the admin dashboard, Dashboard > Logs).
 - An S3 user with read/write access to the bucket.
 - Docker.
 
@@ -113,9 +113,13 @@ A commented `config.jsonc` example file is provided in the repository. The dashb
 
 Mount the S3 bucket as Nextcloud external storage. Users drop files into `inbox/`, browse and share from `files/`. Archivist and Nextcloud work on the same objects; neither is the exclusive interface of the other.
 
+## Logs
+
+- Startup errors (missing environment variable, invalid `config.jsonc`) are written to the container's stderr: read them with `docker logs archivist`.
+- Runtime activity — imports, duplicates, recoveries, and the rule-evaluation trace at Debug level — is logged through PocketBase's logger and browsable from the admin dashboard: Dashboard > Logs, filterable by level and message. Retention and the minimum log level are configured from the standard PocketBase logs settings.
 ## Troubleshooting
 
-- A file stays in `inbox/`: check the container logs (`docker logs archivist`). Frequent causes: unreadable PDF (goes to `pending/`), transient S3 error (retried on the next pass).
+- A file stays in `inbox/`: check the logs — admin dashboard, Dashboard > Logs (`docker logs archivist` shows startup errors). Frequent causes: unreadable PDF (goes to `pending/`), transient S3 error (retried on the next pass).
 - A file goes to `pending/`: open its detail view in the dashboard; the classification error(s) are displayed there.
-- The container does not start: invalid `config.jsonc`. The full error message is in the logs; the application refuses to start with a partially valid configuration.
+- The container does not start: invalid `config.jsonc`. The full error message is in the container logs; the application refuses to start with a partially valid configuration.
 - After editing `config.jsonc`: `docker restart archivist`.

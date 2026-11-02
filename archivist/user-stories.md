@@ -12,9 +12,9 @@ so that the container starts with no configuration file for infrastructure and s
 
 Acceptance criteria:
 
-- Given the container starts with all mandatory variables set (`ARCHIVIST_S3_ENDPOINT`, `ARCHIVIST_S3_ACCESS_KEY`, `ARCHIVIST_S3_SECRET_KEY`, `ARCHIVIST_S3_BUCKET`, `ARCHIVIST_ADMIN_EMAIL`, `ARCHIVIST_ADMIN_PASSWORD`), when the application starts, then it connects to the S3 server, verifies the bucket is reachable, and starts serving HTTP on the configured port; when bucket versioning is disabled, a warning is logged recommending the user to enable it to reduce the risk of losing a file to a bug (the application starts anyway).
+- Given the container starts with all mandatory variables set (`ARCHIVIST_S3_ENDPOINT`, `ARCHIVIST_S3_ACCESS_KEY`, `ARCHIVIST_S3_SECRET_KEY`, `ARCHIVIST_S3_BUCKET`, `ARCHIVIST_ADMIN_EMAIL`, `ARCHIVIST_ADMIN_PASSWORD`), when the application starts, then it connects to the S3 server, verifies the bucket is reachable, and starts serving HTTP on the configured port; when bucket versioning is disabled, a warning is emitted through the PocketBase logger (visible in the admin dashboard, Dashboard > Logs) recommending the user to enable it to reduce the risk of losing a file to a bug (the application starts anyway).
 - Given an optional variable is not set, when the application starts, then it uses its documented default (`ARCHIVIST_S3_USE_SSL=true`, `ARCHIVIST_POLL_INTERVAL=* * * * *`, `ARCHIVIST_HTTP_PORT=8090`).
-- Given a mandatory variable is missing or the S3 server is unreachable, when the application starts, then it exits with a non-zero code and a single explicit error message in the logs naming the faulty variable or resource.
+- Given a mandatory variable is missing or the S3 server is unreachable, when the application starts, then it exits with a non-zero code and a single explicit error message on stderr (visible in `docker logs`) naming the faulty variable or resource.
 - Given the admin account variables are set, when the application starts for the first time, then the PocketBase admin account is created with these credentials; on subsequent starts it is left unchanged unless the password differs, in which case it is updated.
 
 ### US-02 — Load and validate the functional configuration
@@ -83,7 +83,7 @@ Acceptance criteria:
 - Given the cron triggers, when the poller runs, then it lists all objects under `inbox/`.
 - Given an object is listed, when no `documents` record references its key yet, then it is a candidate and its size and ETag are recorded; it becomes eligible for download only if its size and ETag are unchanged on the next poll.
 - Given an object is listed, when a `documents` record already references its key, then it is skipped (interrupted filings are handled by US-11).
-- Given a transient S3 error occurs, when the poller runs, then the error is logged, the pass ends, and the next pass retries; no object is lost.
+- Given a transient S3 error occurs, when the poller runs, then the error is logged (PocketBase logger, Error level), the pass ends, and the next pass retries; no object is lost.
 
 ### US-11 — Recover interrupted filings
 
@@ -95,7 +95,7 @@ Acceptance criteria:
 
 - Given a poll pass runs, when a `documents` record exists with `file_key` under `inbox/` and a classification verdict already computed, then the filing procedure (US-17) runs again for that record.
 - Given the recovery succeeds, when the object is moved, then the record is updated exactly as a normal filing would (same events, same conflict resolution).
-- Given the inbox object of a stuck record no longer exists, when the recovery is attempted, then the record is flagged in the logs for manual inspection and never blocks the poll pass.
+- Given the inbox object of a stuck record no longer exists, when the recovery is attempted, then the record is flagged in the logs (PocketBase logger, Warn level) for manual inspection and never blocks the poll pass.
 
 ### US-12 — Download the object and reject duplicates
 
@@ -106,7 +106,7 @@ so that the same file never enters the pipeline twice.
 Acceptance criteria:
 
 - Given an eligible candidate, when it is downloaded, then it is streamed in memory with no disk write and its sha256 is computed on the fly.
-- Given the computed sha256 matches an existing `documents` record, when the download completes, then the `inbox/` key is deleted (a no-data-loss case — the original with the same content stays filed; with versioning enabled the deleted copy is additionally recoverable via delete markers), the duplicate is logged in the application logs only (no `document_events` entry, by design), and processing stops for that object.
+- Given the computed sha256 matches an existing `documents` record, when the download completes, then the `inbox/` key is deleted (a no-data-loss case — the original with the same content stays filed; with versioning enabled the deleted copy is additionally recoverable via delete markers), the duplicate is logged in the PocketBase logs only (Dashboard > Logs; no `document_events` entry, by design), and processing stops for that object.
 - Given the sha256 is new, when the download completes, then processing continues to extraction.
 
 ### US-13 — Extract the text page by page
@@ -135,7 +135,7 @@ Acceptance criteria:
 - Given a field assignment whose value does not match the declared field type (raw string to a `date`, non-numeric to a `number`), when it executes, then it is a rule error and the document is routed to `pending/`.
 - Given `firstMatch` finds no match, when its result is used, then it returns an empty string (parsing an empty string with `date()` is a rule error).
 - Given `delete` is executed, when the rule fires, then the named fields become undefined again for later rules and template rendering.
-- Given the whole evaluation, when it runs, then every rule evaluation and action is written in detail to the application logs (the same trace feeds the future dry-run mode).
+- Given the whole evaluation, when it runs, then every rule evaluation and action is written in detail to the PocketBase logger at Debug level (visible in Dashboard > Logs; the same trace feeds the future dry-run mode).
 
 ### US-15 — Decide the verdict
 

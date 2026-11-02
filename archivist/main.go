@@ -83,10 +83,21 @@ func main() {
 	}
 
 	app := pocketbase.New()
+	// The PocketBase logger and database are available only after bootstrap;
+	// everything logged before this point goes to stderr (arch.md section 9).
+	if err := app.Bootstrap(); err != nil {
+		log.Fatalf("pocketbase bootstrap: %v", err)
+	}
 
 	// US-03 / US-04 / US-01: collections migration and superuser account.
 	if err := pbapp.Setup(app, envCfg.AdminEmail, envCfg.AdminPassword, cfg); err != nil {
 		log.Fatalf("pocketbase setup: %v", err)
+	}
+
+	// US-01: versioning recommendation, via the PocketBase logger
+	// (visible in the admin dashboard, Dashboard > Logs).
+	if s3.StartupWarning != "" {
+		app.Logger().Warn(s3.StartupWarning, "bucket", envCfg.S3Bucket)
 	}
 
 	// US-22 / US-23 / US-04: request hooks on documents and document_events.

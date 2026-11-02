@@ -3,7 +3,6 @@ package pbapp
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/napnap75/archivist/internal/config"
@@ -100,7 +99,7 @@ func handleDocumentUpdate(app *core.App, cfg *config.Config, s3 *storage.Client,
 	before := SnapshotFromRecord(cfg, orig, true)
 	after := SnapshotFromRecord(cfg, newRec, true)
 	if err := AppendEvent(app, newRec.Id, "corrected", before, after, nil); err != nil {
-		log.Printf("corrected event for %s: %v", newRec.Id, err)
+		app.Logger().Error("corrected event append failed", "document", newRec.Id, "error", err)
 	}
 	return e.Next()
 }
