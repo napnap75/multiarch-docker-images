@@ -29,7 +29,7 @@ Everything runs offline on the server infrastructure: no cloud APIs, no outbound
 
 ## 3. S3 Layout
 
-A single versioned bucket:
+A single bucket. Versioning is not required, but it is strongly recommended: without it, any deletion performed by the application (or by a bug) is final; with it, delete markers keep deleted objects recoverable.
 
 ```
 inbox/       # drop zone for new PDFs (via Nextcloud / S3 client)
@@ -183,7 +183,7 @@ Validation on load: JSON schema, regex compilation, `expr` expression compilatio
 Executed by the PocketBase cron job (configurable interval, e.g. every minute):
 
 1. **Poll**: list objects in `inbox/`; an object is a candidate only if no `documents` record references its key yet, and its size and ETag are stable across two consecutive polls (write-completion wait). The same pass also picks up interrupted filings: any `documents` record whose `file_key` is still under `inbox/` (a filing that was interrupted between record creation and the physical move) is completed as described below.
-2. **Download**: fetch the object into memory (streamed), no disk writes. The sha256 is computed during download; if a `documents` record with the same hash already exists, the object is a duplicate: the `inbox/` key is deleted (delete marker, data recoverable), a message is logged in the application logs, and processing stops there. By design, no `document_events` entry is recorded: the duplicate is not a document of its own, and the trace lives in the application logs only.
+2. **Download**: fetch the object into memory (streamed), no disk writes. The sha256 is computed during download; if a `documents` record with the same hash already exists, the object is a duplicate: the `inbox/` key is deleted (a no-data-loss case — the original with the same content stays filed), a message is logged in the application logs, and processing stops there. By design, no `document_events` entry is recorded: the duplicate is not a document of its own, and the trace lives in the application logs only.
 3. **Extraction**: page-by-page text (one entry per page, for rule evaluation and the FTS index) via `ledongthuc/pdf`, including headers and footers
 4. **Rule evaluation**: rules evaluated in order against the document pages and the fields set so far; full evaluation log written to the application logs (built-in dry-run mode for debugging from the dashboard).
 5. **Validation**: a result is valid if and only if: all rules have been processed with no error, all mandatory fields are identified, the selected template exists in the configuration, and the naming template evaluated with no error. Otherwise: route directly to `pending/`.
@@ -192,7 +192,7 @@ Executed by the PocketBase cron job (configurable interval, e.g. every minute):
    - valid → resolve the target name first: if a file with the same name already exists in the target prefix, append a number to the filename; then copy to the new key (`files/` + rendered template — the template renders the full object path, there is no separate prefix), verify the target object exists, and delete the `inbox/` key only after the copy is confirmed; finally update the `documents` record with the final, conflict-resolved filename (`file_key`, status `processed`); the whole import is recorded as the single `imported` event of section 4.
    - invalid → move to `pending/` (incremental suffix on name conflict); update `file_key`; status `pending`.
 
-The bucket is versioned: any `inbox/` object deletion creates a delete marker, the data remains recoverable.
+When the bucket is versioned, any deletion creates a delete marker and the data remains recoverable; when it is not, deletions are final. The application logs a warning at startup when versioning is disabled, recommending the user to enable it to reduce the risk of losing a file to a bug.
 
 ## 7. Review Dashboard
 
