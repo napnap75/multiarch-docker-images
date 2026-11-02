@@ -97,8 +97,9 @@ func (c *Client) Copy(ctx context.Context, srcKey, dstKey string) error {
 	return err
 }
 
-// Remove deletes the object; with a versioned bucket this creates a delete
-// marker and the data remains recoverable.
+// Remove deletes the object. On a versioned bucket this creates a delete
+// marker and the data remains recoverable; without versioning the deletion
+// is final (see the startup warning in New).
 func (c *Client) Remove(ctx context.Context, key string) error {
 	return c.mc.RemoveObject(ctx, c.Bucket, key, minio.RemoveObjectOptions{})
 }
