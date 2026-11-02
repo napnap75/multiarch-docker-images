@@ -40,6 +40,14 @@ docker run -d --name archivist \
 
 The dashboard is available at `http://<server>:8090/`, the PocketBase admin at `http://<server>:8090/_/`.
 
+## Building the image
+
+```bash
+docker build -t napnap75/archivist:latest archivist/
+```
+
+The build has two stages: the builder compiles a static binary (CGO disabled), and the runtime image is `scratch` containing only that binary, the CA bundle (the S3 endpoint is HTTPS by default), the timezone database, and the writable data directories. The container runs as the non-root user 65532: a named volume for `/app/pb_data` works out of the box; for a host bind mount, `chown 65532:65532` the directory first. The image has no shell, so `docker exec` is not available.
+
 ## Configuration
 
 Two distinct configurations:
@@ -62,7 +70,7 @@ The functional configuration is reloaded only when the container restarts.
 | `ARCHIVIST_POLL_INTERVAL` | no | Cron expression for polling `inbox/`, default `* * * * *` (every minute) |
 | `ARCHIVIST_ADMIN_EMAIL` | yes | Admin account (dashboard and PocketBase) |
 | `ARCHIVIST_ADMIN_PASSWORD` | yes | Admin account password |
-| `ARCHIVIST_HTTP_PORT` | no | Internal listening port, default `8090` |
+| `ARCHIVIST_HTTP_ADDR` | no | Listen address, default `0.0.0.0:8090` |
 
 The `pb_data` volume holds the PocketBase SQLite database (documents, history, full-text search index): it must persist across restarts.
 
@@ -127,6 +135,8 @@ A single-file end-to-end suite runs a built image against a disposable Garage co
 cd archivist
 E2E_IMAGE=archivist:e2e go test ./e2e -v -count=1
 ```
+
+Build the image first: `docker build -t archivist:e2e .` (see Building the image).
 
 Without `E2E_IMAGE` the suite skips. The suite drives the poller through the superuser-only `POST /api/archivist/poll` route instead of waiting for the cron. `E2E_KEEP=1` leaves the containers running after the run for debugging; `GARAGE_IMAGE` overrides the Garage image (default `dxflrs/garage:latest`). See arch.md section 10.
 

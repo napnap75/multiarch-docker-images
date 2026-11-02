@@ -1,0 +1,6 @@
+# Keep the build context to the Go sources the builder stage copies.
+# config.jsonc is mounted at runtime, never baked into the image.
+e2e/
+pb_data/
+*.md
+config.jsonc
