@@ -18,7 +18,7 @@ PDFs arrive continuously in the inbox prefix via Nextcloud or upload automations
 
 - Ingestion: polling the `inbox/` prefix for new objects. OCR for scanned/image-only documents is out of scope.
 - Fields, rule-based extraction, and naming templates declared in configuration (JSONC), not in code; constant reference lists live inline in rule expressions.
-- Storage: single versioned self-hosted S3 bucket; objects addressed by S3 keys, no local filesystem for documents.
+- Storage: single self-hosted S3 bucket; objects addressed by S3 keys, no local filesystem for documents. Versioning is optional but recommended: the application must start without it (simple warning) and the user can enable it to reduce the risk of losing a file to a bug.
 - Dashboard: file list with status, PDF preview streamed from S3, field and template correction, validation, history, and full-text search across the entire document in addition to metadata/field search.
 - The ~2000 pre-existing files are out of scope: no initial import or indexing.
 
