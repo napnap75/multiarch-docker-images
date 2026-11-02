@@ -12,11 +12,11 @@ The application is 100% offline: no cloud APIs, no data ever leaves your server.
 4. Invalid result (missing mandatory field, failing rule, unknown template): the file goes to `pending/`, along with the recognized fields and the errors. Status `pending`.
 5. From the dashboard, you correct the fields of a `pending` file: it is re-filed and takes the status `validated`. You can also directly validate a `processed` file.
 
-Duplicates (same sha256) are ignored: the `inbox/` copy is deleted, the original stays in place. The bucket is versioned, so everything remains recoverable via delete markers.
+Duplicates (same sha256) are ignored: the `inbox/` copy is deleted, the original stays in place — no data is lost, the content is identical.
 
 ## Prerequisites
 
-- A versioned S3 bucket, with three prefixes: `inbox/`, `pending/`, `files/`. The prefixes are created on first startup if they do not exist.
+- An S3 bucket, with three prefixes: `inbox/`, `pending/`, `files/`. The prefixes are created on first startup if they do not exist. Versioning is not required, but it is strongly recommended: without it, a file deleted by the application or by a bug is lost for good; with it, deleted objects stay recoverable via delete markers. The application logs a warning at startup when versioning is disabled.
 - An S3 user with read/write access to the bucket.
 - Docker.
 
@@ -56,7 +56,7 @@ The functional configuration is reloaded only when the container restarts.
 | `ARCHIVIST_S3_ENDPOINT` | yes | S3 server address (host:port) |
 | `ARCHIVIST_S3_ACCESS_KEY` | yes | S3 access key |
 | `ARCHIVIST_S3_SECRET_KEY` | yes | S3 secret |
-| `ARCHIVIST_S3_BUCKET` | yes | Versioned bucket name |
+| `ARCHIVIST_S3_BUCKET` | yes | Bucket name |
 | `ARCHIVIST_S3_USE_SSL` | no | `true` (default) for HTTPS, `false` for HTTP |
 | `ARCHIVIST_POLL_INTERVAL` | no | Cron expression for polling `inbox/`, default `* * * * *` (every minute) |
 | `ARCHIVIST_ADMIN_EMAIL` | yes | Admin account (dashboard and PocketBase) |
