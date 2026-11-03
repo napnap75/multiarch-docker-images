@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"strings"
 
+	ganigeorgiev.com/pocketbase/dbx"
+	ganigeorgiev.com/pocketbase/pocketbase/core"
 	"github.com/ledongthuc/pdf"
 	"github.com/napnap75/archivist/internal/config"
 	"github.com/napnap75/archivist/internal/pbapp"
 	"github.com/napnap75/archivist/internal/storage"
-	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/tools/dbx"
 )
 
 // pollState remembers size and ETag between two passes (US-10 write-completion wait).

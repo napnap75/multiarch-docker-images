@@ -2,7 +2,7 @@
 # the runtime is scratch with only that binary and the files it needs.
 
 # --- build stage ------------------------------------------------------------
-FROM golang:1.23-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 
 # ca-certificates and tzdata are copied into the runtime image below.

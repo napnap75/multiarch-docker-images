@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	ganigeorgiev.com/pocketbase/pocketbase/core"
 	"github.com/napnap75/archivist/internal/config"
 	"github.com/napnap75/archivist/internal/storage"
-	"github.com/pocketbase/pocketbase/core"
 )
 
 // BindHooks registers the request hooks (US-04, US-22, US-23).

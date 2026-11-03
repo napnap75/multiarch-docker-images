@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	ganigeorgiev.com/pocketbase/pocketbase/core"
 	"github.com/napnap75/archivist/internal/config"
-	"github.com/pocketbase/pocketbase/core"
 )
 
 const eventsName = "document_events"

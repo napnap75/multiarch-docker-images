@@ -4,12 +4,12 @@ import (
 	"log"
 	"os"
 
+	ganigeorgiev.com/pocketbase/pocketbase"
+	ganigeorgiev.com/pocketbase/pocketbase/core"
 	"github.com/napnap75/archivist/internal/config"
 	"github.com/napnap75/archivist/internal/pbapp"
 	"github.com/napnap75/archivist/internal/pipeline"
 	"github.com/napnap75/archivist/internal/storage"
-	"github.com/pocketbase/pocketbase"
-	"github.com/pocketbase/pocketbase/core"
 )
 
 // EnvConfig is the technical configuration, from environment variables (US-01).
