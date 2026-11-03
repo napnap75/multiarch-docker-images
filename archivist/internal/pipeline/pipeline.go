@@ -74,14 +74,19 @@ func processOne(app core.App, cfg *config.Config, s3 *storage.Client, ctx contex
 	// US-13: page-by-page extraction.
 	pages, extractErr := extractPages(data)
 	var errs []string
+	var fields map[string]any
+	rendered := ""
 	if extractErr != nil {
+		// US-13: an unreadable PDF goes straight to pending/ with the
+		// extraction failure as its only error; the rule engine never
+		// runs on a document without pages.
 		errs = append(errs, "unreadable PDF: "+extractErr.Error())
-		pages = nil
+	} else {
+		// US-14 / US-15: classification and verdict.
+		var evalErrs []string
+		fields, rendered, evalErrs = cfg.Evaluate(pages)
+		errs = append(errs, evalErrs...)
 	}
-
-	// US-14 / US-15: classification and verdict.
-	fields, rendered, evalErrs := cfg.Evaluate(pages)
-	errs = append(errs, evalErrs...)
 	valid := len(errs) == 0 && rendered != ""
 
 	// US-16: the record is created before any physical move.
