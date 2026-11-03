@@ -8,13 +8,14 @@ import (
 	"time"
 
 	"github.com/expr-lang/expr"
+	"github.com/expr-lang/expr/vm"
 )
 
 var placeholderRe = regexp.MustCompile(`\{([^{}]+)\}`)
 
 type tplPart struct {
 	literal string
-	program expr.Node
+	program *vm.Program
 	hasExpr bool
 }
 

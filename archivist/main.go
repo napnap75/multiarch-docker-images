@@ -4,12 +4,13 @@ import (
 	"log"
 	"os"
 
-	ganigeorgiev.com/pocketbase/pocketbase"
-	ganigeorgiev.com/pocketbase/pocketbase/core"
+	"ganigeorgiev.com/pocketbase/pocketbase"
+	"ganigeorgiev.com/pocketbase/pocketbase/core"
 	"github.com/napnap75/archivist/internal/config"
 	"github.com/napnap75/archivist/internal/pbapp"
 	"github.com/napnap75/archivist/internal/pipeline"
 	"github.com/napnap75/archivist/internal/storage"
+	"github.com/spf13/pflag"
 )
 
 // EnvConfig is the technical configuration, from environment variables (US-01).
@@ -64,10 +65,26 @@ func LoadEnvConfig() (*EnvConfig, error) {
 	return c, nil
 }
 
+func configPathFromArgs(args []string, defaultPath string) (string, error) {
+	var configPath string
+	flags := pflag.NewFlagSet("archivist", pflag.ContinueOnError)
+	flags.SetInterspersed(true)
+	flags.ParseErrorsWhitelist.UnknownFlags = true
+	flags.StringVar(&configPath, "config", defaultPath, "Path to the functional JSONC configuration")
+	if err := flags.Parse(args); err != nil {
+		return "", err
+	}
+	return configPath, nil
+}
+
 func main() {
 	envCfg, err := LoadEnvConfig()
 	if err != nil {
 		log.Fatal(err)
+	}
+	envCfg.ConfigPath, err = configPathFromArgs(os.Args[1:], envCfg.ConfigPath)
+	if err != nil {
+		log.Fatalf("invalid command line: %v", err)
 	}
 
 	// US-02: load and validate the functional configuration. Full rejection,
@@ -86,6 +103,7 @@ func main() {
 	}
 
 	app := pocketbase.New()
+	app.RootCmd.PersistentFlags().StringVar(&envCfg.ConfigPath, "config", envCfg.ConfigPath, "Path to the functional JSONC configuration")
 	// The PocketBase logger and database are available only after bootstrap;
 	// everything logged before this point goes to stderr (arch.md section 9).
 	if err := app.Bootstrap(); err != nil {
@@ -119,9 +137,11 @@ func main() {
 		return e.Next()
 	})
 	// US-10..US-17: the poller, on the configured cron.
-	app.CronAdd(envCfg.PollCron, "archivist-poller", func() {
+	if err := app.Cron().Add("archivist-poller", envCfg.PollCron, func() {
 		pipeline.RunPoll(app, cfg, s3)
-	})
+	}); err != nil {
+		log.Fatalf("register archivist poller: %v", err)
+	}
 
 	app.RootCmd.PersistentFlags().Set("http", envCfg.HTTPAddr)
 	if err := app.Start(); err != nil {

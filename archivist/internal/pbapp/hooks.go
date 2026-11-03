@@ -5,28 +5,28 @@ import (
 	"fmt"
 	"time"
 
-	ganigeorgiev.com/pocketbase/pocketbase/core"
+	"ganigeorgiev.com/pocketbase/pocketbase/core"
 	"github.com/napnap75/archivist/internal/config"
 	"github.com/napnap75/archivist/internal/storage"
 )
 
 // BindHooks registers the request hooks (US-04, US-22, US-23).
-func BindHooks(app *core.App, cfg *config.Config, s3 *storage.Client) {
+func BindHooks(app core.App, cfg *config.Config, s3 *storage.Client) {
 	// US-04: document_events is append-only for everyone, superusers included.
-	app.OnRecordUpdateRequest(eventsName).PreBindFunc(func(e *core.RecordRequestEvent) error {
+	app.OnRecordUpdateRequest(eventsName).BindFunc(func(e *core.RecordRequestEvent) error {
 		return errAppendOnly
 	})
-	app.OnRecordDeleteRequest(eventsName).PreBindFunc(func(e *core.RecordRequestEvent) error {
+	app.OnRecordDeleteRequest(eventsName).BindFunc(func(e *core.RecordRequestEvent) error {
 		return errAppendOnly
 	})
 
 	// US-22 / US-23: corrections and validations through the standard UI.
-	app.OnRecordUpdateRequest("documents").PreBindFunc(func(e *core.RecordRequestEvent) error {
+	app.OnRecordUpdateRequest("documents").BindFunc(func(e *core.RecordRequestEvent) error {
 		return handleDocumentUpdate(app, cfg, s3, e)
 	})
 }
 
-func handleDocumentUpdate(app *core.App, cfg *config.Config, s3 *storage.Client, e *core.RecordRequestEvent) error {
+func handleDocumentUpdate(app core.App, cfg *config.Config, s3 *storage.Client, e *core.RecordRequestEvent) error {
 	newRec := e.Record
 
 	// The original state, before the submitted data is persisted.
@@ -158,7 +158,7 @@ type Payload struct {
 }
 
 // AppendEvent appends one event to document_events.
-func AppendEvent(app *core.App, documentId, eventType string, before, after Snapshot, errs []string) error {
+func AppendEvent(app core.App, documentId, eventType string, before, after Snapshot, errs []string) error {
 	coll, err := app.FindCollectionByNameOrId(eventsName)
 	if err != nil {
 		return err
@@ -184,7 +184,7 @@ func AppendEvent(app *core.App, documentId, eventType string, before, after Snap
 }
 
 // AppendImportedEvent builds the imported event of US-16.
-func AppendImportedEvent(app *core.App, documentId, fromKey, toKey string, valid bool, fields map[string]any, errs []string) error {
+func AppendImportedEvent(app core.App, documentId, fromKey, toKey string, valid bool, fields map[string]any, errs []string) error {
 	before := Snapshot{"file_key": fromKey}
 	after := Snapshot{"file_key": toKey}
 	if valid {

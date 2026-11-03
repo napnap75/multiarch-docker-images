@@ -6,14 +6,14 @@ import (
 	"errors"
 	"fmt"
 
-	ganigeorgiev.com/pocketbase/pocketbase/core"
+	"ganigeorgiev.com/pocketbase/pocketbase/core"
 	"github.com/napnap75/archivist/internal/config"
 )
 
 const eventsName = "document_events"
 
 // Setup ensures the collections and the superuser account (US-03, US-04, US-01).
-func Setup(app *core.App, adminEmail, adminPassword string, cfg *config.Config) error {
+func Setup(app core.App, adminEmail, adminPassword string, cfg *config.Config) error {
 	if err := ensureDocuments(app, cfg); err != nil {
 		return err
 	}
@@ -23,11 +23,10 @@ func Setup(app *core.App, adminEmail, adminPassword string, cfg *config.Config) 
 	if err := ensureSuperuser(app, adminEmail, adminPassword); err != nil {
 		return err
 	}
-	config.SetKnownFields(cfg.FieldList)
 	return nil
 }
 
-func ensureDocuments(app *core.App, cfg *config.Config) error {
+func ensureDocuments(app core.App, cfg *config.Config) error {
 	coll, err := app.FindCollectionByNameOrId("documents")
 	if err != nil {
 		// First start: create the collection with its fixed columns (US-03).
@@ -59,9 +58,9 @@ func ensureDocuments(app *core.App, cfg *config.Config) error {
 		case "boolean":
 			newField = &core.BoolField{Name: f.Name}
 		case "enum":
-			// The vocabulary is an application notion (dashboard dropdown with
-			// free entry), not a schema constraint: empty allowed values.
-			newField = &core.SelectField{Name: f.Name, MaxSelect: 1}
+			// PocketBase select fields require a fixed non-empty vocabulary;
+			// config enums are free-form, so store them as text.
+			newField = &core.TextField{Name: f.Name}
 		}
 		if existing := coll.Fields.GetByName(f.Name); existing != nil {
 			if existing.Type() != newField.Type() {
@@ -79,9 +78,9 @@ func ensureDocuments(app *core.App, cfg *config.Config) error {
 		if f.GetSystem() {
 			continue
 		}
-		if _, declared := cfg.Fields[f.Name]; !declared && !isFixed(f.Name) {
-			app.Logger().Warn("documents: column removed", "field", f.Name, "reason", "removed from config")
-			coll.Fields.RemoveByName(f.Name)
+		if _, declared := cfg.Fields[f.GetName()]; !declared && !isFixed(f.GetName()) {
+			app.Logger().Warn("documents: column removed", "field", f.GetName(), "reason", "removed from config")
+			coll.Fields.RemoveByName(f.GetName())
 		}
 	}
 
@@ -104,7 +103,7 @@ func isFixed(name string) bool {
 	return false
 }
 
-func ensureEvents(app *core.App) error {
+func ensureEvents(app core.App) error {
 	if _, err := app.FindCollectionByNameOrId(eventsName); err == nil {
 		return nil
 	}
@@ -128,7 +127,7 @@ func ensureEvents(app *core.App) error {
 	return nil
 }
 
-func ensureSuperuser(app *core.App, email, password string) error {
+func ensureSuperuser(app core.App, email, password string) error {
 	superusers, err := app.FindCollectionByNameOrId(core.CollectionNameSuperusers)
 	if err != nil {
 		return err

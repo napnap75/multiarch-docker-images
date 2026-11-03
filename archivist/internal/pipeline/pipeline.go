@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"strings"
 
-	ganigeorgiev.com/pocketbase/dbx"
-	ganigeorgiev.com/pocketbase/pocketbase/core"
+	"ganigeorgiev.com/pocketbase/dbx"
+	"ganigeorgiev.com/pocketbase/pocketbase/core"
 	"github.com/ledongthuc/pdf"
 	"github.com/napnap75/archivist/internal/config"
 	"github.com/napnap75/archivist/internal/pbapp"
@@ -24,7 +24,7 @@ type pollState struct {
 
 var stable = map[string]pollState{}
 
-func RunPoll(app *core.App, cfg *config.Config, s3 *storage.Client) {
+func RunPoll(app core.App, cfg *config.Config, s3 *storage.Client) {
 	ctx := context.Background()
 
 	// US-11: recover interrupted filings first.
@@ -54,7 +54,7 @@ func RunPoll(app *core.App, cfg *config.Config, s3 *storage.Client) {
 	}
 }
 
-func processOne(app *core.App, cfg *config.Config, s3 *storage.Client, ctx context.Context, key string) error {
+func processOne(app core.App, cfg *config.Config, s3 *storage.Client, ctx context.Context, key string) error {
 	// US-12: download in memory, sha256 on the fly.
 	data, hash, err := s3.Get(ctx, key)
 	if err != nil {
@@ -154,7 +154,7 @@ func fileDocument(s3 *storage.Client, ctx context.Context, record *core.Record, 
 
 // recoverStuck completes interrupted filings: records whose file_key is still
 // under inbox/ (US-11).
-func recoverStuck(app *core.App, cfg *config.Config, s3 *storage.Client, ctx context.Context) {
+func recoverStuck(app core.App, cfg *config.Config, s3 *storage.Client, ctx context.Context) {
 	stuck, err := app.FindRecordsByFilter("documents", "file_key ~ {:p}", "", 100, 0, dbx.Params{"p": "inbox/"})
 	if err != nil {
 		app.Logger().Error("recovery: query failed", "error", err)
@@ -213,7 +213,11 @@ func extractPages(data []byte) ([]string, error) {
 		if p.V.IsNull() {
 			return nil, fmt.Errorf("page %d is null", i)
 		}
-		pages = append(pages, p.GetPlainText(nil))
+		text, err := p.GetPlainText(nil)
+		if err != nil {
+			return nil, fmt.Errorf("page %d: %w", i, err)
+		}
+		pages = append(pages, text)
 	}
 	if len(pages) == 0 {
 		return nil, fmt.Errorf("no page extracted")

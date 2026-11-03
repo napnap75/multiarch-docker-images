@@ -40,3 +40,4 @@ USER 65532:65532
 VOLUME /app/pb_data
 EXPOSE 8090
 ENTRYPOINT ["/archivist"]
+CMD ["serve"]

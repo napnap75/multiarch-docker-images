@@ -97,7 +97,7 @@ func (c *Client) Exists(ctx context.Context, key string) bool {
 func (c *Client) Copy(ctx context.Context, srcKey, dstKey string) error {
 	_, err := c.mc.CopyObject(ctx,
 		minio.CopyDestOptions{Bucket: c.Bucket, Object: dstKey},
-		minio.CopySourceOptions{Bucket: c.Bucket, Object: srcKey})
+		minio.CopySrcOptions{Bucket: c.Bucket, Object: srcKey})
 	return err
 }
 

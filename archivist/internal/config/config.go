@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/expr-lang/expr"
+	"github.com/expr-lang/expr/vm"
 	"github.com/tailscale/hujson"
 )
 
@@ -88,6 +89,7 @@ func Load(path string) (*Config, error) {
 		c.Fields[f.Name] = f
 		c.FieldList = append(c.FieldList, f)
 	}
+	SetKnownFields(c.FieldList)
 
 	// --- rules --------------------------------------------------------------
 	if err := validateRules(raw.Rules, c.Fields); err != nil {
@@ -124,7 +126,7 @@ func checkRuleTemplates(rules []*Rule, c *Config) error {
 			}
 		}
 		for _, child := range r.Rules {
-			if err := checkRuleTemplates(child, c); err != nil {
+			if err := checkRuleTemplates([]*Rule{child}, c); err != nil {
 				return err
 			}
 		}
@@ -166,8 +168,29 @@ func validateRules(rules []*Rule, fields map[string]Field) error {
 }
 
 // CompileExpr compiles one expression against the typed document context.
-func CompileExpr(src string) (expr.Node, error) {
-	return expr.Compile(src, expr.Env(ExprEnv(nil, nil)))
+func CompileExpr(src string) (*vm.Program, error) {
+	env := ExprEnv(nil, nil)
+	for _, name := range knownFields {
+		switch knownFieldTypes[name] {
+		case "number":
+			env[name] = float64(0)
+		case "date":
+			env[name] = time.Time{}
+		case "boolean":
+			env[name] = false
+		default:
+			env[name] = ""
+		}
+	}
+	opts := append([]expr.Option{expr.Env(env)}, exprOptions()...)
+	return expr.Compile(src, opts...)
+}
+
+func exprOptions() []expr.Option {
+	return []expr.Option{
+		expr.Function("firstMatch", FirstMatch),
+		expr.Function("period", Period),
+	}
 }
 
 // ExprEnv builds the evaluation environment: pages + declared fields.
@@ -186,11 +209,14 @@ func ExprEnv(pages []string, fields map[string]any) map[string]any {
 }
 
 var knownFields []string
+var knownFieldTypes map[string]string
 
 func SetKnownFields(fields []Field) {
 	knownFields = nil
+	knownFieldTypes = make(map[string]string, len(fields))
 	for _, f := range fields {
 		knownFields = append(knownFields, f.Name)
+		knownFieldTypes[f.Name] = f.Type
 	}
 }
 
@@ -230,7 +256,12 @@ func (c *Config) Classify(pages []string) (map[string]any, []string) {
 	walk = func(rules []*Rule) {
 		for _, r := range rules {
 			env := ExprEnv(pages, fields)
-			res, err := expr.Eval(r.When, env)
+			program, err := CompileExpr(r.When)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("when: %v", err))
+				continue
+			}
+			res, err := expr.Run(program, env)
 			if err != nil {
 				errs = append(errs, fmt.Sprintf("when: %v", err))
 				continue
@@ -241,8 +272,12 @@ func (c *Config) Classify(pages []string) (map[string]any, []string) {
 			for _, s := range r.Set {
 				var v any
 				if s.Eval != "" {
-					var err error
-					v, err = expr.Eval(s.Eval, env)
+					program, err := CompileExpr(s.Eval)
+					if err != nil {
+						errs = append(errs, fmt.Sprintf("eval %s: %v", s.Field, err))
+						continue
+					}
+					v, err = expr.Run(program, env)
 					if err != nil {
 						errs = append(errs, fmt.Sprintf("eval %s: %v", s.Field, err))
 						continue

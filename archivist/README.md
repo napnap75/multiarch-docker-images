@@ -35,7 +35,7 @@ docker run -d --name archivist \
   -e ARCHIVIST_S3_USE_SSL="true" \
   -e ARCHIVIST_ADMIN_EMAIL="me@mydomain.fr" \
   -e ARCHIVIST_ADMIN_PASSWORD="..." \
-  napnap75/archivist:latest
+  napnap75/archivist:latest serve --config /app/config.jsonc
 ```
 
 The dashboard is available at `http://<server>:8090/`, the PocketBase admin at `http://<server>:8090/_/`.
@@ -71,6 +71,8 @@ The functional configuration is reloaded only when the container restarts.
 | `ARCHIVIST_ADMIN_EMAIL` | yes | Admin account (dashboard and PocketBase) |
 | `ARCHIVIST_ADMIN_PASSWORD` | yes | Admin account password |
 | `ARCHIVIST_HTTP_ADDR` | no | Listen address, default `0.0.0.0:8090` |
+
+The PocketBase command is `serve` (the Docker image uses it by default). To load a different functional config file, pass `--config /path/to/config.jsonc` after `serve`. This overrides `ARCHIVIST_CONFIG`, which defaults to `config.jsonc`.
 
 The `pb_data` volume holds the PocketBase SQLite database (documents, history, full-text search index): it must persist across restarts.
 
