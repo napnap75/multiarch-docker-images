@@ -56,13 +56,13 @@ The append-only `document_events` collection is the single source of truth for a
 ### `document_events`
 Append-only history: `document`, `event_type` (`imported`, `corrected`, `validated`), `payload` as JSON, `timestamp`.
 
-The payload is self-contained: each event carries its own type, its own timestamp and the document state before and after, so a document's full history is reconstructed from this collection alone. All dates are RFC 3339; all S3 keys are complete, prefix included.
+The payload is self-contained: each event carries its own type, its own timestamp and the document state before and after, so a document's full history is reconstructed from this collection alone; the snapshots are stored as diffs — each `before`/`after` carries only the fields the event changes. All dates are RFC 3339; all S3 keys are complete, prefix included.
 
 Common payload keys:
 
 - `event_type`: `imported` | `corrected` | `validated`
 - `timestamp`: RFC 3339 date of the event
-- `before` / `after`: snapshots of the document state; `file_key` (the S3 key, unified with the `documents` record field) is always present; `status` appears only when the event changes it — at import the status does not exist before, so `before` carries no `status`; declared extraction fields appear only when they have a recognized value — a missing key means the value is unknown, there is no `null`
+- `before` / `after`: the event's diff, never full snapshots — a key appears on a side only when its value changes in the event: same value on both sides, it is omitted; absent from `before` and present in `after`, the field was added (every `after` key at import, since nothing existed before); present in `before` and absent from `after`, it was deleted. `file_key` (the S3 key, unified with the `documents` record field) follows the same rule and appears only when the object actually moves; at import the status does not exist before, so `before` carries no `status`. A missing key means the value is unknown, there is no `null`
 
 Per event type:
 

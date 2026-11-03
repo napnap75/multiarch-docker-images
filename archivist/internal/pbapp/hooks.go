@@ -130,11 +130,42 @@ func FieldsFromRecord(cfg *config.Config, record *core.Record) map[string]any {
 	return out
 }
 
+// DiffSnapshots reduces two snapshots to the keys whose value differs
+// between them: a key with the same value on both sides is omitted, a
+// key present on one side only is kept on that side (added or deleted
+field). It is the section-4 payload rule: before/after carry only what
+// the event changes.
+func DiffSnapshots(before, after Snapshot) (Snapshot, Snapshot) {
+	keys := map[string]bool{}
+	for k := range before {
+		keys[k] = true
+	}
+	for k := range after {
+		keys[k] = true
+	}
+	db, da := Snapshot{}, Snapshot{}
+	for k := range keys {
+		bv, bok := before[k]
+		av, aok := after[k]
+		if bok && aok && fmt.Sprintf("%v", bv) == fmt.Sprintf("%v", av) {
+			continue
+		}
+		if bok {
+			db[k] = bv
+		}
+		if aok {
+			da[k] = av
+		}
+	}
+	return db, da
+}
+
 // Snapshot is one before/after state of a document (arch.md §4).
 type Snapshot map[string]any
 
-// SnapshotFromRecord builds a snapshot: file_key always, status when it is
-// set, and the recognized declared fields.
+// SnapshotFromRecord builds the full snapshot of a record: file_key, status
+// when set, and the recognized declared fields. AppendEvent reduces pairs of
+// such snapshots to what actually changes.
 func SnapshotFromRecord(cfg *config.Config, record *core.Record, withStatus bool) Snapshot {
 	s := Snapshot{"file_key": record.GetString("file_key")}
 	if withStatus {
@@ -164,6 +195,9 @@ func AppendEvent(app core.App, documentId, eventType string, before, after Snaps
 		return err
 	}
 	now := time.Now().UTC()
+	// The stored payload carries the event's diff only: unchanged keys
+	// are dropped from both sides (arch.md section 4).
+	before, after = DiffSnapshots(before, after)
 	p := Payload{
 		EventType: eventType,
 		Timestamp: now.Format(time.RFC3339),
