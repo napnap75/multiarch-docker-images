@@ -190,6 +190,7 @@ func exprOptions() []expr.Option {
 	return []expr.Option{
 		expr.Function("firstMatch", FirstMatch),
 		expr.Function("period", Period),
+		expr.Function("frDate", FrenchDate),
 	}
 }
 
@@ -394,6 +395,78 @@ func toString(v any) string {
 	default:
 		return fmt.Sprintf("%v", t)
 	}
+}
+
+// frDateRe matches a French natural-language date, with or without a day:
+// "le 19 janvier 2026", "Janvier 2026", "1er févr. 2026". Abbreviated month
+// names are accepted, accents are optional.
+var frDateRe = regexp.MustCompile(`(?i)(?:le\s+)?(?:(1er|\d{1,2})\s+)?(janv\.?|janvier|f[eé]vr\.?|f[eé]vrier|mars|avr\.?|avril|mai|juin|juil\.?|juillet|ao[uû]t|sept\.?|septembre|oct\.?|octobre|nov\.?|novembre|d[eé]c\.?|d[eé]cembre)\s+(\d{4})`)
+
+// frMonths maps the folded month names to their numbers. Keys are lowercase
+// and unaccented; foldFrench normalizes what the regex captured.
+var frMonths = map[string]time.Month{
+	"janv": time.January, "janvier": time.January,
+	"fevr": time.February, "fevrier": time.February,
+	"mars": time.March,
+	"avr": time.April, "avril": time.April,
+	"mai": time.May,
+	"juin": time.June,
+	"juil": time.July, "juillet": time.July,
+	"aout": time.August,
+	"sept": time.September, "septembre": time.September,
+	"oct": time.October, "octobre": time.October,
+	"nov": time.November, "novembre": time.November,
+	"dec": time.December, "decembre": time.December,
+}
+
+// foldFrench lowercases and strips the French diacritics used in month
+// names plus the abbreviation dot, so the lookup tolerates "Février",
+// "FEVRIER" and "févr." alike.
+func foldFrench(s string) string {
+	r := strings.ToLower(s)
+	for _, a := range [][2]string{{"é", "e"}, {"è", "e"}, {"ê", "e"}, {"û", "u"}, {"â", "a"}} {
+		r = strings.ReplaceAll(r, a[0], a[1])
+	}
+	return strings.TrimSuffix(r, ".")
+}
+
+// FrenchDate is the frDate(text) helper (arch.md §5). It extracts and
+// parses a French natural-language date — "le 19 janvier 2026", the day
+// being optional ("Janvier 2026" gives the first of the month) and
+// abbreviated month names accepted ("1er févr. 2026") — into a native
+// date. Go layouts only know English month names, so date(value, layout)
+// cannot parse these. A text containing no French date is a rule error
+// and routes the document to pending/.
+func FrenchDate(args ...any) (any, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("frDate: text required")
+	}
+	text, _ := args[0].(string)
+	m := frDateRe.FindStringSubmatch(text)
+	if m == nil {
+		return nil, fmt.Errorf("frDate: no French date found")
+	}
+	day := 1
+	if m[1] != "" && !strings.EqualFold(m[1], "1er") {
+		d, err := strconv.Atoi(m[1])
+		if err != nil {
+			return nil, fmt.Errorf("frDate: %w", err)
+		}
+		day = d
+	}
+	month, ok := frMonths[foldFrench(m[2])]
+	if !ok {
+		return nil, fmt.Errorf("frDate: unknown month %q", m[2])
+	}
+	year, err := strconv.Atoi(m[3])
+	if err != nil {
+		return nil, fmt.Errorf("frDate: %w", err)
+	}
+	d := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+	if d.Month() != month || d.Day() != day {
+		return nil, fmt.Errorf("frDate: %d %s %d is not a valid date", day, m[2], year)
+	}
+	return d, nil
 }
 
 var frenchMonths = []string{"Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
