@@ -140,7 +140,7 @@ E2E_IMAGE=archivist:e2e go test ./e2e -v -count=1
 
 Build the image first: `docker build -t archivist:e2e .` (see Building the image).
 
-Without `E2E_IMAGE` the suite skips. The suite drives the poller through the superuser-only `POST /api/archivist/poll` route instead of waiting for the cron. `E2E_KEEP=1` leaves the containers running after the run for debugging; `GARAGE_IMAGE` overrides the Garage image (default `dxflrs/garage:latest`). See arch.md section 10.
+Without `E2E_IMAGE` the suite skips. The suite drives the poller through the superuser-only `POST /api/archivist/poll` route instead of waiting for the cron. `E2E_KEEP=1` leaves the containers running after the run for debugging; `GARAGE_IMAGE` overrides the Garage image (default `dxflrs/garage:v2.5.0`). See arch.md section 10.
 
 ## Troubleshooting
 

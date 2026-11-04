@@ -123,7 +123,7 @@ func startGarage() error {
 	}
 	gImage := os.Getenv("GARAGE_IMAGE")
 	if gImage == "" {
-		gImage = "dxflrs/garage:latest"
+		gImage = "dxflrs/garage:v2.5.0"
 	}
 	_, _ = run("docker", "network", "create", network) // already exists is fine
 	if _, err := run("docker", "run", "-d", "--name", garageC, "--network", network,
@@ -147,7 +147,7 @@ func startGarage() error {
 	if _, err := garage("bucket", "create", bucket); err != nil {
 		return err
 	}
-	keyOut, err := garage("key", "new", "--name", bucket)
+	keyOut, err := garage("key", "create", bucket)
 	if err != nil {
 		return err
 	}
@@ -178,6 +178,13 @@ func startApp(image string) error {
 	if err := os.WriteFile(cfgPath, []byte(testConfig), 0o644); err != nil {
 		return err
 	}
+	dataPath := filepath.Join(dir, "pb_data")
+	if err := os.Mkdir(dataPath, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dataPath, 0o777); err != nil {
+		return err
+	}
 	env := []string{
 		"ARCHIVIST_S3_ENDPOINT=" + garageC + ":3900",
 		"ARCHIVIST_S3_ACCESS_KEY=" + s3KeyID,
@@ -189,10 +196,13 @@ func startApp(image string) error {
 		"ARCHIVIST_ADMIN_PASSWORD=" + adminPass,
 		"ARCHIVIST_CONFIG=/config.jsonc",
 		// Never fires (February 31st): the timing stays deterministic.
-		"ARCHIVIST_POLL_INTERVAL=0 0 31 2 * *",
+		"ARCHIVIST_POLL_INTERVAL=0 0 31 2 *",
 	}
 	args := []string{"run", "-d", "--name", appC, "--network", network,
-		"-p", "127.0.0.1:8090:8090", "-v", cfgPath + ":/config.jsonc"}
+		"-p", "127.0.0.1:8090:8090",
+		"-v", cfgPath + ":/config.jsonc",
+		"-v", dataPath + ":/pb_data",
+		"-v", dataPath + ":/app/pb_data"}
 	for _, e := range env {
 		args = append(args, "-e", e)
 	}
@@ -206,6 +216,14 @@ func startApp(image string) error {
 		}
 		return err
 	}
+	if err := authenticate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func authenticate() error {
+	token = ""
 	_, body, err := api(http.MethodPost, "/api/collections/_superusers/auth-with-password",
 		map[string]any{"identity": adminMail, "password": adminPass})
 	if err != nil {
@@ -381,9 +399,21 @@ func eventsOf(t *testing.T, docID string) []map[string]any {
 
 func eventPayload(t *testing.T, rec map[string]any) map[string]any {
 	t.Helper()
-	raw, _ := rec["payload"].(string)
+	var data []byte
+	switch raw := rec["payload"].(type) {
+	case string:
+		data = []byte(raw)
+	case map[string]any:
+		var err error
+		data, err = json.Marshal(raw)
+		if err != nil {
+			t.Fatalf("event payload is not JSON: %v", err)
+		}
+	default:
+		t.Fatalf("unexpected event payload type: %T", rec["payload"])
+	}
 	var p map[string]any
-	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+	if err := json.Unmarshal(data, &p); err != nil {
 		t.Fatalf("event payload is not JSON: %v", err)
 	}
 	return p
@@ -476,7 +506,7 @@ func putPDF(t *testing.T, key string, lines ...string) string {
 // --- the config.jsonc mounted into the image under test -----------------
 // "~" is a stand-in for a backtick: expr string literals are backticked
 // (arch.md section 5) and backticks cannot appear in Go raw strings.
-var testConfigRaw = `{
+var testConfigRaw = `
 {
   "fields": [
     { "name": "template", "type": "text" },
@@ -498,13 +528,12 @@ var testConfigRaw = `{
     }
   ],
   "templates": {
-    "bank_statement": "files/{emittingCompany}/{emissionDate.Format(~2006-01~)}_{documentType}_{bankAccount}.pdf",
+		"bank_statement": "{emittingCompany}/{emissionDate.Format(~2006-01~)}_{documentType}_{bankAccount}.pdf",
     "default": "files/{documentType}.pdf"
   }
 }`
 
 var testConfig = strings.ReplaceAll(testConfigRaw, "~", "`")
-
 
 func TestE2E(t *testing.T) {
 
@@ -549,6 +578,21 @@ func TestE2E(t *testing.T) {
 	// 2. Import (US-10 to US-17): a valid simulated statement is
 	// classified, filed under files/, traced by an imported event with
 	// the section-4 payload.
+	t.Run("import: inbox directory marker is ignored", func(t *testing.T) {
+		if _, err := s3.PutObject(context.Background(), bucket, "inbox/",
+			bytes.NewReader(nil), 0, minio.PutObjectOptions{}); err != nil {
+			t.Fatalf("PutObject inbox directory marker: %v", err)
+		}
+		poll(t)
+		poll(t)
+		if docs := listRecords(t, "documents", "", ""); len(docs) != 0 {
+			t.Fatalf("directory marker created %d document(s)", len(docs))
+		}
+		if s3Exists(t, "pending/") {
+			t.Fatal("directory marker was copied to pending/")
+		}
+	})
+
 	t.Run("import: a valid statement is classified and filed", func(t *testing.T) {
 		hash := putPDF(t, "inbox/statement-1.pdf",
 			"BRED", "Releve de compte", "Date : 15/12/2025", "Compte Thomas")
@@ -726,9 +770,9 @@ func TestE2E(t *testing.T) {
 			"status":          "processed",
 			"template":        "bank_statement",
 			"emittingCompany": "BRED",
-			"documentType":   "Releve de compte",
-			"emissionDate":   "2026-02-01",
-			"bankAccount":    "Thomas",
+			"documentType":    "Releve de compte",
+			"emissionDate":    "2026-02-01",
+			"bankAccount":     "Thomas",
 		})
 		if status != 200 {
 			t.Fatalf("stuck record creation: %d %v", status, out)
@@ -752,6 +796,9 @@ func TestE2E(t *testing.T) {
 		}
 		if err := retry(60*time.Second, checkHealth); err != nil {
 			t.Fatalf("app never came back: %v", err)
+		}
+		if err := authenticate(); err != nil {
+			t.Fatalf("superuser reauthentication after restart: %v", err)
 		}
 		after := listRecords(t, "documents", "", "")
 		if len(after) != len(before) {

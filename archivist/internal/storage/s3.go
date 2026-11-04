@@ -68,6 +68,9 @@ func (c *Client) ListInbox(ctx context.Context) ([]InboxObject, error) {
 		if obj.Err != nil {
 			return nil, obj.Err
 		}
+		if strings.HasSuffix(obj.Key, "/") {
+			continue
+		}
 		out = append(out, InboxObject{Key: obj.Key, Size: obj.Size, ETag: obj.ETag})
 	}
 	return out, nil

@@ -133,7 +133,7 @@ func FieldsFromRecord(cfg *config.Config, record *core.Record) map[string]any {
 // DiffSnapshots reduces two snapshots to the keys whose value differs
 // between them: a key with the same value on both sides is omitted, a
 // key present on one side only is kept on that side (added or deleted
-field). It is the section-4 payload rule: before/after carry only what
+// field). It is the section-4 payload rule: before/after carry only what
 // the event changes.
 func DiffSnapshots(before, after Snapshot) (Snapshot, Snapshot) {
 	keys := map[string]bool{}

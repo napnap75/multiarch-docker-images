@@ -6,7 +6,7 @@ FROM golang:1.27-alpine AS build
 WORKDIR /src
 
 # ca-certificates and tzdata are copied into the runtime image below.
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata git
 
 # TARGETARCH is set by buildx for multi-platform builds; it is unset for a
 # plain docker build, where go builds for the host architecture.
@@ -15,7 +15,8 @@ ARG TARGETARCH
 # go.sum is not committed yet: go mod tidy resolves and pins the exact
 # versions at build time. Once go.sum is committed, replace the tidy line
 # with `go mod download` for fully reproducible builds.
-COPY go.mod main.go internal/ ./
+COPY go.mod main.go ./
+COPY internal/ ./internal/
 RUN go mod tidy
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /archivist .
 
@@ -32,12 +33,12 @@ RUN mkdir -p /out/etc/ssl/certs /out/usr/share /out/app/pb_data /out/tmp \
 # --- runtime stage -----------------------------------------------------------
 FROM scratch
 COPY --from=build /out/ /
-COPY --from=build /archivist /archivist
+COPY --from=build /archivist /app/archivist
 
 WORKDIR /app
 ENV TMPDIR=/tmp
 USER 65532:65532
 VOLUME /app/pb_data
 EXPOSE 8090
-ENTRYPOINT ["/archivist"]
+ENTRYPOINT ["/app/archivist"]
 CMD ["serve"]

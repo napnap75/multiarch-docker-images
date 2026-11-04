@@ -239,7 +239,7 @@ E2E_IMAGE=<image-under-test> go test ./e2e -v -count=1
 
 The whole harness lives in one file, `e2e/e2e_test.go`. TestMain orchestrates the containers itself over `docker` (no compose, no fixtures):
 
-- starts a disposable Garage (`dxflrs/garage` by default, `GARAGE_IMAGE` overrides) on a private docker network, bootstraps its layout, bucket and key, and publishes its S3 API on 127.0.0.1:3900;
+- starts a disposable Garage (`dxflrs/garage:v2.5.0` by default, `GARAGE_IMAGE` overrides) on a private docker network, bootstraps its layout, bucket and key, and publishes its S3 API on 127.0.0.1:3900;
 - starts the image under test with a minimal `config.jsonc` embedded in the test file and the cron disabled;
 - drives everything through the PocketBase HTTP API and the S3 API; test PDFs are generated in memory from a minimal one-page template, so the classification outcome is the proof that extraction works, without any fixture.
 

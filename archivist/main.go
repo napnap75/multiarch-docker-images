@@ -143,7 +143,8 @@ func main() {
 		log.Fatalf("register archivist poller: %v", err)
 	}
 
-	app.RootCmd.PersistentFlags().Set("http", envCfg.HTTPAddr)
+	args := append([]string(nil), os.Args[1:]...)
+	app.RootCmd.SetArgs(append(args, "--http="+envCfg.HTTPAddr))
 	if err := app.Start(); err != nil {
 		log.Fatal(err)
 	}
