@@ -115,7 +115,7 @@ On classification failure, the document is routed to `pending/` and the payload 
 }
 ```
 
-`corrected` — created after a dashboard correction is saved and the file re-filed; a correction always moves the document to `validated` whatever its previous status, so the status change is part of the snapshot diff:
+`corrected` — created whenever declared fields are modified, whatever the interface. A field edited from the standard PocketBase UI is a draft correction (US-22): the values persist as they are, no template evaluation, no re-filing, no status change, and the snapshots carry the field diff alone. A dashboard correction (US-3x) adds the side effects: the file is re-filed and the status moves to `validated`, so `file_key` and `status` join the diff:
 
 ```json
 {
@@ -203,8 +203,9 @@ Custom pages on the PocketBase instance:
 
 - File list: all files with status, filters, combined search over full text (FTS5) + metadata/fields.
 - Detail: PDF preview streamed from S3 through a dedicated route, along with extracted fields; debug mode adds detailed log lines explaining every rule evaluation and action performed.
-- Correction: performed directly from the standard PocketBase collections UI (or any PocketBase client) by editing the extracted fields. The application's `OnRecordUpdateRequest` hook on `documents` intercepts the save: it evaluates the selected template with the new values and refuses the save if the template cannot be evaluated without error; otherwise it re-files the file (copy to the new key, delete the old one, incremental suffix on conflict, move skipped when the rendered name is unchanged), updates `file_key`, sets the status to `validated` whatever the previous status, and appends the `corrected` event. A corrected `pending` file is thereby removed from `pending/`. On a mid-re-filing failure the save is rejected and the S3 state is restored. History is preserved.
-- Validation: performed from the same interface by changing the status to `validated`; the hook appends the `validated` event, and any other status change is refused. A `pending` file can only leave the review queue through a correction that can be saved, which itself sets the status to `validated`.
+- Correction: performed directly from the standard PocketBase collections UI (or any PocketBase client) by editing the extracted fields. The application's `OnRecordUpdateRequest` hook on `documents` intercepts the save and appends the `corrected` event carrying the field diff — and nothing else. The UI edits one field at a time with no preview of the resulting file name, so the hook deliberately performs no template evaluation and no re-filing, and the status does not move: an inconsistent draft cannot trigger irreversible side effects. The full correction — all fields at once, dry-run of the resulting name, re-filing and validation — is the custom dashboard's job (US-3x).
+- Validation: performed from the same interface by changing the status to `validated`; the hook appends the `validated` event, and any other status change is refused. A `pending` file can only leave the review queue through a full correction from the custom dashboard (US-3x).
+- Deletion: deleting a `documents` record from the same interface first deletes the S3 object at `file_key` (US-24); on S3 failure the deletion is refused and the record stays. The cascade delete of the `document_events` relation removes the history with the record; with versioning the object stays recoverable via its delete marker.
 - Rule management: config display and dry-run on an existing document. The configuration is reloaded only on restart; there is no runtime reload.
 
 Authentication: single account via PocketBase's standard auth.
@@ -249,11 +250,12 @@ The scenarios form one narrative; each subtest names the US it proves:
 2. Import — a valid simulated statement is classified and filed to `files/` with its `imported` event (US-10 to US-17).
 3. Duplicate — the same content re-uploaded is deleted from `inbox/`, no record, no event (US-12).
 4. Pending — a missing mandatory date routes the document to `pending/` with `errors` in the imported event and the recognized fields kept (US-13 to US-15).
-5. Correction — a field PATCH through the API re-files and validates, `corrected` event appended (US-22).
+5. Correction — a field PATCH through the API persists the values with no side effect (no re-filing, no status change), `corrected` event carrying the field diff (US-22).
 6. Validation — a status-only PATCH appends the `validated` event, `file_key` untouched (US-23).
 7. Append-only — PATCH and DELETE on `document_events` are refused (US-04).
-8. Recovery — a stuck record (`file_key` still under `inbox/`, created directly through the API) is completed by the next pass (US-11).
-9. Restart — the container restarts with all state intact.
+8. Deletion — a deleted record removes the S3 object; the history follows via the cascade delete (US-24).
+9. Recovery — a stuck record (`file_key` still under `inbox/`, created directly through the API) is completed by the next pass (US-11).
+10. Restart — the container restarts with all state intact.
 
 `POST /api/archivist/poll` (superuser only) runs one poll pass immediately. It exists so the gate and the operator trigger passes on demand instead of waiting for the cron; a fresh upload needs two calls because the poller waits for size/ETag stability across two passes (US-10).
 

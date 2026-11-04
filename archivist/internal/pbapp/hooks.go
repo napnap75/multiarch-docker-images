@@ -10,7 +10,7 @@ import (
 	"github.com/napnap75/archivist/internal/storage"
 )
 
-// BindHooks registers the request hooks (US-04, US-22, US-23).
+// BindHooks registers the request hooks (US-04, US-22, US-23, US-24).
 func BindHooks(app core.App, cfg *config.Config, s3 *storage.Client) {
 	// US-04: document_events is append-only for everyone, superusers included.
 	app.OnRecordUpdateRequest(eventsName).BindFunc(func(e *core.RecordRequestEvent) error {
@@ -20,13 +20,35 @@ func BindHooks(app core.App, cfg *config.Config, s3 *storage.Client) {
 		return errAppendOnly
 	})
 
-	// US-22 / US-23: corrections and validations through the standard UI.
+	// US-24: deleting a documents record deletes the underlying S3 object
+	// first; on failure the deletion is refused and both the record and
+	// the object are left in place. Like US-04, the hook binds to
+	// superusers as well: API rules alone cannot enforce it.
+	app.OnRecordDeleteRequest("documents").BindFunc(func(e *core.RecordRequestEvent) error {
+		key := e.Record.GetString("file_key")
+		if key == "" {
+			return e.Next()
+		}
+		if err := s3.Remove(e.Request.Context(), key); err != nil {
+			return fmt.Errorf("refused: S3 deletion of %s failed: %v", key, err)
+		}
+		return e.Next()
+	})
+
+	// US-22 / US-23: draft corrections and validations through the standard UI.
 	app.OnRecordUpdateRequest("documents").BindFunc(func(e *core.RecordRequestEvent) error {
-		return handleDocumentUpdate(app, cfg, s3, e)
+		return handleDocumentUpdate(app, cfg, e)
 	})
 }
 
-func handleDocumentUpdate(app core.App, cfg *config.Config, s3 *storage.Client, e *core.RecordRequestEvent) error {
+// handleDocumentUpdate implements US-22 and US-23. A field edit from the
+// standard UI is a draft correction: the values persist as they are, no
+// template evaluation, no re-filing, no status change — the UI edits one
+// field at a time and shows no preview of the resulting file name. The full
+// correction (all fields, dry-run, re-filing, validation) is the custom
+// dashboard's job (US-3x). The only direct status change is processed ->
+// validated (US-23).
+func handleDocumentUpdate(app core.App, cfg *config.Config, e *core.RecordRequestEvent) error {
 	newRec := e.Record
 
 	// The original state, before the submitted data is persisted.
@@ -36,6 +58,7 @@ func handleDocumentUpdate(app core.App, cfg *config.Config, s3 *storage.Client, 
 	}
 	oldStatus := orig.GetString("status")
 	newStatus := newRec.GetString("status")
+
 	fieldsChanged := false
 	for _, f := range cfg.FieldList {
 		if fmt.Sprintf("%v", orig.Get(f.Name)) != fmt.Sprintf("%v", newRec.Get(f.Name)) {
@@ -44,62 +67,29 @@ func handleDocumentUpdate(app core.App, cfg *config.Config, s3 *storage.Client, 
 		}
 	}
 
-	if !fieldsChanged {
-		// US-23: direct validation, processed -> validated, no field change.
-		if newStatus == "validated" && oldStatus == "processed" {
-			before := Snapshot{"status": oldStatus}
-			after := Snapshot{"status": "validated"}
-			if err := AppendEvent(app, newRec.Id, "validated", before, after, nil); err != nil {
-				return err
+	// US-23: the only direct status change is processed -> validated.
+	if newStatus != oldStatus && (newStatus != "validated" || oldStatus != "processed") {
+		return fmt.Errorf("refused: the only direct status change is processed -> validated; full corrections belong to the review dashboard")
+	}
+
+	// US-22: append the corrected event carrying the field diff alone;
+	// file_key and status are absent since they did not change.
+	if fieldsChanged {
+		before, after := DiffSnapshots(SnapshotFromRecord(cfg, orig, false), SnapshotFromRecord(cfg, newRec, false))
+		if len(before) > 0 || len(after) > 0 {
+			if err := AppendEvent(app, newRec.Id, "corrected", before, after, nil); err != nil {
+				app.Logger().Error("corrected event append failed", "document", newRec.Id, "error", err)
 			}
-			return e.Next()
 		}
-		if newStatus != oldStatus {
-			return fmt.Errorf("refused: the only direct status change is processed -> validated; other changes go through a field correction")
-		}
-		return e.Next()
 	}
 
-	// US-22: a field correction. Whatever the previous status, the document
-	// becomes validated after a successful re-filing.
-	fields := FieldsFromRecord(cfg, newRec)
-	tplName := "default"
-	if v, ok := fields["template"].(string); ok && v != "" {
-		tplName = v
-	}
-	tpl, ok := cfg.Templates[tplName]
-	if !ok {
-		return fmt.Errorf("refused: unknown template %q", tplName)
-	}
-	rendered, err := tpl.Render(fields, nil)
-	if err != nil {
-		return fmt.Errorf("refused: %v", err)
-	}
-
-	oldKey := orig.GetString("file_key")
-	target := "files/" + rendered
-	finalKey := oldKey
-	if target != oldKey {
-		finalKey, err = s3.ResolveConflict(e.Request.Context(), target)
-		if err != nil {
+	// US-23: the validated event, snapshots carrying the status change alone.
+	if newStatus != oldStatus {
+		before := Snapshot{"status": oldStatus}
+		after := Snapshot{"status": "validated"}
+		if err := AppendEvent(app, newRec.Id, "validated", before, after, nil); err != nil {
 			return err
 		}
-		if err := s3.Copy(e.Request.Context(), oldKey, finalKey); err != nil {
-			return fmt.Errorf("refused: re-filing failed: %v", err)
-		}
-		if err := s3.Remove(e.Request.Context(), oldKey); err != nil {
-			// Roll back the partial copy so the S3 state matches the record.
-			_ = s3.Remove(e.Request.Context(), finalKey)
-			return fmt.Errorf("refused: re-filing failed: %v", err)
-		}
-	}
-	newRec.Set("file_key", finalKey)
-	newRec.Set("status", "validated")
-
-	before := SnapshotFromRecord(cfg, orig, true)
-	after := SnapshotFromRecord(cfg, newRec, true)
-	if err := AppendEvent(app, newRec.Id, "corrected", before, after, nil); err != nil {
-		app.Logger().Error("corrected event append failed", "document", newRec.Id, "error", err)
 	}
 	return e.Next()
 }

@@ -176,8 +176,7 @@ Acceptance criteria:
 
 ## Epic: Data visualization (standard PocketBase UI)
 
-The standard PocketBase collections UI is the nominal interface for reading and correcting documents. Field edits and status changes made through it (or through any PocketBase API client) are intercepted by the application's `OnRecordUpdateRequest` hook on `documents`, which performs the required side effects: template validation, re-filing, event tracking. The custom dashboard (later epic) adds search, PDF preview and dry-run on top of the same hook, not a separate correction flow.
-
+The standard PocketBase collections UI is the nominal interface for reading and correcting documents. Field edits and status changes made through it (or through any PocketBase API client) are intercepted by the application's `OnRecordUpdateRequest` hook on `documents`, which records the change in the event history (US-22) and enforces the status rules (US-23) — but deliberately performs no re-filing: the UI edits one field at a time and shows no preview of the resulting file name, so an inconsistent draft cannot trigger irreversible side effects. The full correction — all fields at once, dry-run of the resulting name, re-filing and validation — is the custom dashboard's job (US-3x), and record deletions propagate to S3 (US-24).
 ### US-20 — Browse documents in the collections UI
 
 As the user,
@@ -202,21 +201,19 @@ Acceptance criteria:
 - Given an event, when I open it, then the `payload` JSON is displayed and readable, matching the section-4 format.
 - Given the collection, when I try to edit or delete a record from the UI, then the operation is rejected by the application's request hooks (US-04) — including for the superuser account the admin UI uses.
 
-### US-22 — Correct a document's fields from the standard PocketBase UI
+### US-22 — Edit a document's fields from the standard PocketBase UI without side effects
 
 As the user,
-I want to edit a document's fields directly in the collections UI (or any PocketBase client) and have the application do the rest in the update hook,
-so that a file needing correction is re-filed and traced without any custom interface.
+I want field edits saved from the standard PocketBase UI (or any PocketBase client) to persist the new values without any side effect — no template evaluation, no re-filing, no status change,
+so that the UI's editing model — one field at a time, no preview of the resulting file name — cannot trigger irreversible actions I cannot review before saving.
 
 Acceptance criteria:
 
-- Given a document, when I edit one or more fields in the collections UI and save, then the `OnRecordUpdateRequest` hook on `documents` evaluates the selected template with the new field values and refuses the save with an explicit error if the template is unknown or cannot be rendered (missing mandatory field, evaluation error); the record is left unchanged and no event is appended.
-- Given the save is valid, when the hook runs, then the file is re-filed: copy to the new key, delete the old key, incremental suffix on conflict; the record's `file_key` is updated to the final, conflict-resolved key.
-- Given the rendered name equals the current `file_key`, when the hook runs, then the copy and delete are skipped, the event is still appended, and the status still moves to `validated`.
-- Given the save is valid, when the record is persisted, then the status moves to `validated` whatever the previous status, and a `corrected` event is appended with `before`/`after` snapshots conforming to the section-4 format (`file_key` and `status` included in the diff when they change).
-- Given the previous status was `pending`, when the correction succeeds, then the `pending/` key is deleted and the file leaves the review queue.
-- Given the re-filing fails midway (S3 error), when the hook runs, then the save is rejected, the S3 state is restored (any partial copy is deleted), and the record and history are left unchanged.
-
+- Given a document, when I edit one or more declared fields in the collections UI and save, then the `OnRecordUpdateRequest` hook on `documents` persists the new values as they are: no template evaluation, no re-filing, no `file_key` change, no status change.
+- Given a field edit is saved, when the record is persisted, then a `corrected` event is appended whose `before`/`after` diff (section-4 format) carries the changed fields only; `file_key` and `status` do not appear since they did not change.
+- Given a save where no declared field actually changed, when the hook runs, then no event is appended.
+- Given the save also changes the status, when the hook runs, then the status rules of US-23 apply on their own: `processed` → `validated` is appended as a separate `validated` event, anything else is refused.
+- Given a `pending` document, when fields are edited this way, then it stays `pending` and its object stays in `pending/`; leaving the review queue requires the full correction of the custom dashboard (US-3x), whose form shows all fields and the resulting name before saving.
 ### US-23 — Validate a document from the standard PocketBase UI
 
 As the user,
@@ -226,10 +223,23 @@ so that the validation is traced as a `validated` event without a custom interfa
 Acceptance criteria:
 
 - Given a `processed` document, when I set its status to `validated` in the collections UI and save, then the update hook appends a `validated` event with the section-4 payload (snapshots carrying the status change alone) and persists the new status.
-- Given any update that tries to change the status to something else than the allowed transition (`processed`→`validated` directly, any status→`validated` through a correction), when the hook runs, then the save is refused with an explicit error.
+- Given any update that tries a status change other than the allowed transition (`processed`→`validated`), when the hook runs, then the save is refused with an explicit error.
 - Given a status change to `validated`, when no field changed, then no re-filing occurs and the `file_key` is untouched.
 
+### US-24 — Delete a document and its S3 object together
+
+As the user,
+I want deleting a `documents` record from the standard PocketBase UI (or any PocketBase client) to also delete the underlying S3 object,
+so that the database and the bucket never contradict each other.
+
+Acceptance criteria:
+
+- Given a `documents` record, when it is deleted, then the `OnRecordDeleteRequest` hook on `documents` deletes the S3 object at `file_key` before the record is removed; the cascade delete of the `document_events` relation (US-04) removes the history with it.
+- Given the S3 deletion fails (transient error, unreachable cluster), when the hook runs, then the record deletion is refused with an explicit error and both the record and the object are left in place.
+- Given the object at `file_key` is already gone from the bucket, when the hook runs, then the deletion is idempotent: the record is removed.
+- Given the bucket is versioned, when the object is deleted, then a delete marker keeps it recoverable; without versioning the deletion is final (same caveat as US-01).
+- Given a superuser issues the DELETE, when the hook runs, then the hook applies: like the append-only protection of US-04, it cannot rely on API rules alone.
 ## Stories deferred to later epics
 
-- US-3x (Custom review dashboard): file list with status, combined search (FTS5 + fields), detail with PDF preview streamed from S3, correction form pre-filled from the last event snapshot, rule dry-run. Correction and validation semantics are those of US-22/US-23; the dashboard is a convenience layer over the same hook.
+- US-3x (Custom review dashboard): file list with status, combined search (FTS5 + fields), detail with PDF preview streamed from S3, correction form pre-filled from the last event snapshot, rule dry-run. The dashboard owns the full correction: its form shows every field and the resulting file name (dry-run) before saving; saving a full correction re-files the object and sets the status to `validated` — the side effects US-22 deliberately keeps out of the standard UI. Validation remains that of US-23.
 - US-4x (FTS5): full-text index synchronization via hooks.

@@ -2,7 +2,7 @@
 //
 // The suite is one narrative: it starts a disposable Garage and the image
 // under test, then follows documents through the whole pipeline - import,
-// duplicate, pending, correction, validation, append-only, recovery,
+// duplicate, pending, correction, validation, append-only, deletion, recovery,
 // restart. It is a regression gate for dependency upgrades (PocketBase,
 // minio-go, ledongthuc/pdf, expr, Garage), not an acceptance proof.
 //
@@ -670,9 +670,10 @@ func TestE2E(t *testing.T) {
 		}
 	})
 
-	// 5. Correction (US-22): a field PATCH through the API re-files the
-	// document, sets status validated and appends the corrected event.
-	t.Run("correction: a field PATCH re-files and validates", func(t *testing.T) {
+	// 5. Correction (US-22): a field PATCH persists the values with no
+	// side effect - no re-filing, no status change; the corrected event
+	// carries the field diff alone.
+	t.Run("correction: a field PATCH persists with no side effect", func(t *testing.T) {
 		pending := listRecords(t, "documents", "(status='pending')", "")
 		if len(pending) != 1 {
 			t.Fatalf("want 1 pending document, got %d", len(pending))
@@ -683,28 +684,37 @@ func TestE2E(t *testing.T) {
 		if status != 200 {
 			t.Fatalf("correction refused: %d %v", status, out)
 		}
-		want := "files/BRED/2026-01_Releve de compte_Thomas.pdf"
 		doc := oneRecord(t, "documents", "(id='"+id+"')")
-		if doc["status"] != "validated" {
-			t.Fatalf("status: %v", doc["status"])
+		if doc["status"] != "pending" {
+			t.Fatalf("status must not change on a field edit: %v", doc["status"])
 		}
-		if doc["file_key"] != want {
-			t.Fatalf("file_key: %v, want %v", doc["file_key"], want)
+		if doc["file_key"] != "pending/no-date.pdf" {
+			t.Fatalf("file_key must not change on a field edit: %v", doc["file_key"])
 		}
-		if !s3Exists(t, want) || s3Exists(t, "pending/no-date.pdf") {
-			t.Fatal("S3 state does not match the correction")
+		if !s3Exists(t, "pending/no-date.pdf") {
+			t.Fatal("the object must stay in pending/")
+		}
+		if s3Exists(t, "files/BRED/2026-01_Releve de compte_Thomas.pdf") {
+			t.Fatal("a field edit must not re-file the object")
 		}
 		p := eventPayloadOfType(t, eventsOf(t, id), "corrected")
 		before, _ := p["before"].(map[string]any)
 		after, _ := p["after"].(map[string]any)
-		if before["file_key"] != "pending/no-date.pdf" || before["status"] != "pending" {
-			t.Fatalf("before: %v", before)
+		if _, has := before["emissionDate"]; has {
+			t.Fatalf("emissionDate was unknown before the correction: %v", before)
 		}
-		if after["file_key"] != want || after["status"] != "validated" {
-			t.Fatalf("after: %v", after)
+		if after["emissionDate"] != "2026-01-15T00:00:00Z" {
+			t.Fatalf("after.emissionDate: %v", after)
+		}
+		for _, s := range []string{"file_key", "status"} {
+			if _, has := before[s]; has {
+				t.Fatalf("%s must not appear in a field-edit diff: %v", s, before)
+			}
+			if _, has := after[s]; has {
+				t.Fatalf("%s must not appear in a field-edit diff: %v", s, after)
+			}
 		}
 	})
-
 	// 6. Validation (US-23): a status-only PATCH appends the validated
 	// event; file_key is untouched and the snapshots carry the status
 	// alone.
@@ -759,7 +769,31 @@ func TestE2E(t *testing.T) {
 		}
 	})
 
-	// 8. Recovery (US-11): a stuck record - file_key still under inbox/,
+	// 8. Deletion (US-24): deleting a documents record deletes the S3
+	// object; the history follows via the cascade delete.
+	t.Run("deletion: a deleted record removes the S3 object", func(t *testing.T) {
+		pending := listRecords(t, "documents", "(status='pending')", "")
+		if len(pending) != 1 {
+			t.Fatalf("want 1 pending document, got %d", len(pending))
+		}
+		id := pending[0]["id"].(string)
+		if n := len(eventsOf(t, id)); n == 0 {
+			t.Fatal("no events before deletion")
+		}
+		status, out := call(t, http.MethodDelete, "/api/collections/documents/records/"+id, nil)
+		if status != 204 {
+			t.Fatalf("delete refused: %d %v", status, out)
+		}
+		if s3Exists(t, "pending/no-date.pdf") {
+			t.Fatal("S3 object not deleted with the record")
+		}
+		if n := len(eventsOf(t, id)); n != 0 {
+			t.Fatal("history not cascade-deleted with the record")
+		}
+	})
+
+
+	// 9. Recovery (US-11): a stuck record - file_key still under inbox/,
 	// created directly through the API - is completed by the next pass.
 	t.Run("recovery: a stuck filing is completed by the next pass", func(t *testing.T) {
 		hash := putPDF(t, "inbox/stuck.pdf",
@@ -788,7 +822,7 @@ func TestE2E(t *testing.T) {
 		}
 	})
 
-	// 9. Restart: the container restarts with all state intact.
+	// 10. Restart: the container restarts with all state intact.
 	t.Run("restart: state survives a container restart", func(t *testing.T) {
 		before := listRecords(t, "documents", "", "")
 		if out, err := run("docker", "restart", appC); err != nil {

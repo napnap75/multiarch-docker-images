@@ -121,7 +121,7 @@ func main() {
 		app.Logger().Warn(s3.StartupWarning, "bucket", envCfg.S3Bucket)
 	}
 
-	// US-22 / US-23 / US-04: request hooks on documents and document_events.
+	// US-04 / US-22 / US-23 / US-24: request hooks on documents and document_events.
 	pbapp.BindHooks(app, cfg, s3)
 
 	// Manual poll pass: a superuser-only route used by the E2E gate and the
