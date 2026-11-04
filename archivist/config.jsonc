@@ -47,7 +47,7 @@
   //   2026"; the day is optional and "1er" / abbreviated months are
   //   accepted) into a native date, for documents whose date is not
   //   written in a Go layout format.
-  //   period(value, unit, shift, layout?) renders a period instead of a
+  //   frPeriod(value, unit, shift, layout?) renders a period instead of a
   //   raw date: unit = `month`|`quarter`|`half`|`year`, shift = -1/0/+1
   //   for the previous / containing / next period (rent receipt: 0,
   //   end-of-quarter charges call: +1, bank statement: -1). Returns a
@@ -187,7 +187,7 @@
   // ==========================================================================
   "templates": {
     // A bank statement covers the month before its emission date.
-    "bank_statement":     "{emittingCompany}/{period(emissionDate, `month`, -1)}_{documentType}_{bankAccount}.pdf",
+    "bank_statement":     "{emittingCompany}/{frPeriod(emissionDate, `month`, -1)}_{documentType}_{bankAccount}.pdf",
     "tax_notice_housing": "Impots/{emissionDate.Format(`2006-01-02`)}_{documentType}_{address}.pdf",
     "tax_notice_income":  "Impots/{emissionDate.Format(`2006-01-02`)}_{documentType}.pdf",
     "invoice":            "Factures/{emissionDate.Format(`2006-01-02`)}_{emittingCompany}_{reference}.pdf",

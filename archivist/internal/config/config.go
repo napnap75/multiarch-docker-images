@@ -189,7 +189,7 @@ func CompileExpr(src string) (*vm.Program, error) {
 func exprOptions() []expr.Option {
 	return []expr.Option{
 		expr.Function("firstMatch", FirstMatch),
-		expr.Function("period", Period),
+		expr.Function("frPeriod", FrPeriod),
 		expr.Function("frDate", FrenchDate),
 	}
 }
@@ -472,14 +472,14 @@ func FrenchDate(args ...any) (any, error) {
 var frenchMonths = []string{"Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
 	"Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"}
 
-// Period is the period(value, unit, shift, layout?) helper (arch.md §5).
-func Period(args ...any) (any, error) {
+// FrPeriod is the frPeriod(value, unit, shift, layout?) helper (arch.md §5).
+func FrPeriod(args ...any) (any, error) {
 	if len(args) < 3 {
-		return "", fmt.Errorf("period: value, unit and shift required")
+		return "", fmt.Errorf("frPeriod: value, unit and shift required")
 	}
 	d, ok := args[0].(time.Time)
 	if !ok {
-		return "", fmt.Errorf("period: value must be a native date")
+		return "", fmt.Errorf("frPeriod: value must be a native date")
 	}
 	unit, _ := args[1].(string)
 	shift, _ := toInt(args[2])
@@ -533,7 +533,7 @@ func Period(args ...any) (any, error) {
 		}
 		return time.Date(y, 1, 1, 0, 0, 0, 0, time.UTC).Format(layout), nil
 	default:
-		return "", fmt.Errorf("period: unknown unit %q (want month|quarter|half|year)", unit)
+		return "", fmt.Errorf("frPeriod: unknown unit %q (want month|quarter|half|year)", unit)
 	}
 }
 

@@ -26,7 +26,7 @@ so that no document is ever processed against a partially understood configurati
 Acceptance criteria:
 
 - Given a syntactically valid `config.jsonc` mounted in the container, when the application starts, then the file is parsed with comments allowed and validated against the JSON schema generated from the configuration structs.
-- Given the schema is valid, when the application validates further, then every regex compiles, every `expr` expression (`when`, `eval`, template placeholders) compiles against the typed context `Document{Pages, Fields}` with the `firstMatch` and `period` helpers, and every compiled expression is cached for later use.
+- Given the schema is valid, when the application validates further, then every regex compiles, every `expr` expression (`when`, `eval`, template placeholders) compiles against the typed context `Document{Pages, Fields}` with the `firstMatch`, `frDate` and `frPeriod` helpers, and every compiled expression is cached for later use.
 - Given any validation error (unknown key, bad type, non-compiling regex or expression, unknown field referenced in `set`/`delete`), when the application starts, then it exits with a non-zero code, an error message pinpointing the file location of the first error, and processes nothing. Cross-references are also checked: every template name used in the rules must exist in `templates`.
 - Given the configuration is valid, when a field declaration references a type, then the declared type is one of `text`, `number`, `date`, `boolean`, `enum` (schema-enforced).
 - Given the configuration is valid, when the application starts, then the effective configuration (fields, rules, templates) is logged in a condensed form for traceability.
@@ -131,7 +131,7 @@ Acceptance criteria:
 
 - Given a document's pages, when evaluation runs, then rules are evaluated in declaration order: a rule's `when` expression runs first; `set`, `delete`, and child rules run only if `when` returned true.
 - Given a rule's `set` entry with a constant `value`, when the rule fires, then the field is set to that constant.
-- Given a `set` entry with an `eval` expression, when the rule fires, then the expression is evaluated in the same context (pages, current fields, `firstMatch`, `period`, expr builtins) and the result is assigned.
+- Given a `set` entry with an `eval` expression, when the rule fires, then the expression is evaluated in the same context (pages, current fields, `firstMatch`, `frDate`, `frPeriod`, expr builtins) and the result is assigned.
 - Given a field assignment whose value does not match the declared field type (raw string to a `date`, non-numeric to a `number`), when it executes, then it is a rule error and the document is routed to `pending/`.
 - Given `firstMatch` finds no match, when its result is used, then it returns an empty string (parsing an empty string with `date()` is a rule error).
 - Given `delete` is executed, when the rule fires, then the named fields become undefined again for later rules and template rendering.
