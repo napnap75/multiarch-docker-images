@@ -39,7 +39,7 @@ so that the persistence schema always reflects the declared extraction fields.
 
 Acceptance criteria:
 
-- Given the `documents` collection does not exist, when the application starts, then it is created with the fixed columns (`sha256` unique-indexed, `file_key`, `pages` as a JSON array, `status`) plus one column per field declared in `fields`.
+- Given the `documents` collection does not exist, when the application starts, then it is created with the fixed columns (`sha256` unique-indexed, `file_key`, `pages` as a JSON array, `status`), the standard PocketBase `created`/`updated` autodate columns, plus one column per field declared in `fields`.
 - Given a declared field, when its column is created, then the column type maps from the field type: `text`→text, `number`→number, `date`→date, `boolean`→bool, `enum`→select (single value).
 - Given the `documents` collection exists and a field was added to `config.jsonc`, when the application starts, then the matching column is added without data loss.
 - Given a field was removed from `config.jsonc`, when the application starts, then the matching column is removed and the operation is logged; existing values in that column are lost by design (they remain in the event history snapshots).
@@ -54,7 +54,7 @@ so that the history of a document remains an immutable, append-only source of tr
 
 Acceptance criteria:
 
-- Given the `document_events` collection does not exist, when the application starts, then it is created with the columns `document` (relation to `documents`, cascade delete with the record), `event_type` (select: `imported`, `corrected`, `validated`), `payload` (JSON), `timestamp` (date).
+- Given the `document_events` collection does not exist, when the application starts, then it is created with the columns `document` (relation to `documents`, cascade delete with the record), `event_type` (select: `imported`, `corrected`, `validated`), `payload` (JSON), `timestamp` (date), plus the standard PocketBase `created`/`updated` autodate columns.
 - Given the collection exists, when the application starts, then its schema is verified and left unchanged.
 - Given any API request that tries to update or delete a `document_events` record, when it is served, then it is rejected by the application's request hooks (`OnRecordUpdateRequest` / `OnRecordDeleteRequest` for the collection, bound to superusers as well). API rules alone cannot enforce this: superusers bypass all API rules, and no rule value blocks everyone (`null` = superusers only, empty string = public).
 - Given a record is appended, when the write succeeds, then it is never modified afterwards by the application itself.

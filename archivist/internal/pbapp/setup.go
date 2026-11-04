@@ -33,16 +33,22 @@ func ensureDocuments(app core.App, cfg *config.Config) error {
 		coll = core.NewBaseCollection("documents")
 	}
 
-	// Fixed columns (re)declared on every start, ordering preserved.
+	// Fixed columns (re)declared on every start, ordering preserved, plus
+	// the standard PocketBase created/updated autodate columns for
+	// convenience in the admin UI (US-03).
 	coll.Fields.RemoveByName("sha256")
 	coll.Fields.RemoveByName("file_key")
 	coll.Fields.RemoveByName("pages")
 	coll.Fields.RemoveByName("status")
+	coll.Fields.RemoveByName("created")
+	coll.Fields.RemoveByName("updated")
 	coll.Fields.Add(
 		&core.TextField{Name: "sha256"},
 		&core.TextField{Name: "file_key"},
 		&core.JSONField{Name: "pages"},
 		&core.SelectField{Name: "status", MaxSelect: 1, Values: []string{"pending", "processed", "validated"}},
+		&core.AutodateField{Name: "created", OnCreate: true},
+		&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},
 	)
 
 	// One column per declared field, mapped from the field type (US-03).
@@ -95,7 +101,7 @@ func ensureDocuments(app core.App, cfg *config.Config) error {
 }
 
 func isFixed(name string) bool {
-	for _, f := range []string{"sha256", "file_key", "pages", "status"} {
+	for _, f := range []string{"sha256", "file_key", "pages", "status", "created", "updated"} {
 		if f == name {
 			return true
 		}
@@ -117,6 +123,8 @@ func ensureEvents(app core.App) error {
 		&core.SelectField{Name: "event_type", MaxSelect: 1, Values: []string{"imported", "corrected", "validated"}},
 		&core.JSONField{Name: "payload"},
 		&core.DateField{Name: "timestamp"},
+		&core.AutodateField{Name: "created", OnCreate: true},
+		&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},
 	)
 	// Append-only (US-04): API rules locked to superusers are not enough,
 	// the standard admin UI uses a superuser; the request hooks in

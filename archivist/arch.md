@@ -49,12 +49,13 @@ One row per processed PDF file:
 - `file_key`: current S3 key of the file
 - `pages`: page-by-page extracted text as a JSON array (0-based, `pages[0]` = page 1); the FTS5 full-text index is built from the concatenation of all pages
 - `status`: `pending` | `processed` | `validated`
+- `created` / `updated`: the standard PocketBase autodate columns, added for convenience in the admin UI; the authoritative history remains `document_events`
 + all the fields declared by the user in the configuration file
 
 The append-only `document_events` collection is the single source of truth for a document's history; no history is stored on the `documents` record itself.
 
 ### `document_events`
-Append-only history: `document`, `event_type` (`imported`, `corrected`, `validated`), `payload` as JSON, `timestamp`.
+Append-only history: `document`, `event_type` (`imported`, `corrected`, `validated`), `payload` as JSON, `timestamp`, plus the standard `created`/`updated` autodate columns; the event's business timestamp is `timestamp`, mirrored in the payload.
 
 The payload is self-contained: each event carries its own type, its own timestamp and the document state before and after, so a document's full history is reconstructed from this collection alone; the snapshots are stored as diffs — each `before`/`after` carries only the fields the event changes. All dates are RFC 3339; all S3 keys are complete, prefix included.
 
