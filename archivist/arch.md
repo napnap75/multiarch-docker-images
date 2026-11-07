@@ -5,7 +5,7 @@
 Single docker container Go application built on PocketBase as an embedded framework (https://pocketbase.io/). The binary contains:
 
 - PocketBase's HTTP/API server and admin dashboard;
-- the custom review dashboard;
+- the custom review dashboard — a static frontend whose files live in `pb_public/` and are served by PocketBase's built-in static file serving;
 - the S3 poller and the PDF processing pipeline, executed through PocketBase's standard job scheduler (`app.Cron()`);
 - the declarative rule engine (JSONC config + `expr-lang/expr` expressions);
 - access to the self-hosted S3 storage via the MinIO Go SDK.
@@ -17,6 +17,7 @@ Everything runs offline on the server infrastructure: no cloud APIs, no outbound
 | Component | Choice |
 |---|---|
 | Framework / runtime | PocketBase v0.41.1 (Go framework, single binary; module `ganigeorgiev.com/pocketbase/pocketbase`) |
+| Review dashboard | static HTML/CSS/JS in `pb_public/`, no JS build toolchain (htmx or Alpine vendored as a local file, never loaded from a CDN: the application is 100% offline) |
 | Language | Go |
 | Scheduling | `app.Cron()` (S3 poller, periodic tasks) |
 | S3 | MinIO Go SDK (`github.com/minio/minio-go/v7`) |
@@ -200,16 +201,16 @@ When the bucket is versioned, any deletion creates a delete marker and the data 
 
 ## 7. Review Dashboard
 
-Custom pages on the PocketBase instance:
+The review dashboard is a static frontend — plain HTML/CSS/JS files, no build toolchain — served by PocketBase's built-in static file serving from the `pb_public/` directory shipped in the image next to `pb_data/`. The browser persists everything through the standard PocketBase API, whose request hooks already carry the correction, validation and deletion semantics (US-22 / US-23 / US-24): the dashboard never implements its own save path. Only what the standard API cannot do goes through dedicated JSON routes on the PocketBase router:
 
-- File list: all files with status, filters, combined search over full text (FTS5) + metadata/fields.
-- Detail: PDF preview streamed from S3 through a dedicated route, along with extracted fields; debug mode adds detailed log lines explaining every rule evaluation and action performed.
+- File list: all files with status, filters, combined search over full text (FTS5) + metadata/fields; the search runs server-side through a dedicated search route querying the FTS5 index via `app.DB()`, no search logic in the browser.
+- Detail: PDF preview streamed from S3 through `GET /api/archivist/documents/{id}/pdf` (a proxy route: the browser never reaches the S3 cluster), along with extracted fields; debug mode adds detailed log lines explaining every rule evaluation and action performed.
 - Correction: performed directly from the standard PocketBase collections UI (or any PocketBase client) by editing the extracted fields. The application's `OnRecordUpdateRequest` hook on `documents` intercepts the save and appends the `corrected` event carrying the field diff — and nothing else. The UI edits one field at a time with no preview of the resulting file name, so the hook deliberately performs no template evaluation and no re-filing, and the status does not move: an inconsistent draft cannot trigger irreversible side effects. The full correction — all fields at once, dry-run of the resulting name, re-filing and validation — is the custom dashboard's job (US-3x).
 - Validation: performed from the same interface by changing the status to `validated`; the hook appends the `validated` event, and any other status change is refused. A `pending` file can only leave the review queue through a full correction from the custom dashboard (US-3x).
 - Deletion: deleting a `documents` record from the same interface first deletes the S3 object at `file_key` (US-24); on S3 failure the deletion is refused and the record stays. The cascade delete of the `document_events` relation removes the history with the record; with versioning the object stays recoverable via its delete marker.
-- Rule management: config display and dry-run on an existing document. The configuration is reloaded only on restart; there is no runtime reload.
+- Rule management: config display; dry-run on an existing document through `POST /api/archivist/documents/{id}/dry-run`, which renders the selected template from the proposed values without saving. The configuration is reloaded only on restart; there is no runtime reload.
 
-Authentication: single account via PocketBase's standard auth.
+The static pages themselves carry no data and are public by nature; every fetch is authenticated against the PocketBase API and an unauthenticated visitor is redirected to the admin UI (`/_/`). Authentication: single account via PocketBase's standard auth.
 
 ## 8. Error Handling
 
@@ -267,6 +268,6 @@ The gate is a regression detector for dependency upgrades (PocketBase, minio-go,
 `Dockerfile`, two-stage build:
 
 - Builder: `golang:1.27-alpine` (matches the `go 1.27` directive of PocketBase v0.41.1), CGO disabled, static binary, `TARGETARCH` honored for multi-platform builds under buildx. `go mod tidy` runs there because `go.sum` is not committed; once it is committed, the line becomes `go mod download` for fully reproducible builds.
-- Runtime: `scratch` with only the `/archivist` binary, the CA bundle (the S3 endpoint is HTTPS by default), the timezone database (the cron and date rendering honor `TZ`), and `/app/pb_data` + `/tmp`, the only writable directories, owned by the unprivileged runtime user 65532. `config.jsonc` is never baked in: it is mounted at runtime, `ARCHIVIST_CONFIG` defaulting to `config.jsonc` relative to `/app`.
+- Runtime: `scratch` with the `/archivist` binary, the CA bundle (the S3 endpoint is HTTPS by default), the timezone database (the cron and date rendering honor `TZ`), the static review-dashboard frontend copied to `/app/pb_public/` (read-only at runtime), and `/app/pb_data` + `/tmp`, the only writable directories, owned by the unprivileged runtime user 65532. `config.jsonc` is never baked in: it is mounted at runtime, `ARCHIVIST_CONFIG` defaulting to `config.jsonc` relative to `/app`.
 
-The container runs as 65532:65532 (non-root), exposes 8090, declares `/app/pb_data` as a volume, and has no shell: `docker exec` is not available. `.dockerignore` keeps the build context to the Go sources; the E2E harness is not part of the image.
+The container runs as 65532:65532 (non-root), exposes 8090, declares `/app/pb_data` as a volume, and has no shell: `docker exec` is not available. `.dockerignore` keeps the build context to the Go sources and the dashboard frontend; the E2E harness is not part of the image.
