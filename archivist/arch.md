@@ -167,7 +167,12 @@ A `config.jsonc` file kept alongside the binary, reloaded on restart. Three sect
    - `type`: `text` | `number` | `date` | `boolean` | `enum`
    - `mandatory`: true | false
 
-   Type semantics in rule expressions: `number` and `boolean` expose native values, `date` exposes a native Go `time.Time` (comparable, arithmetic via `duration()`, usable with the `date()`/`now()` builtins), `text` and `enum` expose strings. `enum` does not declare its values: the application builds the field's vocabulary from the constants the rules assign to it; the dashboard correction form offers this vocabulary as a dropdown, with free entry allowed. Assigning a value that does not match the field type (e.g. a raw string to a `date` field, a non-numeric value to a `number` field) is a rule error and routes the document to `pending/`.
+   Type semantics in rule expressions:
+   - `number` and `boolean` expose native values
+   - `date` exposes a native Go `time.Time` (comparable, arithmetic via `duration()`, usable with the `date()`/`now()` builtins)
+   - `text` and `enum` expose strings
+   - `enum` does not declare its values: the application builds the field's vocabulary from the constants the rules assign to it; the dashboard correction form offers this vocabulary as a dropdown, with free entry allowed
+   - assigning a value that does not match the field type (e.g. a raw string to a `date` field, a non-numeric value to a `number` field) is a rule error and routes the document to `pending/`
 
 2. `rules`: an ordered tree of rules. Each rule contains four keys:
    - `when` (required): an `expr-lang/expr` expression evaluated against the document pages (`pages`) and the current field values; the rest of the rule runs only if it returns true (e.g. `pages[0] contains `Relevé de compte``, or `emittingCompany in [`BRED`, `Fortunéo`] && documentType == `Relevé de compte``)
@@ -175,11 +180,35 @@ A `config.jsonc` file kept alongside the binary, reloaded on restart. Three sect
    - `delete`: list of field names to unset (they become undefined again for later rules and template rendering)
    - `rules`: child rules, evaluated in order only if the parent `when` matched; nesting is recursive
 
-   The application registers three built-in helpers in the expression environment. `firstMatch(regex, texts?)` returns the first match of the regex in the document text (first capture group when present), or an empty string when no match is found (parsing an empty string with `date()` is then a rule error and routes the document to `pending/`); the optional second argument is an expression evaluated to the text(s) to search — a single page (e.g. `pages[0]`, the first page), a slice (e.g. `pages[0:3]`, pages 1 to 3, expr's standard slice syntax, end exclusive), or any list of strings — and when omitted the whole document is searched (e.g. `firstMatch(`[0-9]{2}/[0-9]{2}/[0-9]{4}`, pages[0])`). `frPeriod(value, unit, shift, layout?)` renders a period instead of a raw date: `value` is a native date (e.g. `emissionDate`), `unit` is `month` | `quarter` | `half` | `year`, `shift` is `-1` (previous period), `0` (period containing the date) or `+1` (next period) — e.g. a rent receipt issued mid-month uses the containing month, a service-charge call issued at the end of a quarter uses the next quarter, a bank statement uses the previous month. It returns a French string: `Janvier 2026`, `T2 2026`, `S1 2026` or `2026`. The optional `layout` argument is a standard Go reference-date layout applied to the period's first day, with month names rendered in French by the application (default layouts: `January 2006` for `month`, `2006` for `year`); it is ignored for `quarter` and `half`, whose formats (`T<quarter> <year>`, `S<half> <year>`) are fixed. A missing or invalid date is a rule error and routes the document to `pending/`. Parsing strings into native dates uses expr's standard `date(value, layout)` builtin (Go date layout, e.g. `date(`15/01/2026`, `02/01/2006`)`) — the format is carried by the parsing rule, so it can differ per document type.
+   The expression environment provides expr's standard `date(value, layout)` builtin plus three built-in helpers registered by the application:
 
-`frDate(text)` extracts and parses a French natural-language date — the layout Go cannot express, since `date(value, layout)` only knows English month names. It matches `le 19 janvier 2026` (day and leading `le` optional: `Janvier 2026` gives the first of the month; `1er` and abbreviated month names like `févr.` are accepted; accents are optional) and returns a native date — e.g. `frDate(firstMatch(`(?:le )?\d{1,2} \S+ \d{4}`, pages[0]))`, or `frDate(pages[0])` when the first French-looking date of the page is the right one. A text containing no French date, or an impossible date (31 février), is a rule error and routes the document to pending/.
+   - `date(value, layout)`: expr's standard builtin. Parses a string into a native date using a Go date layout (e.g. `date(`15/01/2026`, `02/01/2006`)`). The format is carried by the parsing rule, so it can differ per document type. It only knows English month names: see `frDate` below for French text.
+   - `firstMatch(regex, texts?)`: returns the first match of the regex in the document text (first capture group when present), or an empty string when no match is found — e.g. `firstMatch(`[0-9]{2}/[0-9]{2}/[0-9]{4}`, pages[0])`. The optional second argument is an expression evaluated to the text(s) to search:
+     - a single page: `pages[0]` (the first page)
+     - a slice: `pages[0:3]` (pages 1 to 3, expr's standard slice syntax, end exclusive)
+     - any list of strings
+     - when omitted, the whole document is searched
+     Parsing an empty result with `date()` is a rule error and routes the document to `pending/`.
+   - `frDate(text)`: extracts and parses a French natural-language date — the layout Go cannot express, since `date(value, layout)` only knows English month names.
+     - It matches `le 19 janvier 2026`; the day and the leading `le` are optional (`Janvier 2026` gives the first of the month), `1er` and abbreviated month names like `févr.` are accepted, accents are optional.
+     - It returns a native date — e.g. `frDate(firstMatch(`(?:le )?\d{1,2} \S+ \d{4}`, pages[0]))`, or `frDate(pages[0])` when the first French-looking date of the page is the right one.
+     - A text containing no French date, or an impossible date (31 février), is a rule error and routes the document to `pending/`.
+   - `frPeriod(value, unit, shift, layout?)`: renders a period instead of a raw date.
+     - `value`: a native date (e.g. `emissionDate`); a missing or invalid date is a rule error and routes the document to `pending/`.
+     - `unit`: `month` | `quarter` | `half` | `year`.
+     - `shift`: `-1` (previous period), `0` (period containing the date) or `+1` (next period) — e.g. a rent receipt issued mid-month uses the containing month, a service-charge call issued at the end of a quarter uses the next quarter, a bank statement uses the previous month.
+     - Returns a French string: `Janvier 2026`, `T2 2026`, `S1 2026` or `2026`.
+     - The optional `layout` argument is a standard Go reference-date layout applied to the period's first day, with month names rendered in French by the application (default layouts: `January 2006` for `month`, `2006` for `year`); it is ignored for `quarter` and `half`, whose formats (`T<quarter> <year>`, `S<half> <year>`) are fixed.
 
-3. `templates`: named naming templates (e.g. `bank_statement: {emittingCompany}/{emissionDate.Format(`2006-01-02`)}_{documentType}_{bankAccount}.pdf`). A template is a literal string containing `{...}` placeholders: the inside of each placeholder is an `expr-lang/expr` expression evaluated in the document context (fields, helpers, builtins — e.g. `{emissionDate.Format(`2006-01-02`)}` or `{upper(emittingCompany)}`) and replaced by its result; the static text between placeholders stays literal. Unset optional fields evaluate to an empty string; a missing mandatory field or an evaluation error renders the result invalid and routes the file to `pending/`. All placeholder expressions are compiled at config load; "/" must not appear in the result (it is the S3 key delimiter). The template is chosen by the rules themselves: `template` is a field declared in the `fields` section like any other and set with `set` (e.g. `set template = `bank_statement`` when `emittingCompany in [`BRED`, `Fortunéo`] and documentType == `Relevé de compte``). If no rule sets `template`, the special `default` template is used. A `template` value with no matching entry renders the result invalid and routes the file to `pending/`.
+3. `templates`: named naming templates (e.g. `bank_statement: {emittingCompany}/{emissionDate.Format(`2006-01-02`)}_{documentType}_{bankAccount}.pdf`). A template is a literal string containing `{...}` placeholders:
+   - the inside of each placeholder is an `expr-lang/expr` expression evaluated in the document context (fields, helpers, builtins — e.g. `{emissionDate.Format(`2006-01-02`)}` or `{upper(emittingCompany)}`) and replaced by its result
+   - the static text between placeholders stays literal
+   - unset optional fields evaluate to an empty string
+   - a missing mandatory field or an evaluation error renders the result invalid and routes the file to `pending/`
+   - all placeholder expressions are compiled at config load
+   - "/" must not appear in the result (it is the S3 key delimiter)
+
+   The template is chosen by the rules themselves: `template` is a field declared in the `fields` section like any other and set with `set` (e.g. `set template = `bank_statement`` when `emittingCompany in [`BRED`, `Fortunéo`] and documentType == `Relevé de compte``). If no rule sets `template`, the special `default` template is used. A `template` value with no matching entry renders the result invalid and routes the file to `pending/`.
 
 Validation on load: JSON schema, regex compilation, `expr` expression compilation (`when`, `eval` and template placeholder expressions) against a typed context (`Document{Pages, Fields}`) with the `firstMatch`, `frDate` and `frPeriod` helpers, regex precompilation and caching. Full rejection if invalid, no partial processing.
 
