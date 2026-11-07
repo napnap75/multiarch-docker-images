@@ -176,7 +176,7 @@ Acceptance criteria:
 
 ## Epic: Data visualization (standard PocketBase UI)
 
-The standard PocketBase collections UI is the nominal interface for reading and correcting documents. Field edits and status changes made through it (or through any PocketBase API client) are intercepted by the application's `OnRecordUpdateRequest` hook on `documents`, which records the change in the event history (US-22) and enforces the status rules (US-23) — but deliberately performs no re-filing: the UI edits one field at a time and shows no preview of the resulting file name, so an inconsistent draft cannot trigger irreversible side effects. The full correction — all fields at once, dry-run of the resulting name, re-filing and validation — is the custom dashboard's job (US-3x), and record deletions propagate to S3 (US-24).
+The standard PocketBase collections UI is the nominal interface for reading and correcting documents. Field edits and status changes made through it (or through any PocketBase API client) are intercepted by the application's `OnRecordUpdateRequest` hook on `documents`, which records the change in the event history (US-22) and enforces the status rules (US-23) — but deliberately performs no re-filing: the UI edits one field at a time and shows no preview of the resulting file name, so an inconsistent draft cannot trigger irreversible side effects. The full correction — all fields at once, dry-run of the resulting name, re-filing and validation — is the review dashboard's job (US-34 to US-36), and record deletions propagate to S3 (US-24).
 ### US-20 — Browse documents in the collections UI
 
 As the user,
@@ -213,7 +213,7 @@ Acceptance criteria:
 - Given a field edit is saved, when the record is persisted, then a `corrected` event is appended whose `before`/`after` diff (section-4 format) carries the changed fields only; `file_key` and `status` do not appear since they did not change.
 - Given a save where no declared field actually changed, when the hook runs, then no event is appended.
 - Given the save also changes the status, when the hook runs, then the status rules of US-23 apply on their own: `processed` → `validated` is appended as a separate `validated` event, anything else is refused.
-- Given a `pending` document, when fields are edited this way, then it stays `pending` and its object stays in `pending/`; leaving the review queue requires the full correction of the custom dashboard (US-3x), whose form shows all fields and the resulting name before saving.
+- Given a `pending` document, when fields are edited this way, then it stays `pending` and its object stays in `pending/`; leaving the review queue requires the full correction of the review dashboard (US-36), whose form shows all fields and the resulting name before saving.
 ### US-23 — Validate a document from the standard PocketBase UI
 
 As the user,
@@ -239,7 +239,103 @@ Acceptance criteria:
 - Given the object at `file_key` is already gone from the bucket, when the hook runs, then the deletion is idempotent: the record is removed.
 - Given the bucket is versioned, when the object is deleted, then a delete marker keeps it recoverable; without versioning the deletion is final (same caveat as US-01).
 - Given a superuser issues the DELETE, when the hook runs, then the hook applies: like the append-only protection of US-04, it cannot rely on API rules alone.
+## Epic: Review Dashboard (US-30 to US-36)
+
+The static frontend served from `pb_public/` (arch.md section 7): a document list and a document detail page, entirely driven by the configuration metadata route. No build toolchain, vendored dependencies only (100% offline). Every persistence goes through the standard PocketBase API and its hooks; the only application routes are those the standard API cannot express (config metadata, PDF proxy, dry-run, full correction).
+
+### US-30 — Serve the dashboard as static files
+
+As the user,
+I want the review dashboard served by the application itself at the root URL,
+so that no additional server or build step is needed.
+
+Acceptance criteria:
+
+- Given the image is built and running, when I open `http://<server>:8090/`, then the dashboard pages are served from `pb_public/` — plain HTML/CSS/JS, no build toolchain, dependencies vendored locally, nothing loaded from a CDN.
+- Given a page is opened, when it renders, then it carries no document data by itself; everything is loaded through authenticated API calls.
+- Given an unauthenticated visitor, when a page requests data, then the API refuses it and the page redirects to the admin UI (`/_/`).
+
+### US-31 — Expose the configuration metadata
+
+As the dashboard,
+I want the declared fields, their types and the enum vocabularies exposed by a read-only route,
+so that the UI is entirely driven by the configuration.
+
+Acceptance criteria:
+
+- Given an authenticated request to `GET /api/archivist/config`, when it is served, then it returns the declared fields (name, type, mandatory), the enum vocabularies computed from the constants the rules assign, and the template names — and nothing sensitive (no S3 credentials).
+- Given an unauthenticated request, when it is served, then it is refused.
+- Given the configuration is reloaded only on restart, when the route is called, then it serves the in-memory compiled configuration (the same the pipeline uses).
+
+### US-32 — Browse documents in a configurable table
+
+As the user,
+I want the documents in a table whose columns I choose, sortable and filterable per column,
+so that I can work through the review queue efficiently.
+
+Acceptance criteria:
+
+- Given the list page, when it opens, then it shows a paginated table with `status`, `file_key` and `created` by default, and a column chooser exposing every declared field plus `created`/`updated`; the choice persists in the browser.
+- Given a column header, when I click it, then the list is sorted by that column server-side and the state persists.
+- Given a column, when I open its filter, then the control matches the field type (contains for `text`, dropdown for `enum` and `status`, range for `date`, tri-state for `boolean`) and the filter is applied server-side through a PocketBase filter expression.
+- Given the list, when I open it, then quick tabs show the per-status counts and pre-filter the review queue (`pending` first).
+
+### US-33 — Change one field for a selection of documents
+
+As the user,
+I want to select several documents and change one declared field for all of them,
+so that a systematic correction does not require opening every document.
+
+Acceptance criteria:
+
+- Given the list, when I select rows (page or whole filtered set), then a bulk action proposes choosing a declared field and a new value in a control matching the field type, and shows the number of impacted documents.
+- Given the bulk action is confirmed, when it runs, then it issues one standard PATCH per document — the US-22 hook applies per record: a `corrected` event each, no re-filing, no status change.
+- Given one document of the selection fails, when the bulk action finishes, then the others are applied and the failure is reported with its error.
+
+### US-34 — Preview a document and correct each field
+
+As the user,
+I want a page showing the PDF preview and a form for every field,
+so that I can correct a document with its content in view.
+
+Acceptance criteria:
+
+- Given the detail page of a document, when it opens, then the PDF preview is embedded via `GET /api/archivist/documents/{id}/pdf` and the declared fields appear in typed controls pre-filled with the current values; mandatory fields are marked.
+- Given a `pending` document, when the page opens, then the classification errors of its `imported` event are displayed at the top of the form.
+- Given the page, when I look below the form, then the document's event history is listed read-only, sorted by timestamp, payloads rendered as before/after diffs.
+- Given the form, when I save with the draft button, then the values persist through a standard PATCH (US-22: no re-filing, no status change).
+- Given a `processed` document with no field change, when I use the validate button, then the US-23 transition applies.
+
+### US-35 — Propose the pipeline values and the resulting name live
+
+As the user,
+I want, for each field, the value the pipeline would extract today when it differs from the current value, and the resulting file name recomputed as I type,
+so that I see the effect of a correction before committing it.
+
+Acceptance criteria:
+
+- Given the detail page, when it opens, then it calls `POST /api/archivist/documents/{id}/dry-run` with no body; the route re-runs the rule tree against the stored pages and returns the proposed fields, the selected template, the rendered name and the errors, persisting nothing.
+- Given a field whose proposed value differs from the current value, when the response arrives, then a discreet banner under the control offers the proposed value with one-click adoption.
+- Given the form is modified, when the typing settles, then the page calls the dry-run route with the proposed field values; the route converts them to their native types (per-field error on mismatch), merges them with the record values, renders the template against the stored pages and returns the target name and its errors in the same response shape.
+- Given the two modes, when either runs, then they are exclusive: user values never enter the rule-evaluation context, and no record, event or S3 object is touched.
+- Given the dry-run returns errors, when the form still allows a draft save, then the full correction refuses to run while errors remain.
+
+### US-36 — Correct fully and validate
+
+As the user,
+I want a single action that re-files the document under its corrected name and validates it,
+so that a reviewed document leaves the queue in one confirmed step.
+
+Acceptance criteria:
+
+- Given the form, when I trigger the full correction, then `POST /api/archivist/documents/{id}/correct` runs the transactional orchestration: conflict-suffix resolution, S3 copy, target verification, deletion of the old key, record update (`file_key`, status `validated`), and a `corrected` event carrying the full diff.
+- Given any step fails midway, when the route handles it, then the save is refused, the S3 state is restored, and the record and history are left unchanged.
+- Given the rendered name equals the current `file_key`, when the correction runs, then the copy and delete are skipped, the status alone changes, and `file_key` is absent from the diff.
+- Given a `pending` document, when the correction succeeds, then the `pending/` object is removed and the document leaves the review queue.
+- Given an unauthenticated client, when it calls the route, then it is refused.
+- Given the implementation, when it is reviewed, then it reuses the engine internals (`FieldsFromRecord`, `ValidateValue`, `Render`, `ResolveConflict`, `DiffSnapshots`, `AppendEvent`) with no parallel business logic.
+
 ## Stories deferred to later epics
 
-- US-3x (Custom review dashboard): file list with status, combined search (FTS5 + fields), detail with PDF preview streamed from S3, correction form pre-filled from the last event snapshot, rule dry-run. The dashboard owns the full correction: its form shows every field and the resulting file name (dry-run) before saving; saving a full correction re-files the object and sets the status to `validated` — the side effects US-22 deliberately keeps out of the standard UI. Validation remains that of US-23.
+- US-5x (Config editor): pages to declare fields and build rules with user assistance — guided rule construction, test bench against existing documents through the dry-run routes.
 - US-4x (FTS5): full-text index synchronization via hooks.

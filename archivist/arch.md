@@ -201,17 +201,41 @@ When the bucket is versioned, any deletion creates a delete marker and the data 
 
 ## 7. Review Dashboard
 
-The review dashboard is a static frontend — plain HTML/CSS/JS files, no build toolchain — served by PocketBase's built-in static file serving from the `pb_public/` directory shipped in the image next to `pb_data/`. The browser persists everything through the standard PocketBase API, whose request hooks already carry the correction, validation and deletion semantics (US-22 / US-23 / US-24): the dashboard never implements its own save path. Only what the standard API cannot do goes through dedicated JSON routes on the PocketBase router:
+The review dashboard is a static frontend — plain HTML/CSS/JS files, no build toolchain, vendored dependencies only (no CDN: the application is 100% offline) — served by PocketBase's built-in static file serving from the `pb_public/` directory shipped in the image next to `pb_data/`. Two pages: the document list and the document detail. The browser persists everything through the standard PocketBase API, whose request hooks already carry the correction, validation and deletion semantics (US-22 / US-23 / US-24): the dashboard never implements its own save path. Only what the standard API cannot express goes through the dedicated JSON routes of section 7.3.
 
-- File list: all files with status, filters, combined search over full text (FTS5) + metadata/fields; the search runs server-side through a dedicated search route querying the FTS5 index via `app.DB()`, no search logic in the browser.
-- Detail: PDF preview streamed from S3 through `GET /api/archivist/documents/{id}/pdf` (a proxy route: the browser never reaches the S3 cluster), along with extracted fields; debug mode adds detailed log lines explaining every rule evaluation and action performed.
-- Correction: performed directly from the standard PocketBase collections UI (or any PocketBase client) by editing the extracted fields. The application's `OnRecordUpdateRequest` hook on `documents` intercepts the save and appends the `corrected` event carrying the field diff — and nothing else. The UI edits one field at a time with no preview of the resulting file name, so the hook deliberately performs no template evaluation and no re-filing, and the status does not move: an inconsistent draft cannot trigger irreversible side effects. The full correction — all fields at once, dry-run of the resulting name, re-filing and validation — is the custom dashboard's job (US-3x).
-- Validation: performed from the same interface by changing the status to `validated`; the hook appends the `validated` event, and any other status change is refused. A `pending` file can only leave the review queue through a full correction from the custom dashboard (US-3x).
+### 7.1 Document list (US-32 / US-33)
+
+- Table: one row per document, paginated (50 by default), default columns `status` / `file_key` / `created`; a column chooser exposes every declared field plus `created`/`updated`, and the choice persists in the browser (`localStorage`).
+- Sorting: click on a column header, ascending/descending, executed server-side through the standard PocketBase `sort` parameter.
+- Per-column filters, typed from the field declaration: contains for `text`, dropdown for `enum` and `status` (vocabulary from the config metadata route), date range for `date`, tri-state for `boolean`; translated client-side into a PocketBase filter expression.
+- Quick tabs with the per-status counts pre-filter the review queue (`pending` first).
+- Combined search over full text (FTS5) + metadata/fields: the search runs server-side through a dedicated search route querying the FTS5 index via `app.DB()`, no search logic in the browser (US-4x).
+- Bulk edit (US-33): row selection — page or whole filtered set — then one declared field and its new value in a control matching the type; applied as one standard PATCH per document, so the US-22 hook runs per record: a `corrected` event each, no re-filing, no status change; per-document success and failure are reported, one failure does not stop the rest.
+
+### 7.2 Document detail (US-34 to US-36)
+
+- Layout: two columns — the PDF preview embedded via the proxy route of section 7.3, and the correction form; below them, the document's event history, read-only, sorted by timestamp, payloads rendered as before/after diffs.
+- Form: one typed control per declared field, pre-filled with the current values; mandatory fields marked; the classification errors of the `imported` event, if any, displayed at the top.
+- Pipeline proposals (US-35): under each field whose value the pipeline would extract differently today, a discreet banner offers the proposed value with one-click adoption. The proposals come from the classification dry-run (section 7.3), re-run against the stored pages.
+- Live name (US-35): as the form changes, the rendered target name under `files/` is recomputed by the render dry-run and displayed with its errors; nothing can be committed while errors remain.
+- Exits, three and distinct: draft save (standard PATCH, US-22: values persist, no re-filing, no status change); full correction (US-36: the `/correct` route, re-filing and validation in one confirmed step); simple validation of a `processed` document (standard PATCH, US-23). A `pending` document only leaves the review queue through the full correction.
+
+### 7.3 Application routes
+
+Beyond the standard PocketBase API, authenticated only:
+
+- `GET /api/archivist/config` — the configuration metadata the UI needs: declared fields (name, type, mandatory), the enum vocabularies computed from the constants the rules assign, the template names. Read-only; the dashboard is entirely driven by it (columns, filters, controls).
+- `GET /api/archivist/documents/{id}/pdf` — proxy route streaming the document from S3; the browser never reaches the S3 cluster.
+- `POST /api/archivist/documents/{id}/dry-run` — two exclusive modes, one response shape (`fields`, `template`, `rendered`, `errors`), persisting nothing. Without a body: a classification re-run — the rule tree evaluated against the stored pages, returning the proposed fields (the source of the pipeline proposals). With field values: a template render — the values converted to their native types (per-field error on type mismatch), merged with the record values, rendered against the stored pages (placeholders may call `firstMatch`/`frDate` on the document text), returning the target name and its errors. The modes are never hybrid: user values never enter the rule-evaluation context, so the proposal always stays what the pipeline would do alone.
+- `POST /api/archivist/documents/{id}/correct` — the full correction of US-36: transactional orchestration (conflict-suffix resolution, S3 copy, verification, old key deletion, record update with `file_key` and status `validated`, `corrected` event carrying the full diff, S3 rollback on mid-failure with the save refused). It reuses the engine internals (`FieldsFromRecord`, `ValidateValue`, `Render`, `ResolveConflict`, `DiffSnapshots`, `AppendEvent`), no parallel business logic. A route rather than a standard PATCH because the intent (re-file + validate) is not expressible in record data, the standard PATCH must stay side-effect-free for every client and the bulk edit (US-22 / US-33), and the operation is a multi-step transaction rather than a record save — the same line drawn by `POST /api/archivist/poll`.
+
+### 7.4 Standard collections UI and hooks
+
+- Correction: performed directly from the standard PocketBase collections UI (or any PocketBase client) by editing the extracted fields. The application's `OnRecordUpdateRequest` hook on `documents` intercepts the save and appends the `corrected` event carrying the field diff — and nothing else. The UI edits one field at a time with no preview of the resulting file name, so the hook deliberately performs no template evaluation and no re-filing, and the status does not move: an inconsistent draft cannot trigger irreversible side effects. The full correction — all fields at once, dry-run of the resulting name, re-filing and validation — is the dashboard's job (US-34 to US-36).
+- Validation: performed from the same interface by changing the status to `validated`; the hook appends the `validated` event, and any other status change is refused. A `pending` file can only leave the review queue through a full correction from the dashboard (US-36).
 - Deletion: deleting a `documents` record from the same interface first deletes the S3 object at `file_key` (US-24); on S3 failure the deletion is refused and the record stays. The cascade delete of the `document_events` relation removes the history with the record; with versioning the object stays recoverable via its delete marker.
-- Rule management: config display; dry-run on an existing document through `POST /api/archivist/documents/{id}/dry-run`, which renders the selected template from the proposed values without saving. The configuration is reloaded only on restart; there is no runtime reload.
 
-The static pages themselves carry no data and are public by nature; every fetch is authenticated against the PocketBase API and an unauthenticated visitor is redirected to the admin UI (`/_/`). Authentication: single account via PocketBase's standard auth.
-
+The static pages themselves carry no data and are public by nature; every fetch is authenticated against the PocketBase API and an unauthenticated visitor is redirected to the admin UI (`/_/`). Authentication: single account via PocketBase's standard auth. The configuration is reloaded only on restart; there is no runtime reload.
 ## 8. Error Handling
 
 - Transient S3 error: retry with backoff, the object stays in `inbox/` and will be polled again.
@@ -261,7 +285,7 @@ The scenarios form one narrative; each subtest names the US it proves:
 
 `POST /api/archivist/poll` (superuser only) runs one poll pass immediately. It exists so the gate and the operator trigger passes on demand instead of waiting for the cron; a fresh upload needs two calls because the poller waits for size/ETag stability across two passes (US-10).
 
-The gate is a regression detector for dependency upgrades (PocketBase, minio-go, ledongthuc/pdf, expr, Garage), not an acceptance proof: acceptance criteria are reviewed on the stories themselves. `E2E_KEEP=1` leaves the containers running after the run for debugging.
+When the dashboard routes land (US-30 to US-36), the gate grows matching assertions: the config metadata route, both dry-run modes, the `/correct` orchestration and the PDF proxy. The gate is a regression detector for dependency upgrades (PocketBase, minio-go, ledongthuc/pdf, expr, Garage), not an acceptance proof: acceptance criteria are reviewed on the stories themselves. `E2E_KEEP=1` leaves the containers running after the run for debugging.
 
 ## 11. Packaging
 
