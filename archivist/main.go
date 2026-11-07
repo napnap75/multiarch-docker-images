@@ -65,7 +65,8 @@ func LoadEnvConfig() (*EnvConfig, error) {
 	return c, nil
 }
 
-func configPathFromArgs(args []string, defaultPath string) (string, error) {
+func configPathFromArgs(args []strin
+g, defaultPath string) (string, error) {
 	var configPath string
 	flags := pflag.NewFlagSet("archivist", pflag.ContinueOnError)
 	flags.SetInterspersed(true)
@@ -116,13 +117,16 @@ func main() {
 	}
 
 	// US-01: versioning recommendation, via the PocketBase logger
-	// (visible in the admin dashboard, Dashboard > Logs).
+	// (visible in the admin dashboard, Das
+hboard > Logs).
 	if s3.StartupWarning != "" {
 		app.Logger().Warn(s3.StartupWarning, "bucket", envCfg.S3Bucket)
 	}
 
 	// US-04 / US-22 / US-23 / US-24: request hooks on documents and document_events.
 	pbapp.BindHooks(app, cfg, s3)
+	// US-31 / US-35 / US-36: the review-dashboard routes (config, pdf, dry-run, correct).
+	pbapp.BindRoutes(app, cfg, s3)
 
 	// Manual poll pass: a superuser-only route used by the E2E gate and the
 	// operator to trigger a pass without waiting for the cron (arch.md 10).

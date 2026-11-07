@@ -3,7 +3,8 @@
 // The suite is one narrative: it starts a disposable Garage and the image
 // under test, then follows documents through the whole pipeline - import,
 // duplicate, pending, correction, validation, append-only, deletion, recovery,
-// restart. It is a regression gate for dependency upgrades (PocketBase,
+// restart, dashboard routes (config metadata, PDF proxy, dry-run, full
+// correction). It is a regression gate for dependency upgrades (PocketBase,
 // minio-go, ledongthuc/pdf, expr, Garage), not an acceptance proof.
 //
 // Run it from the archivist/ directory against an already built image:
@@ -80,7 +81,8 @@ func TestMain(m *testing.M) {
 		}
 	}
 	if os.Getenv("E2E_KEEP") == "1" {
-		fmt.Println("E2E: E2E_KEEP=1, containers left running:", appC, garageC)
+		fmt.
+Println("E2E: E2E_KEEP=1, containers left running:", appC, garageC)
 		return
 	}
 	teardown()
@@ -147,6 +149,7 @@ func startGarage() error {
 	if _, err := garage("bucket", "create", bucket); err != nil {
 		return err
 	}
+
 	keyOut, err := garage("key", "create", bucket)
 	if err != nil {
 		return err
@@ -210,7 +213,8 @@ func startApp(image string) error {
 	if _, err := run("docker", args...); err != nil {
 		return fmt.Errorf("app container: %w", err)
 	}
-	if err := retry(60*time.Second, checkHealth); err != nil {
+	if err := retry(60*time.Second, checkHealth); 
+err != nil {
 		if out, _ := run("docker", "logs", appC); out != "" {
 			return fmt.Errorf("app never became healthy; logs:\n%s", out)
 		}
@@ -296,7 +300,8 @@ func firstHexToken(s string) string {
 	return ""
 }
 
-func lineValue(s, prefix string) string {
+func lineValue(s, prefix string) strin
+g {
 	for _, line := range strings.Split(s, "\n") {
 		t := strings.TrimSpace(line)
 		if strings.HasPrefix(t, prefix) {
@@ -373,7 +378,8 @@ func listRecords(t *testing.T, collection, filter, sort string) []map[string]any
 	q.Set("perPage", "200")
 	status, out := call(t, http.MethodGet, "/api/collections/"+collection+"/records?"+q.Encode(), nil)
 	if status != 200 {
-		t.Fatalf("list %s: status %d: %v", collection, status, out)
+		t.Fatalf("list %s: status %d: %v
+", collection, status, out)
 	}
 	items, _ := out["items"].([]any)
 	recs := make([]map[string]any, 0, len(items))
@@ -450,7 +456,8 @@ func s3Exists(t *testing.T, key string) bool {
 	return err == nil
 }
 
-// --- in-memory test PDFs (no fixtures, no generator dependency) ----------
+// --- in-memory test PDFs (no fixtures, no ge
+nerator dependency) ----------
 
 // makePDF builds a minimal valid single-page PDF whose page text is the
 // given lines. The classification outcome is the proof that the
@@ -500,7 +507,8 @@ func putPDF(t *testing.T, key string, lines ...string) string {
 		t.Fatalf("PutObject %s: %v", key, err)
 	}
 	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:])
+	return hex.EncodeToString(su
+m[:])
 }
 
 // --- the config.jsonc mounted into the image under test -----------------
@@ -513,7 +521,8 @@ var testConfigRaw = `
     { "name": "emittingCompany", "type": "text", "mandatory": true },
     { "name": "documentType", "type": "text", "mandatory": true },
     { "name": "emissionDate", "type": "date", "mandatory": true },
-    { "name": "bankAccount", "type": "text" }
+    { "name": "bankAccount", "type": "text" },
+    { "name": "statementType", "type": "enum" }
   ],
   "rules": [
     {
@@ -523,7 +532,8 @@ var testConfigRaw = `
         { "field": "documentType", "value": "Releve de compte" },
         { "field": "emittingCompany", "eval": "firstMatch(~BRED|Fortuneo~, pages[0])" },
         { "field": "emissionDate", "eval": "date(firstMatch(~Date : ([0-9]{2}/[0-9]{2}/[0-9]{4})~, pages[0]), ~02/01/2006~)" },
-        { "field": "bankAccount", "eval": "firstMatch(~Compte ([A-Za-z]+)~, pages[0])" }
+        { "field": "bankAccount", "eval": "firstMatch(~Compte ([A-Za-z]+)~, pages[0])" },
+        { "field": "statementType", "value": "bank" }
       ]
     }
   ],
@@ -534,6 +544,19 @@ var testConfigRaw = `
 }`
 
 var testConfig = strings.ReplaceAll(testConfigRaw, "~", "`")
+
+// unauth makes one API call with the superuser token temporarily removed.
+func unauth(t *testing.T, method, path string, body any) (int, map[string]any) {
+	t.Helper()
+	saved := token
+	token = ""
+	status, out, err := api(method, path, body)
+	token = saved
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, path, err)
+	}
+	return status, out
+}
 
 func TestE2E(t *testing.T) {
 
@@ -549,7 +572,8 @@ func TestE2E(t *testing.T) {
 			}
 		}
 		// PocketBase writes log batches with a small delay.
-		var found bool
+		var fou
+nd bool
 		deadline := time.Now().Add(15 * time.Second)
 		for !found && time.Now().Before(deadline) {
 			for _, l := range pbLogs(t) {
@@ -607,7 +631,8 @@ func TestE2E(t *testing.T) {
 			t.Fatalf("file_key: %v, want %v", doc["file_key"], want)
 		}
 		if !s3Exists(t, want) {
-			t.Fatalf("object %s missing from S3", want)
+			t.Fatalf("object %s missing from S3", wan
+t)
 		}
 		if s3Exists(t, "inbox/statement-1.pdf") {
 			t.Fatal("source object still in inbox/")
@@ -662,7 +687,8 @@ func TestE2E(t *testing.T) {
 		p := eventPayloadOfType(t, eventsOf(t, doc["id"].(string)), "imported")
 		errs, ok := p["errors"].([]any)
 		if !ok || len(errs) == 0 {
-			t.Fatalf("want errors in the imported event, got %v", p)
+			t.Fatalf("
+want errors in the imported event, got %v", p)
 		}
 		after, _ := p["after"].(map[string]any)
 		if after["documentType"] != "Releve de compte" {
@@ -711,7 +737,8 @@ func TestE2E(t *testing.T) {
 				t.Fatalf("%s must not appear in a field-edit diff: %v", s, before)
 			}
 			if _, has := after[s]; has {
-				t.Fatalf("%s must not appear in a field-edit diff: %v", s, after)
+				t.Fatalf("%s must not appear in a field-edi
+t diff: %v", s, after)
 			}
 		}
 	})
@@ -761,7 +788,8 @@ func TestE2E(t *testing.T) {
 			map[string]any{"event_type": "corrected"}); status < 400 {
 			t.Fatalf("PATCH on document_events must be refused, got %d", status)
 		}
-		if status, _ := call(t, http.MethodDelete, "/api/collections/document_events/records/"+id, nil); status < 400 {
+		if status, _ := call(t, http.MethodDelete, "/api/collections/docum
+ent_events/records/"+id, nil); status < 400 {
 			t.Fatalf("DELETE on document_events must be refused, got %d", status)
 		}
 		if n := len(listRecords(t, "document_events", "", "")); n != len(evs) {
@@ -812,7 +840,8 @@ func TestE2E(t *testing.T) {
 			t.Fatalf("stuck record creation: %d %v", status, out)
 		}
 		poll(t) // the recovery runs at the start of the pass
-		want := "files/BRED/2026-02_Releve de compte_Thomas.pdf"
+		want := "files/BRED/202
+6-02_Releve de compte_Thomas.pdf"
 		doc := oneRecord(t, "documents", "(sha256='"+hash+"')")
 		if doc["file_key"] != want {
 			t.Fatalf("file_key: %v, want %v", doc["file_key"], want)
@@ -839,4 +868,251 @@ func TestE2E(t *testing.T) {
 			t.Fatalf("documents lost across restart: %d -> %d", len(before), len(after))
 		}
 	})
+
+	// 11. Dashboard config (US-31): the metadata route serves the declared
+	// fields, the enum vocabularies computed from the rule constants and
+	// the template names; unauthenticated requests are refused.
+	t.Run("config: metadata route serves fields, enums and templates", func(t *testing.T) {
+		status, out := call(t, http.MethodGet, "/api/archivist/config", nil)
+		if status != 200 {
+			t.Fatalf("config route: status %d: %v", status, out)
+		}
+		fields, _ := out["fields"].([]any)
+		if len(fields) != 6 {
+			t.Fatalf("want 6 declared fields, got %d", len(fields))
+		}
+		byName := map[string]map[string]any{}
+		for _, f := range fields {
+			m, _ := f.(map[string]any)
+			byName[m["name"].(string)] = m
+		}
+		if byName["emissionDate"]["type"] != "date" || byName["emissionDate"]["mandatory"] != true {
+			t.Fatalf("emissionDate metadata: %v", byName["emissionDate"])
+		}
+		if byName["statementType"]["type"] != "enum" {
+			t.Fatalf("statementType metadata: %v", byName["statementType"])
+		}
+		if byName["bankAccount"]["mandatory"] != false {
+			t.Fatalf("bankAccount metadata: %v", byName["bankAccount"])
+		}
+		enums, _ := out["enums"].(map[string]any)
+		vocab, _ := enums["statementType"].([]any)
+		if len(vocab) != 1 || vocab[0] != "bank" {
+			t.Fatalf("statementType vocabulary: %v", enums)
+		}
+		templates, _ := out["templates"].([]any)
+		wantTpl := map[string]bool{"bank_statement": false, "default": false}
+		for _, name := range templates {
+			if _, ok := wantTpl[name.(string)]; ok {
+				wantTpl[name.(string)] = true
+			}
+		}
+		for name, seen := range wantTpl {
+			if !seen {
+				t.Fatalf("template %s missing from %v", name, templates)
+			}
+		}
+		blob, _ := json.Marshal(out)
+		if strings.Contains(string(blob), s3Secret) {
+			t.Fatal("config route leaks the S3 secret")
+		}
+		if status, _ := unauth(t, http.MethodGet, "/api/archivist/config", nil); status != 403 {
+			t.Fatalf("config without superuser auth: want 403, got %d", status)
+		}
+	})
+
+	// 12. PDF proxy (US-34): the route streams the S3 object; the browser
+	// never reaches the S3 cluster.
+	t.Run("pdf: the proxy streams the S3 object", func(t *testing.T) {
+		doc := oneRecord(t, "documents", "(file_key='files/BRED/2025-12_Releve de compte_Thomas.pdf')")
+		id := doc["id"].(string)
+		req, _ := http.NewRequest(http.MethodGet, baseURL+"/api/archivist/documents/"+id+"/pdf", nil)
+		req.Header.Set("Authorization", token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		data, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != 200 {
+			t.Fatalf("pdf proxy: status %d", resp.StatusCode)
+		}
+		if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/pdf") {
+			t.Fatalf("content type: %q", ct)
+		}
+		sum := sha256.Sum256(data)
+		if hex.EncodeToString(sum[:]) != doc["sha256"] {
+			t.Fatal("the proxied bytes differ from the stored object")
+		}
+		if status, _ := unauth(t, http.MethodGet, "/api/archivist/documents/"+id+"/pdf", nil); status != 403 {
+			t.Fatalf("pdf without superuser auth: want 403, got %d", status)
+		}
+	})
+
+	// 13. Dry-run (US-35): the two exclusive modes share one response
+	// shape and persist nothing - no record, no event, no S3 object.
+	t.Run("dry-run: proposals and live render, nothing persisted", func(t *testing.T) {
+		doc := oneRecord(t, "documents", "(file_key='files/BRED/2026-01_Releve de compte_Thomas.pdf')")
+		id := doc["id"].(string)
+		path := "/api/archivist/documents/" + id + "/dry-run"
+		evCount := len(eventsOf(t, id))
+
+		// Mode A - no body: the pipeline proposal.
+		status, out := call(t, http.MethodPost, path, nil)
+		if status != 200 {
+			t.Fatalf("dry-run proposal: %d %v", status, out)
+		}
+		fields, _ := out["fields"].(map[string]any)
+		if fields["emittingCompany"] != "BRED" || fields["bankAccount"] != "Thomas" {
+			t.Fatalf("proposed fields: %v", fields)
+		}
+		if fields["emissionDate"] != "2026-01-15T00:00:00Z" {
+			t.Fatalf("proposed emissionDate: %v", fields["emissionDate"])
+		}
+		if out["template"] != "bank_statement" {
+			t.Fatalf("template: %v", out["template"])
+		}
+		if out["rendered"] != "BRED/2026-01_Releve de compte_Thomas.pdf" {
+			t.Fatalf("rendered: %v", out["rendered"])
+		}
+		if errs, _ := out["errors"].([]any); len(errs) != 0 {
+			t.Fatalf("unexpected errors: %v", errs)
+		}
+
+		// Mode B - values: the merged render, same response shape.
+		status, out = call(t, http.MethodPost, path, map[string]any{"bankAccount": "Nappez"})
+		if status != 200 {
+			t.Fatalf("dry-run with values: %d %v", status, out)
+		}
+		fields, _ = out["fields"].(map[string]any)
+		if fields["bankAccount"] != "Nappez" {
+			t.Fatalf("merged fields: %v", fields)
+		}
+		if out["rendered"] != "BRED/2026-01_Releve de compte_Nappez.pdf" {
+			t.Fatalf("rendered: %v", out["rendered"])
+		}
+
+		// Mode B - type error: per-field error, empty rendered name.
+		status, out = call(t, http.MethodPost, path, map[string]any{"emissionDate": "not-a-date"})
+		if status != 200 {
+			t.Fatalf("dry-run type error: %d %v", status, out)
+		}
+		if errs, _ := out["errors"].([]any); len(errs) == 0 {
+			t.Fatalf("want a per-field error, got %v", out)
+		}
+		if out["rendered"] != "" {
+			t.Fatalf("rendered must be empty on error: %v", out["rendered"])
+		}
+
+		// Unknown fields are refused outright.
+		if status, _ = call(t, http.MethodPost, path, map[string]any{"nope": "x"}); status != 400 {
+			t.Fatalf("unknown field must be refused with 400, got %d", status)
+		}
+
+		// Nothing persisted.
+		doc2 := oneRecord(t, "documents", "(id='" + id + "')")
+		if doc2["file_key"] != doc["file_key"] || doc2["status"] != doc["status"] {
+			t.Fatal("dry-run must not touch the record")
+		}
+		if n := len(eventsOf(t, id)); n != evCount {
+			t.Fatalf("dry-run created %d event(s)", n-evCount)
+		}
+		if status, _ := unauth(t, http.MethodPost, path, nil); status != 403 {
+			t.Fatalf("dry-run without superuser auth: want 403, got %d", status)
+		}
+	})
+
+	// 14. Full correction (US-36).
+	t.Run("correction: a pending document is re-filed and validated", func(t *testing.T) {
+		hash := putPDF(t, "inbox/undated-2.pdf", "BRED", "Releve de compte", "Compte Thomas")
+		poll(t)
+		poll(t)
+		doc := oneRecord(t, "documents", "(sha256='" + hash + "')")
+		id := doc["id"].(string)
+		if doc["status"] != "pending" {
+			t.Fatalf("status: %v", doc["status"])
+		}
+		want := "files/BRED/2026-03_Releve de compte_Thomas.pdf"
+		status, out := call(t, http.MethodPost, "/api/archivist/documents/"+id+"/correct",
+			map[string]any{"emissionDate": "2026-03-10"})
+		if status != 200 {
+			t.Fatalf("correct refused: %d %v", status, out)
+		}
+		doc = oneRecord(t, "documents", "(id='" + id + "')")
+		if doc["file_key"] != want {
+			t.Fatalf("file_key: %v, want %v", doc["file_key"], want)
+		}
+		if doc["status"] != "validated" {
+			t.Fatalf("status: %v", doc["status"])
+		}
+		if !s3Exists(t, want) {
+			t.Fatalf("object %s missing from S3", want)
+		}
+		if s3Exists(t, "pending/undated-2.pdf") {
+			t.Fatal("the pending/ object was not removed")
+		}
+		p := eventPayloadOfType(t, eventsOf(t, id), "corrected")
+		before, _ := p["before"].(map[string]any)
+		after, _ := p["after"].(map[string]any)
+		if before["file_key"] != "pending/undated-2.pdf" {
+			t.Fatalf("before.file_key: %v", before)
+		}
+		if after["file_key"] != want || after["status"] != "validated" {
+			t.Fatalf("after: %v", after)
+		}
+		if _, has := before["emissionDate"]; has {
+			t.Fatalf("emissionDate was unknown before the correction: %v", before)
+		}
+		if after["emissionDate"] != "2026-03-10T00:00:00Z" {
+			t.Fatalf("after.emissionDate: %v", after)
+		}
+		if status, _ := unauth(t, http.MethodPost, "/api/archivist/documents/"+id+"/correct",
+			map[string]any{"emissionDate": "2026-03-10"}); status != 403 {
+			t.Fatalf("correct without superuser auth: want 403, got %d", status)
+		}
+	})
+
+	t.Run("correction: a value error leaves everything unchanged", func(t *testing.T) {
+		doc := oneRecord(t, "documents", "(file_key='files/BRED/2026-01_Releve de compte_Thomas.pdf')")
+		id := doc["id"].(string)
+		evCount := len(eventsOf(t, id))
+		status, out := call(t, http.MethodPost, "/api/archivist/documents/"+id+"/correct",
+			map[string]any{"emissionDate": "not-a-date"})
+		if status != 400 {
+			t.Fatalf("want 400, got %d %v", status, out)
+		}
+		doc2 := oneRecord(t, "documents", "(id='" + id + "')")
+		if doc2["file_key"] != doc["file_key"] || doc2["status"] != doc["status"] {
+			t.Fatal("a refused correction must leave the record unchanged")
+		}
+		if n := len(eventsOf(t, id)); n != evCount {
+			t.Fatalf("a refused correction created %d event(s)", n-evCount)
+		}
+	})
+
+	t.Run("correction: an unchanged name skips S3 and the diff drops file_key", func(t *testing.T) {
+		doc := oneRecord(t, "documents", "(file_key='files/BRED/2026-01_Releve de compte_Thomas.pdf')")
+		id := doc["id"].(string)
+		status, out := call(t, http.MethodPost, "/api/archivist/documents/"+id+"/correct", map[string]any{})
+		if status != 200 {
+			t.Fatalf("correct refused: %d %v", status, out)
+		}
+		doc2 := oneRecord(t, "documents", "(id='" + id + "')")
+		if doc2["file_key"] != doc["file_key"] {
+			t.Fatalf("file_key must not change: %v -> %v", doc["file_key"], doc2["file_key"])
+		}
+		if strings.Contains(doc2["file_key"].(string), " (") {
+			t.Fatalf("a conflict suffix was added: %v", doc2["file_key"])
+		}
+		p := eventPayloadOfType(t, eventsOf(t, id), "corrected")
+		before, _ := p["before"].(map[string]any)
+		after, _ := p["after"].(map[string]any)
+		if _, has := before["file_key"]; has {
+			t.Fatalf("file_key must be absent from the diff: %v", before)
+		}
+		if _, has := after["file_key"]; has {
+			t.Fatalf("file_key must be absent from the diff: %v", after)
+		}
+	})
 }
+
