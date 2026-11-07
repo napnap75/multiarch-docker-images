@@ -1,0 +1,5 @@
+.vscode/
+pb_data/
+tests/
+__debug_bin*
+go.sum
