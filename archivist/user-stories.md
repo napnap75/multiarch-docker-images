@@ -241,7 +241,7 @@ Acceptance criteria:
 - Given a superuser issues the DELETE, when the hook runs, then the hook applies: like the append-only protection of US-04, it cannot rely on API rules alone.
 ## Epic: Review Dashboard (US-30 to US-36)
 
-The static frontend served from `pb_public/` (arch.md section 7): a document list and a document detail page, entirely driven by the configuration metadata route. No build toolchain, vendored dependencies only (100% offline). Every persistence goes through the standard PocketBase API and its hooks; the only application routes are those the standard API cannot express (config metadata, PDF proxy, dry-run, full correction).
+The static frontend served from `pb_public/` (arch.md section 7): a document list and a document detail page, entirely driven by the configuration metadata route. No build toolchain, vendored dependencies only (100% offline). Every persistence goes through the standard PocketBase API and its hooks; the only application routes are those the standard API cannot express (config metadata, PDF proxy, dry-run, full correction). Visual design: Beszel reference (arch.md section 7.5).
 
 ### US-30 — Serve the dashboard as static files
 
@@ -254,6 +254,7 @@ Acceptance criteria:
 - Given the image is built and running, when I open `http://<server>:8090/`, then the dashboard pages are served from `pb_public/` — plain HTML/CSS/JS, no build toolchain, dependencies vendored locally, nothing loaded from a CDN.
 - Given a page is opened, when it renders, then it carries no document data by itself; everything is loaded through authenticated API calls.
 - Given an unauthenticated visitor, when a page requests data, then the API refuses it and the page redirects to the admin UI (`/_/`).
+- Given the pages, when they are styled, then they follow the Beszel design reference (section 7.5): same semantic HSL tokens, light/dark pair switched by a class on `<html>`, cards, hairline borders, sticky table headers — reproduced in one hand-written stylesheet, no Tailwind or CSS framework.
 
 ### US-31 — Expose the configuration metadata
 
