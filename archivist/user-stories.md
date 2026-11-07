@@ -275,7 +275,7 @@ so that I can work through the review queue efficiently.
 
 Acceptance criteria:
 
-- Given the list page, when it opens, then it shows a paginated table with `status`, `file_key` and `created` by default, and a column chooser exposing every declared field plus `created`/`updated`; the choice persists in the browser.
+- Given the list page, when it opens, then it shows a paginated table whose default columns are all mandatory fields plus `status` and `file_key`, and a column chooser exposing every declared field plus `created`/`updated`; the choice persists in the browser.
 - Given a column header, when I click it, then the list is sorted by that column server-side and the state persists.
 - Given a column, when I open its filter, then the control matches the field type (contains for `text`, dropdown for `enum` and `status`, range for `date`, tri-state for `boolean`) and the filter is applied server-side through a PocketBase filter expression.
 - Given the list, when I open it, then quick tabs show the per-status counts and pre-filter the review queue (`pending` first).
