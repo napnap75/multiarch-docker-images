@@ -116,7 +116,7 @@ A commented `config.jsonc` example file is provided in the repository. The dashb
 
 - Document list with status, filters, and combined search: full text (content of all pages) and fields.
 - Detail view with PDF preview (streamed from S3) and extracted fields. Debug mode shows the detail of every rule evaluation.
-- Correction: a form to edit the fields. Saving is only possible if the selected template can be evaluated without error. A corrected file is re-filed and becomes `validated`; a corrected `pending` file leaves the review queue.
+- Correction: a form to edit the fields. A draft save is always possible: it persists the values with no side effect (no template evaluation, no re-filing, no status change). Only the full correction — re-filing and validation — is refused while the rendered name still has errors. A corrected file is re-filed and becomes `validated`; a corrected `pending` file leaves the review queue.
 - Validation: direct transition from `processed` to `validated`.
 - History: every document has a complete, timestamped trace (import, correction, validation) readable from its detail view.
 
