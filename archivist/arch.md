@@ -46,7 +46,7 @@ Nextcloud mounts the bucket as external storage: it is the user-facing interface
 ### `documents`
 One row per processed PDF file:
 
-- `sha256`: the sha256 is a primary key as the system will reject as duplicate any file with the same hash
+- `sha256`: a unique-indexed column — the system rejects as duplicate any file with the same hash
 - `file_key`: current S3 key of the file
 - `pages`: page-by-page extracted text as a JSON array (0-based, `pages[0]` = page 1); the FTS5 full-text index is built from the concatenation of all pages
 - `status`: `pending` | `processed` | `validated`
@@ -217,7 +217,7 @@ The review dashboard is a static frontend — plain HTML/CSS/JS files, no build 
 - Layout: two columns — the PDF preview embedded via the proxy route of section 7.3, and the correction form; below them, the document's event history, read-only, sorted by timestamp, payloads rendered as before/after diffs.
 - Form: one typed control per declared field, pre-filled with the current values; mandatory fields marked; the classification errors of the `imported` event, if any, displayed at the top.
 - Pipeline proposals (US-35): under each field whose value the pipeline would extract differently today, a discreet banner offers the proposed value with one-click adoption. The proposals come from the classification dry-run (section 7.3), re-run against the stored pages.
-- Live name (US-35): as the form changes, the rendered target name under `files/` is recomputed by the render dry-run and displayed with its errors; nothing can be committed while errors remain.
+- Live name (US-35): as the form changes, the rendered target name under `files/` is recomputed by the render dry-run and displayed with its errors; the draft save remains available, but the full correction refuses to run while errors remain.
 - Exits, three and distinct: draft save (standard PATCH, US-22: values persist, no re-filing, no status change); full correction (US-36: the `/correct` route, re-filing and validation in one confirmed step); simple validation of a `processed` document (standard PATCH, US-23). A `pending` document only leaves the review queue through the full correction.
 
 ### 7.3 Application routes
