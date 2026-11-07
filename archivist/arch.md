@@ -234,7 +234,7 @@ The review dashboard is a static frontend — plain HTML/CSS/JS files, no build 
 
 ### 7.1 Document list (US-32 / US-33)
 
-- Table: one row per document, paginated (50 by default), default columns `status` / `file_key` / `created`; a column chooser exposes every declared field plus `created`/`updated`, and the choice persists in the browser (`localStorage`).
+- Table: one row per document, paginated (50 by default), default columns: all mandatory fields plus `status` and `file_key`; a column chooser exposes every declared field plus `created`/`updated`, and the choice persists in the browser (`localStorage`).
 - Sorting: click on a column header, ascending/descending, executed server-side through the standard PocketBase `sort` parameter.
 - Per-column filters, typed from the field declaration: contains for `text`, dropdown for `enum` and `status` (vocabulary from the config metadata route), date range for `date`, tri-state for `boolean`; translated client-side into a PocketBase filter expression.
 - Quick tabs with the per-status counts pre-filter the review queue (`pending` first).
