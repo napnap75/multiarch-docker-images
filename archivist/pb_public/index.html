@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="fr" class="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Archivist — Relecture</title>
+<link rel="stylesheet" href="/styles.css">
+<script>(function(){try{var t=localStorage.getItem("archivist.theme");var d=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.className=d?"dark":"light";}catch(e){document.documentElement.className="light";}})();</script>
+</head>
+<body class="archivist-dashboard">
+<header class="topbar">
+  <div class="wrap">
+    <h1>Archivist — Relecture</h1>
+    <nav>
+      <a href="/_/">Admin</a>
+      <button id="themeBtn" type="button" class="btn secondary">Thème</button>
+    </nav>
+  </div>
+</header>
+<main class="wrap">
+  <div id="tabs" class="tabs"></div>
+  <details id="colchooser" class="card chooser">
+    <summary>Colonnes affichées</summary>
+    <div id="colgrid" class="colgrid"></div>
+  </details>
+  <div id="bulkbar" class="card bulkbar" hidden>
+    <span id="bulkcount"></span>
+    <label>Champ <select id="bulkfield"></select></label>
+    <span id="bulkvalue"></span>
+    <button id="bulkapply" type="button" class="btn primary">Appliquer</button>
+    <button id="bulkall" type="button" class="btn secondary">Sélection filtrée entière</button>
+    <button id="bulkclear" type="button" class="btn secondary">Effacer la sélection</button>
+    <span id="bulkresult"></span>
+  </div>
+  <div class="card">
+    <div class="tablewrap">
+      <table id="doctable">
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div id="pager" class="pager"></div>
+  </div>
+</main>
+<script src="/common.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

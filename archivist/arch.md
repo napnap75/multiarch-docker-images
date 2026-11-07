@@ -341,6 +341,7 @@ ing, no status change), `corrected` event carrying the field diff (US-22).
 12. PDF proxy — the route streams the S3 object, refused without superuser auth (US-34).
 13. Dry-run — both modes return the shared response shape and persist nothing (US-35).
 14. Full correction — a pending document is re-filed and validated; value errors leave everything unchanged; an unchanged name skips the S3 move and the diff drops file_key (US-36).
+15. Static dashboard — the review pages are served from pb_public/ with no external resource (US-30).
 
 `POST /api/archivist/poll` (superuser only) runs one poll pass immediately. It exists so the gate and the operator trigger passes on demand instead of waiting for the cron; a fresh upload needs two calls because the poller waits for size/ETag stability across two passes (US-10).
 

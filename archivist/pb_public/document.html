@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="fr" class="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Archivist — Document</title>
+<link rel="stylesheet" href="/styles.css">
+<script>(function(){try{var t=localStorage.getItem("archivist.theme");var d=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.className=d?"dark":"light";}catch(e){document.documentElement.className="light";}})();</script>
+</head>
+<body class="archivist-dashboard">
+<header class="topbar">
+  <div class="wrap">
+    <h1><a href="/">← Archivist</a></h1>
+    <nav>
+      <a href="/_/">Admin</a>
+      <button id="themeBtn" type="button" class="btn secondary">Thème</button>
+    </nav>
+  </div>
+</header>
+<main class="wrap">
+  <div class="detailhead">
+    <h2 id="docname"></h2>
+    <span id="docstatus" class="badge"></span>
+  </div>
+  <div class="detailgrid">
+    <section class="card pdfpane">
+      <iframe id="pdf" title="Aperçu du document"></iframe>
+    </section>
+    <section>
+      <div id="importerrors" class="errbox" hidden></div>
+      <div class="card">
+        <div id="targetname" class="targetname"></div>
+        <div id="dryerrors" class="errbox" hidden></div>
+        <form id="docform" class="formgrid" onsubmit="return false"></form>
+        <div class="actions">
+          <button id="draftBtn" type="button" class="btn primary">Enregistrer le brouillon</button>
+          <button id="correctBtn" type="button" class="btn primary">Correction complète et validation</button>
+          <button id="validateBtn" type="button" class="btn secondary" hidden>Valider</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Historique</h3>
+        <div id="history"></div>
+      </div>
+    </section>
+  </div>
+</main>
+<script src="/common.js"></script>
+<script src="/detail.js"></script>
+</body>
+</html>

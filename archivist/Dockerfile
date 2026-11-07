@@ -17,6 +17,7 @@ ARG TARGETARCH
 # with `go mod download` for fully reproducible builds.
 COPY go.mod main.go ./
 COPY internal/ ./internal/
+COPY pb_public/ ./pb_public/
 RUN go mod tidy
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /archivist .
 
@@ -34,6 +35,7 @@ RUN mkdir -p /out/etc/ssl/certs /out/usr/share /out/app/pb_data /out/tmp \
 FROM scratch
 COPY --from=build /out/ /
 COPY --from=build /archivist /app/archivist
+COPY --from=build /src/pb_public/ /app/pb_public/
 
 WORKDIR /app
 ENV TMPDIR=/tmp

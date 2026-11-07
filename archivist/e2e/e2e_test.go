@@ -1114,5 +1114,40 @@ ent_events/records/"+id, nil); status < 400 {
 			t.Fatalf("file_key must be absent from the diff: %v", after)
 		}
 	})
+
+	// 15. Static dashboard (US-30): the review pages are served from
+	// pb_public/ by the application itself - plain HTML/CSS/JS, nothing
+	// loaded from a CDN.
+	t.Run("dashboard: static pages served with no CDN", func(t *testing.T) {
+		resp, err := http.Get(baseURL + "/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatalf("dashboard index: status %d", resp.StatusCode)
+		}
+		html := string(data)
+		if !strings.Contains(html, "archivist-dashboard") {
+			t.Fatal("the index page is not the review dashboard")
+		}
+		for _, marker := range []string{"src=\"http", "href=\"http", "url(http"} {
+			if strings.Contains(html, marker) {
+				t.Fatalf("the dashboard loads an external resource (%s)", marker)
+			}
+		}
+		for _, asset := range []string{"/styles.css", "/common.js", "/app.js", "/detail.js", "/document.html"} {
+			r, err := http.Get(baseURL + asset)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(r.Body)
+			r.Body.Close()
+			if r.StatusCode != 200 || len(body) == 0 {
+				t.Fatalf("asset %s: status %d, %d bytes", asset, r.StatusCode, len(body))
+			}
+		}
+	})
 }
 
