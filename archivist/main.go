@@ -65,8 +65,7 @@ func LoadEnvConfig() (*EnvConfig, error) {
 	return c, nil
 }
 
-func configPathFromArgs(args []strin
-g, defaultPath string) (string, error) {
+func configPathFromArgs(args []string, defaultPath string) (string, error) {
 	var configPath string
 	flags := pflag.NewFlagSet("archivist", pflag.ContinueOnError)
 	flags.SetInterspersed(true)
@@ -117,8 +116,7 @@ func main() {
 	}
 
 	// US-01: versioning recommendation, via the PocketBase logger
-	// (visible in the admin dashboard, Das
-hboard > Logs).
+	// (visible in the admin dashboard, Dashboard > Logs).
 	if s3.StartupWarning != "" {
 		app.Logger().Warn(s3.StartupWarning, "bucket", envCfg.S3Bucket)
 	}

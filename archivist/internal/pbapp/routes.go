@@ -8,11 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"ganigeorgiev.com/pocketbase/pocketbase/apis"
 	"ganigeorgiev.com/pocketbase/pocketbase/core"
 	"github.com/napnap75/archivist/internal/config"
 	"github.com/napnap75/archivist/internal/storage"
@@ -23,6 +26,9 @@ import (
 // PocketBase auth, but these routes bypass the record API and its hooks.
 func BindRoutes(app core.App, cfg *config.Config, s3 *storage.Client) {
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
+		if !e.Router.HasRoute(http.MethodGet, "/{path...}") {
+			e.Router.GET("/{path...}", apis.Static(os.DirFS("pb_public"), true))
+		}
 		e.Router.GET("/api/archivist/config", func(re *core.RequestEvent) error {
 			if !re.HasSuperuserAuth() {
 				return re.ForbiddenError("superusers only", nil)
@@ -139,10 +145,10 @@ func fileName(key string) string {
 // dryRunResponse is the single response shape of the two exclusive
 // dry-run modes (US-35).
 type dryRunResponse struct {
-	Fields   map[string]any "json:"fields""
-	Template string         "json:"template""
-	Rendered string         "json:"rendered""
-	Errors   []string       "json:"errors""
+	Fields   map[string]any `json:"fields"`
+	Template string         `json:"template"`
+	Rendered string         `json:"rendered"`
+	Errors   []string       `json:"errors"`
 }
 
 func handleDryRun(re *core.RequestEvent, cfg *config.Config) error {
@@ -270,7 +276,7 @@ func handleCorrect(re *core.RequestEvent, cfg *config.Config, s3 *storage.Client
 		if err := tx.Save(record); err != nil {
 			return err
 		}
-		return AppendEvent(tx, record.Id, "corrected", before, after)
+		return AppendEvent(tx, record.Id, "corrected", before, after, nil)
 	})
 	if txErr != nil {
 		if refiled {

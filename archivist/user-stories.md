@@ -253,7 +253,7 @@ Acceptance criteria:
 
 - Given the image is built and running, when I open `http://<server>:8090/`, then the dashboard pages are served from `pb_public/` — plain HTML/CSS/JS, no build toolchain, dependencies vendored locally, nothing loaded from a CDN.
 - Given a page is opened, when it renders, then it carries no document data by itself; everything is loaded through authenticated API calls.
-- Given an unauthenticated visitor, when a page requests data, then the API refuses it and the page redirects to the admin UI (`/_/`).
+- Given an unauthenticated visitor, when a page requests data, then the page prompts for superuser credentials, authenticates through PocketBase, and retries the request; the API refuses access until authentication succeeds.
 - Given the pages, when they are styled, then they follow the Beszel design reference (section 7.5): same semantic HSL tokens, light/dark pair switched by a class on `<html>`, cards, hairline borders, sticky table headers — reproduced in one hand-written stylesheet, no Tailwind or CSS framework.
 
 ### US-31 — Expose the configuration metadata

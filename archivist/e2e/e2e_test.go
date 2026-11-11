@@ -82,7 +82,7 @@ func TestMain(m *testing.M) {
 	}
 	if os.Getenv("E2E_KEEP") == "1" {
 		fmt.
-Println("E2E: E2E_KEEP=1, containers left running:", appC, garageC)
+			Println("E2E: E2E_KEEP=1, containers left running:", appC, garageC)
 		return
 	}
 	teardown()
@@ -213,8 +213,7 @@ func startApp(image string) error {
 	if _, err := run("docker", args...); err != nil {
 		return fmt.Errorf("app container: %w", err)
 	}
-	if err := retry(60*time.Second, checkHealth); 
-err != nil {
+	if err := retry(60*time.Second, checkHealth); err != nil {
 		if out, _ := run("docker", "logs", appC); out != "" {
 			return fmt.Errorf("app never became healthy; logs:\n%s", out)
 		}
@@ -300,8 +299,7 @@ func firstHexToken(s string) string {
 	return ""
 }
 
-func lineValue(s, prefix string) strin
-g {
+func lineValue(s, prefix string) string {
 	for _, line := range strings.Split(s, "\n") {
 		t := strings.TrimSpace(line)
 		if strings.HasPrefix(t, prefix) {
@@ -378,8 +376,7 @@ func listRecords(t *testing.T, collection, filter, sort string) []map[string]any
 	q.Set("perPage", "200")
 	status, out := call(t, http.MethodGet, "/api/collections/"+collection+"/records?"+q.Encode(), nil)
 	if status != 200 {
-		t.Fatalf("list %s: status %d: %v
-", collection, status, out)
+		t.Fatalf("list %s: status %d: %v", collection, status, out)
 	}
 	items, _ := out["items"].([]any)
 	recs := make([]map[string]any, 0, len(items))
@@ -456,8 +453,7 @@ func s3Exists(t *testing.T, key string) bool {
 	return err == nil
 }
 
-// --- in-memory test PDFs (no fixtures, no ge
-nerator dependency) ----------
+// --- in-memory test PDFs (no fixtures, no generator dependency) ----------
 
 // makePDF builds a minimal valid single-page PDF whose page text is the
 // given lines. The classification outcome is the proof that the
@@ -507,8 +503,7 @@ func putPDF(t *testing.T, key string, lines ...string) string {
 		t.Fatalf("PutObject %s: %v", key, err)
 	}
 	sum := sha256.Sum256(data)
-	return hex.EncodeToString(su
-m[:])
+	return hex.EncodeToString(sum[:])
 }
 
 // --- the config.jsonc mounted into the image under test -----------------
@@ -572,8 +567,7 @@ func TestE2E(t *testing.T) {
 			}
 		}
 		// PocketBase writes log batches with a small delay.
-		var fou
-nd bool
+		var found bool
 		deadline := time.Now().Add(15 * time.Second)
 		for !found && time.Now().Before(deadline) {
 			for _, l := range pbLogs(t) {
@@ -631,8 +625,7 @@ nd bool
 			t.Fatalf("file_key: %v, want %v", doc["file_key"], want)
 		}
 		if !s3Exists(t, want) {
-			t.Fatalf("object %s missing from S3", wan
-t)
+			t.Fatalf("object %s missing from S3", want)
 		}
 		if s3Exists(t, "inbox/statement-1.pdf") {
 			t.Fatal("source object still in inbox/")
@@ -687,8 +680,7 @@ t)
 		p := eventPayloadOfType(t, eventsOf(t, doc["id"].(string)), "imported")
 		errs, ok := p["errors"].([]any)
 		if !ok || len(errs) == 0 {
-			t.Fatalf("
-want errors in the imported event, got %v", p)
+			t.Fatalf("want errors in the imported event, got %v", p)
 		}
 		after, _ := p["after"].(map[string]any)
 		if after["documentType"] != "Releve de compte" {
@@ -737,8 +729,7 @@ want errors in the imported event, got %v", p)
 				t.Fatalf("%s must not appear in a field-edit diff: %v", s, before)
 			}
 			if _, has := after[s]; has {
-				t.Fatalf("%s must not appear in a field-edi
-t diff: %v", s, after)
+				t.Fatalf("%s must not appear in a field-edit diff: %v", s, after)
 			}
 		}
 	})
@@ -788,8 +779,7 @@ t diff: %v", s, after)
 			map[string]any{"event_type": "corrected"}); status < 400 {
 			t.Fatalf("PATCH on document_events must be refused, got %d", status)
 		}
-		if status, _ := call(t, http.MethodDelete, "/api/collections/docum
-ent_events/records/"+id, nil); status < 400 {
+		if status, _ := call(t, http.MethodDelete, "/api/collections/document_events/records/"+id, nil); status < 400 {
 			t.Fatalf("DELETE on document_events must be refused, got %d", status)
 		}
 		if n := len(listRecords(t, "document_events", "", "")); n != len(evs) {
@@ -820,7 +810,6 @@ ent_events/records/"+id, nil); status < 400 {
 		}
 	})
 
-
 	// 9. Recovery (US-11): a stuck record - file_key still under inbox/,
 	// created directly through the API - is completed by the next pass.
 	t.Run("recovery: a stuck filing is completed by the next pass", func(t *testing.T) {
@@ -840,8 +829,7 @@ ent_events/records/"+id, nil); status < 400 {
 			t.Fatalf("stuck record creation: %d %v", status, out)
 		}
 		poll(t) // the recovery runs at the start of the pass
-		want := "files/BRED/202
-6-02_Releve de compte_Thomas.pdf"
+		want := "files/BRED/2026-02_Releve de compte_Thomas.pdf"
 		doc := oneRecord(t, "documents", "(sha256='"+hash+"')")
 		if doc["file_key"] != want {
 			t.Fatalf("file_key: %v, want %v", doc["file_key"], want)
@@ -1010,7 +998,7 @@ ent_events/records/"+id, nil); status < 400 {
 		}
 
 		// Nothing persisted.
-		doc2 := oneRecord(t, "documents", "(id='" + id + "')")
+		doc2 := oneRecord(t, "documents", "(id='"+id+"')")
 		if doc2["file_key"] != doc["file_key"] || doc2["status"] != doc["status"] {
 			t.Fatal("dry-run must not touch the record")
 		}
@@ -1027,7 +1015,7 @@ ent_events/records/"+id, nil); status < 400 {
 		hash := putPDF(t, "inbox/undated-2.pdf", "BRED", "Releve de compte", "Compte Thomas")
 		poll(t)
 		poll(t)
-		doc := oneRecord(t, "documents", "(sha256='" + hash + "')")
+		doc := oneRecord(t, "documents", "(sha256='"+hash+"')")
 		id := doc["id"].(string)
 		if doc["status"] != "pending" {
 			t.Fatalf("status: %v", doc["status"])
@@ -1038,7 +1026,7 @@ ent_events/records/"+id, nil); status < 400 {
 		if status != 200 {
 			t.Fatalf("correct refused: %d %v", status, out)
 		}
-		doc = oneRecord(t, "documents", "(id='" + id + "')")
+		doc = oneRecord(t, "documents", "(id='"+id+"')")
 		if doc["file_key"] != want {
 			t.Fatalf("file_key: %v, want %v", doc["file_key"], want)
 		}
@@ -1081,7 +1069,7 @@ ent_events/records/"+id, nil); status < 400 {
 		if status != 400 {
 			t.Fatalf("want 400, got %d %v", status, out)
 		}
-		doc2 := oneRecord(t, "documents", "(id='" + id + "')")
+		doc2 := oneRecord(t, "documents", "(id='"+id+"')")
 		if doc2["file_key"] != doc["file_key"] || doc2["status"] != doc["status"] {
 			t.Fatal("a refused correction must leave the record unchanged")
 		}
@@ -1097,7 +1085,7 @@ ent_events/records/"+id, nil); status < 400 {
 		if status != 200 {
 			t.Fatalf("correct refused: %d %v", status, out)
 		}
-		doc2 := oneRecord(t, "documents", "(id='" + id + "')")
+		doc2 := oneRecord(t, "documents", "(id='"+id+"')")
 		if doc2["file_key"] != doc["file_key"] {
 			t.Fatalf("file_key must not change: %v -> %v", doc["file_key"], doc2["file_key"])
 		}
@@ -1150,4 +1138,3 @@ ent_events/records/"+id, nil); status < 400 {
 		}
 	})
 }
-

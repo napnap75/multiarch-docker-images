@@ -27,6 +27,7 @@ async function init() {
 
   initTheme("themeBtn");
   renderHead();
+  loadPdf();
   var evs = await loadEvents();
   renderImportErrors(evs);
   renderHistory(evs);
@@ -38,7 +39,7 @@ async function init() {
 }
 
 async function loadEvents() {
-  var q = "/api/collections/document_events/records?perPage=200&sort=timestamp&filter=" +
+  var q = "/api/collections/document_events/records?perPage=200&sort=-timestamp&filter=" +
     encodeURIComponent("(document='" + docId + "')");
   var r = await api("GET", q);
   return (r.status === 200 && r.data.items) ? r.data.items : [];
@@ -50,7 +51,31 @@ function renderHead() {
   var st = $("docstatus");
   st.textContent = record.status || "";
   st.className = "badge st-" + record.status;
-  $("pdf").src = "/api/archivist/documents/" + docId + "/pdf";
+}
+
+async function loadPdf() {
+  var iframe = $("pdf");
+  var error = $("pdferror");
+  try {
+    var response = await apiBlob("/api/archivist/documents/" + docId + "/pdf");
+    if (!response.ok) {
+      var data = null;
+      try { data = await response.json(); } catch (e) {}
+      error.textContent = "Aperçu indisponible : " + (data && data.message || "HTTP " + response.status);
+      error.hidden = false;
+      iframe.hidden = true;
+      return;
+    }
+    var objectUrl = URL.createObjectURL(await response.blob());
+    iframe.src = objectUrl;
+    window.addEventListener("pagehide", function () { URL.revokeObjectURL(objectUrl); }, { once: true });
+  } catch (e) {
+    var reason = e && e.message ? e.message : String(e);
+    console.error("PDF preview failed:", e);
+    error.textContent = "Impossible de charger l'aperçu PDF : " + reason;
+    error.hidden = false;
+    iframe.hidden = true;
+  }
 }
 
 function payloadOf(ev) {

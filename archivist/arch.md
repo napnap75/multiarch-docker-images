@@ -275,8 +275,7 @@ lidateValue`, `Render`, `ResolveConflict`, `DiffSnapshots`, `AppendEvent`), no p
 - Validation: performed from the same interface by changing the status to `validated`; the hook appends the `validated` event, and any other status change is refused. A `pending` file can only leave the review queue through a full correction from the dashboard (US-36).
 - Deletion: deleting a `documents` record from the same interface first deletes the S3 object at `file_key` (US-24); on S3 failure the deletion is refused and the record stays. The cascade delete of the `document_events` relation removes the history with the record; with versioning the object stays recoverable via its delete marker.
 
-The static pages themselves carry no data and are public by nature; every fetch is authenticated against the PocketBase API and an unauthenticated visitor is redirected to the admin UI (`/_/`). Authentication: single ac
-count via PocketBase's standard auth. The configuration is reloaded only on restart; there is no runtime reload.
+The static pages themselves carry no data and are public by nature; every fetch is authenticated against the PocketBase API. An unauthenticated visitor is prompted to sign in with the superuser account; the dashboard exchanges those credentials through PocketBase's standard auth endpoint, stores the returned token locally, and retries the blocked request. The API continues to enforce superuser access. The configuration is reloaded only on restart; there is no runtime reload.
 ### 7.5 Design (Beszel reference)
 
 The dashboard's visual design takes Beszel (https://github.com/henrygd/beszel) as its reference. Beszel is built on shadcn/ui + Tailwind with semantic HSL CSS variables and a light/dark pair; archivist reproduces its palette, token names and layout feel in a single hand-written stylesheet (`pb_public/styles.css`) — no Tailwind, no CSS framework, consistent with the no-build-toolchain constraint of section 7.
