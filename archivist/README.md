@@ -119,6 +119,18 @@ A commented `config.jsonc` example file is provided in the repository. The dashb
 - Correction: a form to edit the fields. A draft save is always possible: it persists the values with no side effect (no template evaluation, no re-filing, no status change). Only the full correction — re-filing and validation — is refused while the rendered name still has errors. A corrected file is re-filed and becomes `validated`; a corrected `pending` file leaves the review queue.
 - Validation: direct transition from `processed` to `validated`.
 - History: every document has a complete, timestamped trace (import, correction, validation) readable from its detail view.
+- Tools: maintenance tasks run by hand (see Tools below).
+
+## Tools
+
+The `Outils` page of the dashboard runs maintenance tasks by hand: one card per tool with its description, a run button, a live progress bar while the task runs (cancellable), and a summary with per-outcome counts when it ends. One task at a time.
+
+The first tool, `Recherche des fichiers perdus`, reconciles the bucket with the database when files have been moved by hand (e.g. through Nextcloud). It scans every object outside `inbox/`, computes each object's sha256 and compares it against the database:
+
+- the object is at the key its record knows: nothing happens;
+- the object was moved outside the application: the record's `file_key` is corrected to the new key and a `relocated` event is appended to the document's history (the object itself never moves);
+- the object is unknown of the database: it is moved to `inbox/` to be processed automatically by the poller;
+- a record whose file has disappeared from the bucket is only reported in the summary, never acted upon.
 
 ## Nextcloud integration
 

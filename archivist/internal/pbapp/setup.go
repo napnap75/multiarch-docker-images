@@ -5,12 +5,17 @@ package pbapp
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"ganigeorgiev.com/pocketbase/pocketbase/core"
 	"github.com/napnap75/archivist/internal/config"
 )
 
 const eventsName = "document_events"
+
+// EventTypes is the official event_type vocabulary. It grows with the
+// application: existing collections are migrated at startup (ensureEvents).
+var EventTypes = []string{"imported", "corrected", "validated", "relocated"}
 
 // Setup ensures the collections and the superuser account (US-03, US-04, US-01).
 func Setup(app core.App, adminEmail, adminPassword string, cfg *config.Config) error {
@@ -116,17 +121,18 @@ func isFixed(name string) bool {
 }
 
 func ensureEvents(app core.App) error {
-	if _, err := app.FindCollectionByNameOrId(eventsName); err == nil {
-		return nil
+	coll, err := app.FindCollectionByNameOrId(eventsName)
+	if err == nil {
+		return migrateEventTypes(app, coll)
 	}
 	docColl, err := app.FindCollectionByNameOrId("documents")
 	if err != nil {
 		return err
 	}
-	coll := core.NewBaseCollection(eventsName)
+	coll = core.NewBaseCollection(eventsName)
 	coll.Fields.Add(
 		&core.RelationField{Name: "document", CollectionId: docColl.Id, MaxSelect: 1, CascadeDelete: true},
-		&core.SelectField{Name: "event_type", MaxSelect: 1, Values: []string{"imported", "corrected", "validated"}},
+		&core.SelectField{Name: "event_type", MaxSelect: 1, Values: EventTypes},
 		&core.JSONField{Name: "payload"},
 		&core.DateField{Name: "timestamp"},
 		&core.AutodateField{Name: "created", OnCreate: true},
@@ -138,6 +144,31 @@ func ensureEvents(app core.App) error {
 	if err := app.Save(coll); err != nil {
 		return fmt.Errorf("save %s collection: %w", eventsName, err)
 	}
+	return nil
+}
+
+// migrateEventTypes extends the event_type select of an existing collection
+// with the event types the current version emits (e.g. "relocated", added
+// with the consistency tools); the values already present are kept.
+func migrateEventTypes(app core.App, coll *core.Collection) error {
+	field, ok := coll.Fields.GetByName("event_type").(*core.SelectField)
+	if !ok || field == nil {
+		return fmt.Errorf("%s: event_type is not a select field", eventsName)
+	}
+	changed := false
+	for _, v := range EventTypes {
+		if !slices.Contains(field.Values, v) {
+			field.Values = append(field.Values, v)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if err := app.Save(coll); err != nil {
+		return fmt.Errorf("migrate %s event types: %w", eventsName, err)
+	}
+	app.Logger().Info("document_events: event types extended", "values", field.Values)
 	return nil
 }
 

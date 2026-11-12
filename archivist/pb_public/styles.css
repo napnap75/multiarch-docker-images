@@ -215,3 +215,24 @@ h3 { margin: 0 0 .5rem; font-size: .9rem; }
 .diff { font-size: 13px; margin-top: .15rem; word-break: break-all; }
 .diff .k { color: var(--muted-foreground); }
 .diff .arrow { color: var(--muted-foreground); padding: 0 .2rem; }
+
+/* Tools page (arch.md 7.6): tool cards, progress bar, summary grid. */
+.muted { color: var(--muted-foreground); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
+.toolcard { margin-bottom: 1rem; }
+.toolhead { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.toolhead h3 { margin: 0; font-size: 1rem; }
+.tooldesc { margin: .5rem 0 0; color: var(--muted-foreground); }
+.jobcard { margin-bottom: 1rem; }
+.jobhead { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.jobhead h3 { margin: 0; font-size: 1rem; }
+.progress { height: .5rem; border-radius: 999px; background: var(--muted); overflow: hidden; margin: .75rem 0 .35rem; }
+.progressbar { height: 100%; background: var(--status-validated); transition: width .4s ease; }
+.progressinfo { color: var(--muted-foreground); font-size: 12px; margin-bottom: .75rem; word-break: break-all; }
+.summarygrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .75rem; margin: .5rem 0; }
+.summaryitem { display: grid; gap: .1rem; padding: .6rem .75rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--secondary); }
+.summarynum { font-size: 1.25rem; font-weight: 600; }
+.summarylabel { color: var(--muted-foreground); font-size: 12px; }
+.jobdetails { margin-top: .5rem; }
+.jobdetails summary { cursor: pointer; color: var(--muted-foreground); }
+.mono-list { margin: .35rem 0 0 1rem; padding: 0; }

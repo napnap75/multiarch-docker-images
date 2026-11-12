@@ -54,7 +54,7 @@ so that the history of a document remains an immutable, append-only source of tr
 
 Acceptance criteria:
 
-- Given the `document_events` collection does not exist, when the application starts, then it is created with the columns `document` (relation to `documents`, cascade delete with the record), `event_type` (select: `imported`, `corrected`, `validated`), `payload` (JSON), `timestamp` (date), plus the standard PocketBase `created`/`updated` autodate columns.
+- Given the `document_events` collection does not exist, when the application starts, then it is created with the columns `document` (relation to `documents`, cascade delete with the record), `event_type` (select: `imported`, `corrected`, `validated`, `relocated`), `payload` (JSON), `timestamp` (date), plus the standard PocketBase `created`/`updated` autodate columns.
 - Given the collection exists, when the application starts, then its schema is verified and left unchanged.
 - Given any API request that tries to update or delete a `document_events` record, when it is served, then it is rejected by the application's request hooks (`OnRecordUpdateRequest` / `OnRecordDeleteRequest` for the collection, bound to superusers as well). API rules alone cannot enforce this: superusers bypass all API rules, and no rule value blocks everyone (`null` = superusers only, empty string = public).
 - Given a record is appended, when the write succeeds, then it is never modified afterwards by the application itself.
@@ -352,6 +352,40 @@ Acceptance criteria:
 - Given the dashboard, when I pick the add-a-value entry in an enum dropdown, then a modal asks for the value, the `POST /api/archivist/fields/{field}/values` route registers it in the list, and the dropdown offers only the possible values afterwards.
 - Given the route, when it is called with an unknown or non-enum field, an empty value, the reserved dummy `-----`, or the `template` field, then it is refused; the list of `template` follows the configuration alone.
 - Given a startup, when the cleanup pass runs, then every enum value no document uses anymore is removed from the list; the dummy `-----` is kept only when the list would otherwise be empty; removals are logged.
+
+## Epic: Tools (dashboard)
+
+The tools page (arch.md section 7.6): maintenance tasks started by hand from a dedicated page — one card per tool with its description, a run button, live progress while the job runs, and a final summary. One job at a time, cancellable. The first tool reconciles the bucket with the database when files have been moved by hand (e.g. through Nextcloud).
+
+### US-40 — A tools page with run, progress and summary
+
+As the user,
+I want a page listing the maintenance tools, each with a description, a run button, a live progress display and a final summary,
+so that one-off maintenance tasks are visible and controllable instead of hidden scripts.
+
+Acceptance criteria:
+
+- Given the dashboard, when I open the tools page, then each tool appears as a card with its name, its description and a run button.
+- Given a tool is started, when the job runs, then the page shows a progress bar (processed / total objects, the key currently being examined), refreshed by polling, and a cancel button that stops the job at the next object boundary.
+- Given the job ends, when the page refreshes, then it shows a summary with the per-outcome counts plus the detail lists (missing keys, per-object errors), and the panel is restored after a page reload.
+- Given a job is already running, when a tool is started, then the request is refused with an explicit message.
+- Given an unauthenticated visitor, when any tools route is called, then it is refused.
+
+### US-41 — Find the files lost in the bucket
+
+As the user,
+I want a tool that hashes every object of the bucket and reconciles it with the database,
+so that files moved by hand are re-attached to their record and unknown files re-enter the pipeline.
+
+Acceptance criteria:
+
+- Given the tool runs, when it scans, then it lists every object of the bucket except `inbox/`, stream-computes each object's sha256 and looks up a `documents` record by hash.
+- Given an object whose record's `file_key` equals its key, when it is scanned, then nothing happens (`ok`).
+- Given an object whose record's `file_key` no longer exists in the bucket, when it is scanned, then the record's `file_key` is corrected to the found key (the object itself never moves), a `relocated` event is appended with the `file_key` diff, and the correction is refused when another record already references the key (`corrected`).
+- Given an object whose record's `file_key` still exists elsewhere, when it is scanned, then the stray copy is left in place and reported (`duplicates`).
+- Given an object no record knows, when it is scanned, then it is moved to `inbox/` (conflict suffix on name collision) so the poller processes it automatically (`moved`).
+- Given a record whose `file_key` exists nowhere in the bucket and is not an interrupted filing under `inbox/`, when the scan ends, then it is reported in the summary (`missing`) with its key, never acted upon.
+- Given a per-object failure (S3 error, lookup error), when it occurs, then it is logged, counted in the summary and listed, and the scan continues with the next object.
 
 ## Stories deferred to later epics
 
