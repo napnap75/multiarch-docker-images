@@ -3,9 +3,10 @@
 // The suite is one narrative: it starts a disposable Garage and the image
 // under test, then follows documents through the whole pipeline - import,
 // duplicate, pending, correction, validation, append-only, deletion, recovery,
-// restart, dashboard routes (config metadata, PDF proxy, dry-run, full
-// correction). It is a regression gate for dependency upgrades (PocketBase,
-// minio-go, ledongthuc/pdf, expr, Garage), not an acceptance proof.
+// restart, dashboard routes (config metadata, enum value registration, PDF
+// proxy, dry-run, full correction). It is a regression gate for dependency
+// upgrades (PocketBase, minio-go, ledongthuc/pdf, expr, Garage), not an
+// acceptance proof.
 //
 // Run it from the archivist/ directory against an already built image:
 //
@@ -108,16 +109,16 @@ func startGarage() error {
 		return err
 	}
 	toml := fmt.Sprintf(`metadata_dir = "/tmp/meta"
-	data_dir = "/tmp/data"
-	replication_factor = 1
-	rpc_bind_addr = "[::]:3901"
-	rpc_public_addr = "127.0.0.1:3901"
-	rpc_secret = "%s"
-	bootstrap_peers = []
-	[s3_api]
-	s3_region = "garage"
-	api_bind_addr = "[::]:3900"
-	root_domain = ".s3.garage"
+data_dir = "/tmp/data"
+replication_factor = 1
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+rpc_secret = "%s"
+bootstrap_peers = []
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.garage"
 `, hex.EncodeToString(secret))
 	tomlPath := filepath.Join(dir, "garage.toml")
 	if err := os.WriteFile(tomlPath, []byte(toml), 0o644); err != nil {
@@ -138,7 +139,8 @@ func startGarage() error {
 	status, _ := garage("status")
 	nodeID := firstHexToken(status)
 	if nodeID == "" {
-		return fmt.Errorf("no node id in garage status:\n%s", status)
+		return fmt.Errorf("no node id in garage status:
+%s", status)
 	}
 	if _, err := garage("layout", "assign", "-z", "dc1", "-c", "1G", nodeID); err != nil {
 		return err
@@ -157,7 +159,8 @@ func startGarage() error {
 	s3KeyID = lineValue(keyOut, "Key ID:")
 	s3Secret = lineValue(keyOut, "Secret key:")
 	if s3KeyID == "" || s3Secret == "" {
-		return fmt.Errorf("cannot parse garage key output:\n%s", keyOut)
+		return fmt.Errorf("cannot parse garage key output:
+%s", keyOut)
 	}
 	if _, err := garage("bucket", "allow", "--read", "--write", bucket, "--key", bucket); err != nil {
 		return err
@@ -215,7 +218,8 @@ func startApp(image string) error {
 	}
 	if err := retry(60*time.Second, checkHealth); err != nil {
 		if out, _ := run("docker", "logs", appC); out != "" {
-			return fmt.Errorf("app never became healthy; logs:\n%s", out)
+			return fmt.Errorf("app never became healthy; logs:
+%s", out)
 		}
 		return err
 	}
@@ -290,7 +294,8 @@ var hexRe = regexp.MustCompile(`^[0-9a-f]{8,}$`)
 
 // firstHexToken extracts the node id from garage status output.
 func firstHexToken(s string) string {
-	for _, line := range strings.Split(s, "\n") {
+	for _, line := range strings.Split(s, "
+") {
 		fields := strings.Fields(line)
 		if len(fields) > 0 && hexRe.MatchString(fields[0]) {
 			return fields[0]
@@ -300,13 +305,24 @@ func firstHexToken(s string) string {
 }
 
 func lineValue(s, prefix string) string {
-	for _, line := range strings.Split(s, "\n") {
+	for _, line := range strings.Split(s, "
+") {
 		t := strings.TrimSpace(line)
 		if strings.HasPrefix(t, prefix) {
 			return strings.TrimSpace(strings.TrimPrefix(t, prefix))
 		}
 	}
 	return ""
+}
+
+// containsAny reports whether want appears in the JSON-decoded list.
+func containsAny(list []any, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 // --- PocketBase and S3 clients ------------------------------------------
@@ -460,32 +476,62 @@ func s3Exists(t *testing.T, key string) bool {
 // extraction of the application works.
 func makePDF(lines []string) []byte {
 	var content strings.Builder
-	content.WriteString("BT /F1 12 Tf 72 720 Td\n")
+	content.WriteString("BT /F1 12 Tf 72 720 Td
+")
 	for _, l := range lines {
-		content.WriteString("(" + pdfEscape(l) + ") Tj 0 -18 Td\n")
+		content.WriteString("(" + pdfEscape(l) + ") Tj 0 -18 Td
+")
 	}
 	content.WriteString("ET")
-	stream := content.String() + "\n"
+	stream := content.String() + "
+"
 
 	var buf bytes.Buffer
-	buf.WriteString("%PDF-1.4\n")
+	buf.WriteString("%PDF-1.4
+")
 	off := func() int { return buf.Len() }
 	o1 := off()
-	buf.WriteString("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+	buf.WriteString("1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+")
 	o2 := off()
-	buf.WriteString("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n")
+	buf.WriteString("2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+")
 	o3 := off()
-	buf.WriteString("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n")
+	buf.WriteString("3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+")
 	o4 := off()
-	buf.WriteString(fmt.Sprintf("4 0 obj\n<< /Length %d >>\nstream\n%sendstream\nendobj\n", len(stream), stream))
+	buf.WriteString(fmt.Sprintf("4 0 obj
+<< /Length %d >>
+stream
+%sendstream
+endobj
+", len(stream), stream))
 	o5 := off()
-	buf.WriteString("5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n")
+	buf.WriteString("5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+")
 	xref := off()
-	buf.WriteString("xref\n0 6\n0000000000 65535 f \n")
+	buf.WriteString("xref
+0 6
+0000000000 65535 f 
+")
 	for _, o := range []int{o1, o2, o3, o4, o5} {
-		buf.WriteString(fmt.Sprintf("%010d 00000 n \n", o))
+		buf.WriteString(fmt.Sprintf("%010d 00000 n 
+", o))
 	}
-	buf.WriteString(fmt.Sprintf("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", xref))
+	buf.WriteString(fmt.Sprintf("trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+%d
+%%%%EOF
+", xref))
 	return buf.Bytes()
 }
 
@@ -512,7 +558,7 @@ func putPDF(t *testing.T, key string, lines ...string) string {
 var testConfigRaw = `
 {
   "fields": [
-    { "name": "template", "type": "text" },
+    { "name": "template", "type": "enum" },
     { "name": "emittingCompany", "type": "text", "mandatory": true },
     { "name": "documentType", "type": "text", "mandatory": true },
     { "name": "emissionDate", "type": "date", "mandatory": true },
@@ -843,7 +889,8 @@ func TestE2E(t *testing.T) {
 	t.Run("restart: state survives a container restart", func(t *testing.T) {
 		before := listRecords(t, "documents", "", "")
 		if out, err := run("docker", "restart", appC); err != nil {
-			t.Fatalf("docker restart: %v\n%s", err, out)
+			t.Fatalf("docker restart: %v
+%s", err, out)
 		}
 		if err := retry(60*time.Second, checkHealth); err != nil {
 			t.Fatalf("app never came back: %v", err)
@@ -857,9 +904,10 @@ func TestE2E(t *testing.T) {
 		}
 	})
 
-	// 11. Dashboard config (US-31): the metadata route serves the declared
-	// fields, the enum vocabularies computed from the rule constants and
-	// the template names; unauthenticated requests are refused.
+	// 11. Dashboard config (US-31, US-37): the metadata route serves the
+	// declared fields, the official enum vocabularies read from the
+	// collection schema (the template field follows the configuration)
+	// and the template names; unauthenticated requests are refused.
 	t.Run("config: metadata route serves fields, enums and templates", func(t *testing.T) {
 		status, out := call(t, http.MethodGet, "/api/archivist/config", nil)
 		if status != 200 {
@@ -887,6 +935,10 @@ func TestE2E(t *testing.T) {
 		vocab, _ := enums["statementType"].([]any)
 		if len(vocab) != 1 || vocab[0] != "bank" {
 			t.Fatalf("statementType vocabulary: %v", enums)
+		}
+		tplVocab, _ := enums["template"].([]any)
+		if len(tplVocab) != 2 || tplVocab[0] != "bank_statement" || tplVocab[1] != "default" {
+			t.Fatalf("template vocabulary must follow the configuration: %v", enums)
 		}
 		templates, _ := out["templates"].([]any)
 		wantTpl := map[string]bool{"bank_statement": false, "default": false}
@@ -1135,6 +1187,85 @@ func TestE2E(t *testing.T) {
 			if r.StatusCode != 200 || len(body) == 0 {
 				t.Fatalf("asset %s: status %d, %d bytes", asset, r.StatusCode, len(body))
 			}
+		}
+	})
+
+	// 16. Enum lifecycle (US-37): the dashboard add-value route extends
+	// the official list, and the startup cleanup drops the values no
+	// document uses anymore.
+	t.Run("enums: add-value route extends the list, cleanup drops unused values", func(t *testing.T) {
+		status, out := call(t, http.MethodGet, "/api/archivist/config", nil)
+		if status != 200 {
+			t.Fatalf("config route: status %d: %v", status, out)
+		}
+		enums, _ := out["enums"].(map[string]any)
+		vocab, _ := enums["statementType"].([]any)
+		if len(vocab) != 1 || vocab[0] != "bank" {
+			t.Fatalf("statementType vocabulary before: %v", enums)
+		}
+
+		status, out = call(t, http.MethodPost, "/api/archivist/fields/statementType/values",
+			map[string]any{"value": "savings"})
+		if status != 200 {
+			t.Fatalf("add-value route: status %d: %v", status, out)
+		}
+		status, out = call(t, http.MethodGet, "/api/archivist/config", nil)
+		if status != 200 {
+			t.Fatalf("config route: status %d: %v", status, out)
+		}
+		enums, _ = out["enums"].(map[string]any)
+		vocab, _ = enums["statementType"].([]any)
+		if len(vocab) != 2 || !containsAny(vocab, "savings") || !containsAny(vocab, "bank") {
+			t.Fatalf("statementType vocabulary after add: %v", enums)
+		}
+
+		// Refusals: unknown field, empty value, reserved placeholder,
+		// template field, unauthenticated.
+		if status, _ = call(t, http.MethodPost, "/api/archivist/fields/nope/values",
+			map[string]any{"value": "x"}); status != 404 {
+			t.Fatalf("unknown field must be refused with 404, got %d", status)
+		}
+		if status, _ = call(t, http.MethodPost, "/api/archivist/fields/statementType/values",
+			map[string]any{"value": "   "}); status != 400 {
+			t.Fatalf("empty value must be refused with 400, got %d", status)
+		}
+		if status, _ = call(t, http.MethodPost, "/api/archivist/fields/statementType/values",
+			map[string]any{"value": "-----"}); status != 400 {
+			t.Fatalf("the placeholder is reserved, got %d", status)
+		}
+		if status, _ = call(t, http.MethodPost, "/api/archivist/fields/template/values",
+			map[string]any{"value": "custom"}); status != 400 {
+			t.Fatalf("the template vocabulary follows the configuration, got %d", status)
+		}
+		if status, _ = unauth(t, http.MethodPost, "/api/archivist/fields/statementType/values",
+			map[string]any{"value": "x"}); status != 403 {
+			t.Fatalf("add-value without superuser auth: want 403, got %d", status)
+		}
+
+		// Restart: the startup cleanup drops "savings" - no document uses
+		// it - and keeps "bank".
+		if out, err := run("docker", "restart", appC); err != nil {
+			t.Fatalf("docker restart: %v
+%s", err, out)
+		}
+		if err := retry(60*time.Second, checkHealth); err != nil {
+			t.Fatalf("app never came back: %v", err)
+		}
+		if err := authenticate(); err != nil {
+			t.Fatalf("superuser reauthentication after restart: %v", err)
+		}
+		status, out = call(t, http.MethodGet, "/api/archivist/config", nil)
+		if status != 200 {
+			t.Fatalf("config route: status %d: %v", status, out)
+		}
+		enums, _ = out["enums"].(map[string]any)
+		vocab, _ = enums["statementType"].([]any)
+		if len(vocab) != 1 || vocab[0] != "bank" {
+			t.Fatalf("cleanup must drop the unused values: %v", enums)
+		}
+		tplVocab, _ := enums["template"].([]any)
+		if len(tplVocab) != 2 || tplVocab[0] != "bank_statement" || tplVocab[1] != "default" {
+			t.Fatalf("template vocabulary must follow the configuration: %v", enums)
 		}
 	})
 }
