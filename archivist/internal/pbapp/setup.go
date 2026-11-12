@@ -23,104 +23,136 @@ func Setup(app core.App, adminEmail, adminPassword string, cfg *config.Config) e
 	if err := ensureSuperuser(app, adminEmail, adminPassword); err != nil {
 		return err
 	}
-	// Startup cleanup of the official enum value lists (enums.go).
+	// Startup cleanup of the official enum value lists (US-37, enums.go).
 	CleanupEnumValues(app, cfg)
 	return nil
 }
 
-// ensureDocuments creates or checks the documents collection: status,
-// file_key, then one column per declared field (US-03). The migration
-// policy is explicit refusal: any deviation from the startup shape makes
-// the application refuse to start rather than guess.
 func ensureDocuments(app core.App, cfg *config.Config) error {
 	coll, err := app.FindCollectionByNameOrId("documents")
-	created := false
 	if err != nil {
+		// First start: create the collection with its fixed columns (US-03).
 		coll = core.NewBaseCollection("documents")
-		created = true
 	}
 
-	// Fixed schema: status and file_key (US-03).
-	status := coll.Fields.GetByName("status")
-	if status == nil {
-		status = &core.SelectField{Name: "status", MaxSelect: 1, Values: []string{"pending", "processed", "validated"}}
-		coll.Fields.Add(status)
-	} else if status, ok := status.(*core.SelectField); !ok {
-		return errors.New("field status exists with a different type; refusing to start")
-	}
+	// Fixed columns (re)declared on every start, ordering preserved, plus
+	// the standard PocketBase created/updated autodate columns for
+	// convenience in the admin UI (US-03).
+	coll.Fields.RemoveByName("sha256")
+	coll.Fields.RemoveByName("file_key")
+	coll.Fields.RemoveByName("pages")
+	coll.Fields.RemoveByName("status")
+	coll.Fields.RemoveByName("created")
+	coll.Fields.RemoveByName("updated")
+	coll.Fields.Add(
+		&core.TextField{Name: "sha256"},
+		&core.TextField{Name: "file_key"},
+		&core.JSONField{Name: "pages"},
+		&core.SelectField{Name: "status", MaxSelect: 1, Values: []string{"pending", "processed", "validated"}},
+		&core.AutodateField{Name: "created", OnCreate: true},
+		&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},
+	)
 
-	fileKey := coll.Fields.GetByName("file_key")
-	if fileKey == nil {
-		fileKey = &core.TextField{Name: "file_key"}
-		coll.Fields.Add(fileKey)
-	} else if _, ok := fileKey.(*core.TextField); !ok {
-		return errors.New("field file_key exists with a different type; refusing to start")
-	}
-
-	// One column per declared field, with the type mapping US-03.
+	// One column per declared field, mapped from the field type (US-03).
 	for _, f := range cfg.FieldList {
 		var newField core.Field
 		switch f.Type {
-		case "string":
+		case "text":
 			newField = &core.TextField{Name: f.Name}
+		case "number":
+			newField = &core.NumberField{Name: f.Name}
 		case "date":
 			newField = &core.DateField{Name: f.Name}
 		case "boolean":
 			newField = &core.BoolField{Name: f.Name}
 		case "enum":
-			// Official select fields: the application manages the value
-			// lists itself (enums.go) - creation with the placeholder,
-			// values added as documents are processed or from the
-			// dashboard, cleanup at startup.
+			// Official select fields (US-37): the application manages the
+			// value lists itself (enums.go) - creation with the dummy
+			// placeholder, or with the configured template names for the
+			// special "template" field; values added as documents are
+			// processed or from the dashboard; unused values cleaned up
+			// at startup.
 			newField = &core.SelectField{Name: f.Name, MaxSelect: 1, Values: enumVocabulary(cfg, f.Name)}
-		default:
-			return fmt.Errorf("field %s has unsupported type %s", f.Name, f.Type)
 		}
-		existing := coll.Fields.GetByName(f.Name)
-		if existing == nil {
-			coll.Fields.Add(newField)
-		} else if existing.Type() != newField.Type() {
-			return fmt.Errorf("field %s changed type (%s to %s); refusing to start", f.Name, existing.Type(), newField.Type())
+		if existing := coll.Fields.GetByName(f.Name); existing != nil {
+			if existing.Type() != newField.Type() {
+				return fmt.Errorf("field %s changed type from %s to %s: refusing to start",
+					f.Name, existing.Type(), newField.Type())
+			}
+			continue
+		}
+		coll.Fields.Add(newField)
+	}
+
+	// Fields removed from the config are removed from the schema; values are
+	// lost by design (they remain in the event snapshots).
+	for _, f := range coll.Fields {
+		if f.GetSystem() {
+			continue
+		}
+		if _, declared := cfg.Fields[f.GetName()]; !declared && !isFixed(f.GetName()) {
+			app.Logger().Warn("documents: column removed", "field", f.GetName(), "reason", "removed from config")
+			coll.Fields.RemoveByName(f.GetName())
 		}
 	}
 
-	if created {
-		return app.Save(coll)
+	if err := app.Save(coll); err != nil {
+		return fmt.Errorf("save documents collection: %w", err)
+	}
+	if _, err := app.DB().NewQuery(
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_sha256 ON documents (sha256)").Execute(); err != nil {
+		return fmt.Errorf("sha256 unique index: %w", err)
 	}
 	return nil
 }
 
-// ensureEvents creates the append-only events collection (US-04).
+func isFixed(name string) bool {
+	for _, f := range []string{"sha256", "file_key", "pages", "status", "created", "updated"} {
+		if f == name {
+			return true
+		}
+	}
+	return false
+}
+
 func ensureEvents(app core.App) error {
 	if _, err := app.FindCollectionByNameOrId(eventsName); err == nil {
 		return nil
 	}
-	coll := core.NewBaseCollection(eventsName)
-	for _, field := range []core.Field{
-		&core.TextField{Name: "document"},
-		&core.TextField{Name: "event_type"},
-		&core.JSONField{Name: "payload"},
-		&core.AutodateField{Name: "timestamp", OnCreate: true},
-	} {
-		coll.Fields.Add(field)
+	docColl, err := app.FindCollectionByNameOrId("documents")
+	if err != nil {
+		return err
 	}
-	return app.Save(coll)
+	coll := core.NewBaseCollection(eventsName)
+	coll.Fields.Add(
+		&core.RelationField{Name: "document", CollectionId: docColl.Id, MaxSelect: 1, CascadeDelete: true},
+		&core.SelectField{Name: "event_type", MaxSelect: 1, Values: []string{"imported", "corrected", "validated"}},
+		&core.JSONField{Name: "payload"},
+		&core.DateField{Name: "timestamp"},
+		&core.AutodateField{Name: "created", OnCreate: true},
+		&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},
+	)
+	// Append-only (US-04): API rules locked to superusers are not enough,
+	// the standard admin UI uses a superuser; the request hooks in
+	// BindHooks reject updates and deletes for everyone.
+	if err := app.Save(coll); err != nil {
+		return fmt.Errorf("save %s collection: %w", eventsName, err)
+	}
+	return nil
 }
 
-// ensureSuperuser upserts the administrator account (US-01).
 func ensureSuperuser(app core.App, email, password string) error {
 	superusers, err := app.FindCollectionByNameOrId(core.CollectionNameSuperusers)
 	if err != nil {
 		return err
 	}
-	existing, err := app.FindAuthRecordByEmail(superusers, email)
-	if err == nil && existing != nil {
-		return nil
+	rec, err := app.FindFirstRecordByFilter(superusers.Name, "email = {:e}", map[string]any{"e": email})
+	if err != nil || rec == nil {
+		rec = core.NewRecord(superusers)
+		rec.SetEmail(email)
 	}
-	record := core.NewRecord(superusers)
-	record.Email = email
-	if err := record.SetPassword(password); err != nil {
-		return err
-	}
-	return app.Save(record)
+	rec.SetPassword(password)
+	return app.Save(rec)
 }
+
+var errAppendOnly = errors.New("document_events is append-only: update and delete are refused")

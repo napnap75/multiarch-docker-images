@@ -9,71 +9,74 @@ import (
 	"github.com/napnap75/archivist/internal/config"
 )
 
-func enumTestCfg(t *testing.T) *config.Config {
-	t.Helper()
-	tpl, err := config.CompileTemplate("default", "Divers/{documentType}.pdf")
-	if err != nil {
-		t.Fatalf("compile template: %v", err)
-	}
-	fields := []config.Field{
-		{Name: "template", Type: "enum"},
-		{Name: "documentType", Type: "enum"},
-	}
-	return &config.Config{
-		Fields: map[string]config.Field{
-			"template":     fields[0],
-			"documentType": fields[1],
-		},
-		FieldList: fields,
-		Templates: map[string]*config.CompiledTemplate{"default": tpl},
-	}
-}
-
-func enumTestApp(t *testing.T, cfg *config.Config) core.App {
-	t.Helper()
+// TestEnsureDocumentsCreatesSelectEnums replaces the former text-storage
+// workaround: declared enums are now official select fields (US-03, US-37),
+// created with the single dummy placeholder.
+func TestEnsureDocumentsCreatesSelectEnums(t *testing.T) {
 	app := pocketbase.NewWithConfig(pocketbase.Config{DefaultDataDir: t.TempDir()})
 	if err := app.Bootstrap(); err != nil {
 		t.Fatalf("bootstrap PocketBase: %v", err)
 	}
+	defer app.ClearBootstrap()
+
+	fields := []config.Field{
+		{Name: "documentType", Type: "enum"},
+		{Name: "bankAccount", Type: "enum"},
+	}
+	cfg := &config.Config{
+		Fields: map[string]config.Field{
+			"documentType": fields[0],
+			"bankAccount":  fields[1],
+		},
+		FieldList: fields,
+	}
 	if err := Setup(app, "admin@example.net", "password-123456", cfg); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	return app
-}
-
-// US-03: declared enums become official select fields; the "template"
-// field starts with the configured template names, the others with the
-// placeholder.
-func TestEnsureDocumentsCreatesSelectEnums(t *testing.T) {
-	cfg := enumTestCfg(t)
-	app := enumTestApp(t, cfg)
-	defer app.ClearBootstrap()
 
 	coll, err := app.FindCollectionByNameOrId("documents")
 	if err != nil {
 		t.Fatalf("find documents collection: %v", err)
 	}
-	for name, want := range map[string][]string{
-		"template":     {"default"},
-		"documentType": {DummyEnumValue},
-	} {
+	for _, name := range []string{"documentType", "bankAccount"} {
 		field, ok := coll.Fields.GetByName(name).(*core.SelectField)
 		if !ok || field == nil {
 			t.Fatalf("field %q is not a select field", name)
 		}
-		if !reflect.DeepEqual(field.Values, want) {
-			t.Errorf("field %q values = %v, want %v", name, field.Values, want)
+		if !reflect.DeepEqual(field.Values, []string{DummyEnumValue}) {
+			t.Errorf("field %q values = %v, want [%s]", name, field.Values, DummyEnumValue)
 		}
 	}
 }
 
-// US-37: the startup cleanup keeps the values documents use, drops the
-// others, keeps the placeholder only while alone, and forces the template
-// list to the configuration.
+// TestCleanupEnumValues covers the startup cleanup (US-37): a value kept
+// because a document uses it, an unused value dropped, the dummy
+// placeholder kept only while alone, and the template field forced to the
+// configured template names.
 func TestCleanupEnumValues(t *testing.T) {
-	cfg := enumTestCfg(t)
-	app := enumTestApp(t, cfg)
+	app := pocketbase.NewWithConfig(pocketbase.Config{DefaultDataDir: t.TempDir()})
+	if err := app.Bootstrap(); err != nil {
+		t.Fatalf("bootstrap PocketBase: %v", err)
+	}
 	defer app.ClearBootstrap()
+
+	fields := []config.Field{
+		{Name: "documentType", Type: "enum"},
+		{Name: "template", Type: "enum"},
+	}
+	cfg := &config.Config{
+		Fields: map[string]config.Field{
+			"documentType": fields[0],
+			"template":     fields[1],
+		},
+		FieldList: fields,
+		Templates: map[string]*config.CompiledTemplate{
+			"default": {},
+		},
+	}
+	if err := Setup(app, "admin@example.net", "password-123456", cfg); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
 
 	if err := AddEnumValue(app, "documentType", "Facture"); err != nil {
 		t.Fatalf("add enum value: %v", err)
