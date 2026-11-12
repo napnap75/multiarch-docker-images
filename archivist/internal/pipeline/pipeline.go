@@ -3,6 +3,7 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,6 +24,18 @@ type pollState struct {
 }
 
 var stable = map[string]pollState{}
+
+// nonPDF remembers the objects already found not to be PDFs (key -> ETag at
+// the check): they are left in place, so the pass skips them without
+// re-downloading until their content changes.
+var nonPDF = map[string]string{}
+
+var pdfMagic = []byte("%PDF-")
+
+// isPDF reports whether the content carries the PDF header.
+func isPDF(data []byte) bool {
+	return bytes.HasPrefix(data, pdfMagic)
+}
 
 func RunPoll(app core.App, cfg *config.Config, s3 *storage.Client) {
 	ctx := context.Background()
@@ -48,17 +61,31 @@ func RunPoll(app core.App, cfg *config.Config, s3 *storage.Client) {
 			continue // first sighting, or still uploading: wait for stability
 		}
 		delete(stable, o.Key)
-		if err := processOne(app, cfg, s3, ctx, o.Key); err != nil {
+		if err := processOne(app, cfg, s3, ctx, o.Key, o.ETag); err != nil {
 			app.Logger().Error("poll: processing failed", "key", o.Key, "error", err)
 		}
 	}
 }
 
-func processOne(app core.App, cfg *config.Config, s3 *storage.Client, ctx context.Context, key string) error {
+func processOne(app core.App, cfg *config.Config, s3 *storage.Client, ctx context.Context, key, etag string) error {
+	// Already found not to be a PDF and unchanged since: left in place,
+	// nothing to do.
+	if nonPDF[key] == etag {
+		return nil
+	}
+
 	// US-12: download in memory, sha256 on the fly.
 	data, hash, err := s3.Get(ctx, key)
 	if err != nil {
 		return fmt.Errorf("download: %w", err)
+	}
+
+	// Not a PDF: the object is left as-is in inbox/, never imported — no
+	// record, no event; the skip is logged once per unchanged content.
+	if !isPDF(data) {
+		nonPDF[key] = etag
+		app.Logger().Warn("inbox: object is not a PDF, left in place", "key", key)
+		return nil
 	}
 
 	// US-12: duplicate rejection.

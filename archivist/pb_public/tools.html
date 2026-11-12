@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fr" class="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Archivist — Outils</title>
+<link rel="stylesheet" href="/styles.css">
+<script>(function(){try{var t=localStorage.getItem("archivist.theme");var d=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.className=d?"dark":"light";}catch(e){document.documentElement.className="light";}})();</script>
+</head>
+<body class="archivist-dashboard">
+<header class="topbar">
+  <div class="wrap">
+    <h1><a href="/">← Archivist</a></h1>
+    <nav>
+      <a href="/_/">Admin</a>
+      <button id="themeBtn" type="button" class="btn secondary">Thème</button>
+    </nav>
+  </div>
+</header>
+<main class="wrap">
+  <h2>Outils</h2>
+  <p class="muted">Tâches de maintenance lancées à la demande. Une seule tâche à la fois.</p>
+  <div id="tools"></div>
+  <div id="jobpanel" hidden></div>
+</main>
+<script src="/common.js"></script>
+<script src="/tools.js"></script>
+</body>
+</html>

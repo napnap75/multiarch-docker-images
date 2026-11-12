@@ -10,6 +10,7 @@ import (
 	"github.com/napnap75/archivist/internal/pbapp"
 	"github.com/napnap75/archivist/internal/pipeline"
 	"github.com/napnap75/archivist/internal/storage"
+	"github.com/napnap75/archivist/internal/tools"
 	"github.com/spf13/pflag"
 )
 
@@ -125,6 +126,8 @@ func main() {
 	pbapp.BindHooks(app, cfg, s3)
 	// US-31 / US-35 / US-36: the review-dashboard routes (config, pdf, dry-run, correct).
 	pbapp.BindRoutes(app, cfg, s3)
+	// US-40 / US-41: the tools-page routes (list, run, progress, cancel).
+	tools.BindRoutes(app, s3)
 
 	// Manual poll pass: a superuser-only route used by the E2E gate and the
 	// operator to trigger a pass without waiting for the cron (arch.md 10).

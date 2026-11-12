@@ -61,6 +61,39 @@ type InboxObject struct {
 	ETag string
 }
 
+// ListAll lists every object of the bucket, all prefixes together. The
+// inbox/ prefix is excluded: it is the poller's drop zone (US-10), the
+// consistency tools never scan it.
+func (c *Client) ListAll(ctx context.Context) ([]InboxObject, error) {
+	var out []InboxObject
+	for obj := range c.mc.ListObjects(ctx, c.Bucket, minio.ListObjectsOptions{Recursive: true}) {
+		if obj.Err != nil {
+			return nil, obj.Err
+		}
+		if strings.HasSuffix(obj.Key, "/") || strings.HasPrefix(obj.Key, "inbox/") {
+			continue
+		}
+		out = append(out, InboxObject{Key: obj.Key, Size: obj.Size, ETag: obj.ETag})
+	}
+	return out, nil
+}
+
+// Hash streams the object and computes its sha256 without holding the
+// content in memory: the consistency tools hash every object of the bucket
+// and never need the bytes themselves.
+func (c *Client) Hash(ctx context.Context, key string) (string, error) {
+	obj, err := c.mc.GetObject(ctx, c.Bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return "", err
+	}
+	defer obj.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, obj); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 // ListInbox lists the objects under the inbox/ prefix (US-10).
 func (c *Client) ListInbox(ctx context.Context) ([]InboxObject, error) {
 	var out []InboxObject
@@ -79,17 +112,21 @@ func (c *Client) ListInbox(ctx context.Context) ([]InboxObject, error) {
 // Get downloads the object into memory and computes its sha256 on the fly
 // (US-12: streamed in memory, no disk writes).
 func (c *Client) Get(ctx context.Context, key string) ([]byte, string, error) {
-	obj, err := c.mc.GetObject(ctx, c.Bucket, key, minio.GetObjectOptions{})
-	if err != nil {
-		return nil, "", err
-	}
-	defer obj.Close()
-	data, err := io.ReadAll(obj)
+	data, err := c.getRaw(ctx, key)
 	if err != nil {
 		return nil, "", err
 	}
 	sum := sha256.Sum256(data)
 	return data, hex.EncodeToString(sum[:]), nil
+}
+
+func (c *Client) getRaw(ctx context.Context, key string) ([]byte, error) {
+	obj, err := c.mc.GetObject(ctx, c.Bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer obj.Close()
+	return io.ReadAll(obj)
 }
 
 func (c *Client) Exists(ctx context.Context, key string) bool {

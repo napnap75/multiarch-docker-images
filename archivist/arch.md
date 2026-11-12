@@ -56,13 +56,13 @@ One row per processed PDF file:
 The append-only `document_events` collection is the single source of truth for a document's history; no history is stored on the `documents` record itself.
 
 ### `document_events`
-Append-only history: `document`, `event_type` (`imported`, `corrected`, `validated`), `payload` as JSON, `timestamp`, plus the standard `created`/`updated` autodate columns; the event's business timestamp is `timestamp`, mirrored in the payload.
+Append-only history: `document`, `event_type` (`imported`, `corrected`, `validated`, `relocated`), `payload` as JSON, `timestamp`, plus the standard `created`/`updated` autodate columns; the event's business timestamp is `timestamp`, mirrored in the payload.
 
 The payload is self-contained: each event carries its own type, its own timestamp and the document state before and after, so a document's full history is reconstructed from this collection alone; the snapshots are stored as diffs — each `before`/`after` carries only the fields the event changes. All dates are RFC 3339; all S3 keys are complete, prefix included.
 
 Common payload keys:
 
-- `event_type`: `imported` | `corrected` | `validated`
+- `event_type`: `imported` | `corrected` | `validated` | `relocated`
 - `timestamp`: RFC 3339 date of the event
 - `before` / `after`: the event's diff, never full snapshots — a key appears on a side only when its value changes in the event: same value on both sides, it is omitted; absent from `before` and present in `after`, the field was added (every `after` key at import, since nothing existed before); present in `before` and absent from `after`, the field was deleted. `file_key` (the S3 key, unified with the `documents` record field) follows the same rule and appears only when the object actually moves; at import the status does not exist before, so `before` carries no `status`. A missing key means the value is unknown, there is no `null`
 
@@ -157,6 +157,21 @@ The diff is derived by comparing the two snapshots: a field present in `before` 
 }
 ```
 
+`relocated` — emitted by the consistency tools (section 7.6) when an object of the bucket was moved outside the application: the record's `file_key` is corrected to the key where the object was found (the object itself never moves), and the diff carries `file_key` alone:
+
+```json
+{
+  "event_type": "relocated",
+  "timestamp": "2026-02-01T10:12:44Z",
+  "before": {
+    "file_key": "files/BRED/Decembre 2025_Relevé de compte_Compte Thomas.pdf"
+  },
+  "after": {
+    "file_key": "files/BRED/Archives/Decembre 2025_Relevé de compte_Compte Thomas.pdf"
+  }
+}
+```
+
 
 ## 5. Configuration File (JSONC)
 
@@ -217,7 +232,7 @@ Validation on load: JSON schema, regex compilation, `expr` expression compilatio
 Executed by the PocketBase cron job (configurable interval, e.g. every minute):
 
 1. **Poll**: list objects in `inbox/`; an object is a candidate only if no `documents` record references its key yet, and its size and ETag are stable across two consecutive polls (write-completion wait). The same pass also picks up interrupted filings: any `documents` record whose `file_key` is still under `inbox/` (a filing that was interrupted between record creation and the physical move) is completed as described below.
-2. **Download**: fetch the object into memory (streamed), no disk writes. The sha256 is computed during download; if a `documents` record with the same hash already exists, the object is a duplicate: the `inbox/` key is deleted (a no-data-loss case — the original with the same content stays filed), a message is logged via the PocketBase logger (section 9), and processing stops there. By design, no `document_events` entry is recorded: the duplicate is not a document of its own, and the trace lives in the PocketBase logs only.
+2. **Download**: fetch the object into memory (streamed), no disk writes. The sha256 is computed during download; if a `documents` record with the same hash already exists, the object is a duplicate: the `inbox/` key is deleted (a no-data-loss case — the original with the same content stays filed), a message is logged via the PocketBase logger (section 9), and processing stops there. By design, no `document_events` entry is recorded: the duplicate is not a document of its own, and the trace lives in the PocketBase logs only. An object that is not a PDF (its content does not start with the `%PDF-` header) is left as-is in `inbox/`: it is never imported, gets no record and no event; the skip is logged at Warn level once per unchanged content (the object is not re-downloaded on later passes until its ETag changes) and processing stops there.
 3. **Extraction**: page-by-page text (one entry per page, for rule evaluation and the FTS index) via `ledongthuc/pdf`, including headers and footers
 4. **Rule evaluation**: rules evaluated in order against the document pages and the fields set so far; full evaluation log written to the PocketBase logger at Debug level (section 9; the same trace feeds the built-in dry-run mode for debugging from the dashboard).
 5. **Validation**: a result is valid if and only if: all rules have been processed with no error, all mandatory fields are identified, the selected template exists in the configuration, and the naming template evaluated with no error. Otherwise: route directly to `pending/`.
@@ -230,7 +245,7 @@ When the bucket is versioned, any deletion creates a delete marker and the data 
 
 ## 7. Review Dashboard
 
-The review dashboard is a static frontend — plain HTML/CSS/JS files, no build toolchain, vendored dependencies only (no CDN: the application is 100% offline) — served by PocketBase's built-in static file serving from the `pb_public/` directory shipped in the image next to `pb_data/`. Two pages: the document list and the document detail. The browser persists everything through the standard PocketBase API, whose request hooks already carry the correction, validation and deletion semantics (US-22 / US-23 / US-24): the dashboard never implements its own save path. Only what the standard API cannot express goes through the dedicated JSON routes of section 7.3.
+The review dashboard is a static frontend — plain HTML/CSS/JS files, no build toolchain, vendored dependencies only (no CDN: the application is 100% offline) — served by PocketBase's built-in static file serving from the `pb_public/` directory shipped in the image next to `pb_data/`. Three pages: the document list, the document detail, and the tools page (section 7.6). The browser persists everything through the standard PocketBase API, whose request hooks already carry the correction, validation and deletion semantics (US-22 / US-23 / US-24): the dashboard never implements its own save path. Only what the standard API cannot express goes through the dedicated JSON routes of section 7.3.
 
 ### 7.1 Document list (US-32 / US-33)
 
@@ -278,6 +293,31 @@ The dashboard's visual design takes Beszel (https://github.com/henrygd/beszel) a
 - Status colors, the only domain additions to Beszel's tokens: `pending` maps to a warm badge on `--accent`, `validated` to a green from Beszel's chart scale (`hsl(140 50% 48%)` light / `hsl(140 49% 60%)` dark), `processed` to a neutral `--muted` badge.
 - Typography: Beszel ships InterVariable; archivist does not ship a font file — it uses the system font stack with Inter as the preferred family when installed, to keep the image lean. A vendored Inter subset remains an accepted option if rendering proves unsatisfactory.
 
+### 7.6 Tools page (US-40, US-41)
+
+A third static page, `tools.html` + `tools.js`, linked from the dashboard's top bar: one card per tool, with its description and a run button; while a job runs, a progress bar (processed / total objects, current key) refreshed by polling; when it ends, a summary (per-outcome counts) plus the detail lists (missing keys, per-object errors). One job at a time; a running job can be cancelled at the next object boundary. The panel is restored on page reload from the latest job state.
+
+The tools are long-running maintenance tasks started by hand, the exact opposite of the cron poller: each run executes as a background job in a `internal/tools` registry (id, status `running`/`done`/`failed`/`cancelled`, progress, summary), served by dedicated routes and never blocking the pipeline.
+
+First tool, `find-lost-files` (US-41) — reconciling the bucket with the database when files have been moved by hand (e.g. through Nextcloud):
+
+1. List every object of the bucket except `inbox/` (the poller's drop zone).
+2. For each object, stream-compute its sha256 and look up a `documents` record by hash:
+   - the record's `file_key` equals the object key: nothing to do (`ok`);
+   - the record's `file_key` no longer exists in the bucket: the file was moved outside the application — the record's `file_key` is corrected to the found key and a `relocated` event is appended (the object itself never moves); refused if another record already references the key (`corrected`);
+   - the record's `file_key` still exists: the scanned object is a stray copy — left in place and reported (`duplicates`);
+   - no record at all: the object is unknown of the database — moved to `inbox/` (conflict suffix on name collision) so the poller processes it automatically (`moved`).
+3. After the scan, every record whose `file_key` exists nowhere in the bucket (and is not an interrupted filing under `inbox/`) is reported as missing, never acted upon (`missing`).
+
+Every outcome is logged through the PocketBase logger; per-object failures do not stop the scan and join the job's error list.
+
+Routes (superuser-only, same rules as section 7.3):
+
+- `GET /api/archivist/tools` — the tool descriptors (id, name, description) and the latest job state (running or last finished).
+- `POST /api/archivist/tools/{id}/run` — starts the job; refused with 409 while one is running.
+- `GET /api/archivist/tools/jobs/{id}` — the job's live state (progress, summary, lists).
+- `POST /api/archivist/tools/jobs/{id}/cancel` — asks the job to stop at the next object boundary.
+
 ## 8. Error Handling
 
 - Transient S3 error: retry with backoff, the object stays in `inbox/` and will be polled again.
@@ -318,7 +358,7 @@ The scenarios form one narrative; each subtest names the US it proves:
 
 1. Startup — health, collections migrated, versioning warning in the PocketBase logs (Garage has no versioning: the US-01 warning path is exercised for free), poll route refused without superuser auth (US-01, US-03, US-04).
 2. Import — a valid simulated statement is classified and filed to `files/` with its `imported` event (US-10 to US-17).
-3. Duplicate — the same content re-uploaded is deleted from `inbox/`, no record, no event (US-12).
+3. Duplicate — the same content re-uploaded is deleted from `inbox/`, no record, no event; a non-PDF object uploaded to `inbox/` is left in place, never imported (US-12).
 4. Pending — a missing mandatory date routes the document to `pending/` with `errors` in the imported event and the recognized fields kept (US-13 to US-15).
 5. Correction — a field PATCH through the API persists the values with no side effect (no re-filing, no status change), `corrected` event carrying the field diff (US-22).
 6. Validation — a status-only PATCH appends the `validated` event, `file_key` untouched (US-23).
@@ -332,6 +372,7 @@ The scenarios form one narrative; each subtest names the US it proves:
 14. Full correction — a pending document is re-filed and validated; value errors leave everything unchanged; an unchanged name skips the S3 move and the diff drops file_key (US-36).
 15. Static dashboard — the review pages are served from pb_public/ with no external resource (US-30).
 16. Enum lifecycle — the value-registration route extends the possible-values list and its refusals hold; a restart drops an unused added value, keeps a used one, and the `template` list follows the configuration (US-37).
+17. Tools — the tools route serves the descriptors and refuses unauthenticated calls; a scan over a bucket with an in-place file, a relocated file, an unknown file and a deleted file produces the matching summary (ok, corrected with `relocated` event, moved to `inbox/`, missing reported) (US-40, US-41).
 
 `POST /api/archivist/poll` (superuser only) runs one poll pass immediately. It exists so the gate and the operator trigger passes on demand instead of waiting for the cron; a fresh upload needs two calls because the poller waits for size/ETag stability across two passes (US-10).
 
