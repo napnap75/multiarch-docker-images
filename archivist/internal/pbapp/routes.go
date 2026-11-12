@@ -1,6 +1,7 @@
 // Routes.go implements the review-dashboard application routes of
-// arch.md section 7.3: configuration metadata (US-31), PDF proxy (US-34),
-// dry-run in its two exclusive modes (US-35) and the full correction (US-36).
+// arch.md section 7.3: configuration metadata (US-31), enum value
+// registration (US-37), PDF proxy (US-34), dry-run in its two exclusive
+// modes (US-35) and the full correction (US-36).
 package pbapp
 
 import (
@@ -33,7 +34,16 @@ func BindRoutes(app core.App, cfg *config.Config, s3 *storage.Client) {
 			if !re.HasSuperuserAuth() {
 				return re.ForbiddenError("superusers only", nil)
 			}
-			return re.JSON(200, configMetadata(cfg))
+			meta, err := configMetadata(re.App, cfg)
+			if err != nil {
+				return re.JSON(500, map[string]any{"message": "config metadata failed", "error": err.Error()})
+			}
+			return re.JSON(200, meta)
+		})
+		// US-37: the dashboard "add a value" action registers the value on
+		// the field's official select list before the form save uses it.
+		e.Router.POST("/api/archivist/fields/{field}/values", func(re *core.RequestEvent) error {
+			return handleAddEnumValue(re, cfg)
 		})
 		e.Router.GET("/api/archivist/documents/{id}/pdf", func(re *core.RequestEvent) error {
 			return handlePdf(re, s3)
@@ -49,15 +59,27 @@ func BindRoutes(app core.App, cfg *config.Config, s3 *storage.Client) {
 }
 
 // configMetadata serves the read-only configuration the UI is driven by:
-// declared fields, enum vocabularies, the fixed statuses, template names.
+// declared fields, the official enum vocabularies read from the documents
+// collection schema (US-31, US-37), the fixed statuses, template names.
 // Nothing technical leaks (no S3 credentials, no rules).
-func configMetadata(cfg *config.Config) map[string]any {
+func configMetadata(app core.App, cfg *config.Config) (map[string]any, error) {
+	enums := map[string][]string{}
+	for _, f := range cfg.FieldList {
+		if f.Type != "enum" {
+			continue
+		}
+		values, err := enumFieldValues(app, f.Name)
+		if err != nil {
+			return nil, err
+		}
+		enums[f.Name] = values
+	}
 	return map[string]any{
 		"fields":    cfg.FieldList,
-		"enums":     enumVocabularies(cfg),
+		"enums":     enums,
 		"statuses":  []string{"pending", "processed", "validated"},
 		"templates": sortedTemplateNames(cfg),
-	}
+	}, nil
 }
 
 func sortedTemplateNames(cfg *config.Config) []string {
@@ -69,43 +91,46 @@ func sortedTemplateNames(cfg *config.Config) []string {
 	return out
 }
 
-// enumVocabularies computes each enum field vocabulary from the constants
-// the rules assign (US-31): the UI dropdowns offer exactly what the rule
-// engine can set.
-func enumVocabularies(cfg *config.Config) map[string][]string {
-	enums := map[string][]string{}
-	seen := map[string]map[string]bool{}
-	var walk func(rules []*config.Rule)
-	walk = func(rules []*config.Rule) {
-		for _, r := range rules {
-			for _, s := range r.Set {
-				if s.Eval != "" {
-					continue
-				}
-				f, ok := cfg.Fields[s.Field]
-				if !ok || f.Type != "enum" {
-					continue
-				}
-				v, _ := s.Value.(string)
-				if v == "" {
-					continue
-				}
-				if seen[s.Field] == nil {
-					seen[s.Field] = map[string]bool{}
-				}
-				if !seen[s.Field][v] {
-					seen[s.Field][v] = true
-					enums[s.Field] = append(enums[s.Field], v)
-				}
-			}
-			walk(r.Rules)
-		}
+// handleAddEnumValue registers a new value on an enum field's official
+// select list (US-37), the action behind the dashboard's "add a value"
+// entry. The "template" field is refused: its vocabulary follows the
+// configuration.
+func handleAddEnumValue(re *core.RequestEvent, cfg *config.Config) error {
+	if !re.HasSuperuserAuth() {
+		return re.ForbiddenError("superusers only", nil)
 	}
-	walk(cfg.Rules)
-	for _, values := range enums {
-		sort.Strings(values)
+	name := re.Request.PathValue("field")
+	f, ok := cfg.Fields[name]
+	if !ok || f.Type != "enum" {
+		return re.JSON(404, map[string]any{"message": "unknown enum field: " + name})
 	}
-	return enums
+	if name == "template" {
+		return re.JSON(400, map[string]any{"message": "the template vocabulary follows the configuration"})
+	}
+	body, err := io.ReadAll(re.Request.Body)
+	if err != nil {
+		return re.JSON(400, map[string]any{"message": "unreadable body", "error": err.Error()})
+	}
+	var submitted map[string]any
+	if err := json.Unmarshal(body, &submitted); err != nil {
+		return re.JSON(400, map[string]any{"message": "invalid JSON body", "error": err.Error()})
+	}
+	value, _ := submitted["value"].(string)
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return re.JSON(400, map[string]any{"message": "empty value"})
+	}
+	if value == DummyEnumValue {
+		return re.JSON(400, map[string]any{"message": "reserved value: " + DummyEnumValue})
+	}
+	if err := AddEnumValue(re.App, name, value); err != nil {
+		return re.JSON(500, map[string]any{"message": "add value failed", "error": err.Error()})
+	}
+	values, err := enumFieldValues(re.App, name)
+	if err != nil {
+		return re.JSON(500, map[string]any{"message": "add value failed", "error": err.Error()})
+	}
+	return re.JSON(200, map[string]any{"field": name, "values": values})
 }
 
 // handlePdf streams the document from S3; the browser never reaches the
@@ -131,7 +156,7 @@ func handlePdf(re *core.RequestEvent, s3 *storage.Client) error {
 	if err != nil {
 		return re.JSON(500, map[string]any{"message": "S3 download failed", "error": err.Error()})
 	}
-	re.Response.Header().Set("Content-Disposition", "inline; filename=\""+fileName(key)+"\"")
+	re.Response.Header().Set("Content-Disposition", "inline; filename=""+fileName(key)+""")
 	return re.Blob(200, "application/pdf", data)
 }
 
@@ -234,6 +259,12 @@ func handleCorrect(re *core.RequestEvent, cfg *config.Config, s3 *storage.Client
 	tplName, rendered, evalErrs := evaluateMerged(cfg, merged, pages)
 	if len(evalErrs) > 0 {
 		return re.JSON(400, map[string]any{"message": "correction refused", "errors": evalErrs})
+	}
+
+	// US-37: new enum values join the official select lists before the
+	// record save validates them.
+	if err := EnsureEnumValues(re.App, cfg, merged); err != nil {
+		return re.JSON(500, map[string]any{"message": "enum value registration failed", "error": err.Error()})
 	}
 
 	before := SnapshotFromRecord(cfg, record, true)

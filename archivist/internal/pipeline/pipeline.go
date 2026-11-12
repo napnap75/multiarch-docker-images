@@ -89,6 +89,12 @@ func processOne(app core.App, cfg *config.Config, s3 *storage.Client, ctx contex
 	}
 	valid := len(errs) == 0 && rendered != ""
 
+	// US-37: new enum values join the official select lists before the
+	// record save validates them.
+	if err := pbapp.EnsureEnumValues(app, cfg, fields); err != nil {
+		return fmt.Errorf("enum values: %w", err)
+	}
+
 	// US-16: the record is created before any physical move.
 	coll, err := app.FindCollectionByNameOrId("documents")
 	if err != nil {
