@@ -66,11 +66,15 @@ func TestMain(m *testing.M) {
 	}
 	code := 1
 	defer func() { os.Exit(code) }()
+	cleanupDockerResources()
 	if err := setup(image); err != nil {
 		fmt.Println("E2E setup failed:", err)
 		if out, _ := run("docker", "logs", appC); out != "" {
 			fmt.Println("--- app logs ---")
 			fmt.Println(out)
+		}
+		if os.Getenv("E2E_KEEP") != "1" {
+			teardown()
 		}
 		return
 	}
@@ -129,9 +133,9 @@ root_domain = ".s3.garage"
 		gImage = "dxflrs/garage:v2.5.0"
 	}
 	_, _ = run("docker", "network", "create", network) // already exists is fine
-	if _, err := run("docker", "run", "-d", "--name", garageC, "--network", network,
+	if out, err := run("docker", "run", "-d", "--name", garageC, "--network", network,
 		"-p", "127.0.0.1:3900:3900", "-v", tomlPath+":/etc/garage.toml", gImage); err != nil {
-		return fmt.Errorf("garage container: %w", err)
+		return fmt.Errorf("garage container: %w: %s", err, strings.TrimSpace(out))
 	}
 	if err := retry(60*time.Second, func() error { _, err := garage("status"); return err }); err != nil {
 		return fmt.Errorf("garage never became ready: %w", err)
@@ -139,8 +143,7 @@ root_domain = ".s3.garage"
 	status, _ := garage("status")
 	nodeID := firstHexToken(status)
 	if nodeID == "" {
-		return fmt.Errorf("no node id in garage status:
-%s", status)
+		return fmt.Errorf("no node id in garage status:\n%s", status)
 	}
 	if _, err := garage("layout", "assign", "-z", "dc1", "-c", "1G", nodeID); err != nil {
 		return err
@@ -159,8 +162,7 @@ root_domain = ".s3.garage"
 	s3KeyID = lineValue(keyOut, "Key ID:")
 	s3Secret = lineValue(keyOut, "Secret key:")
 	if s3KeyID == "" || s3Secret == "" {
-		return fmt.Errorf("cannot parse garage key output:
-%s", keyOut)
+		return fmt.Errorf("cannot parse garage key output:\n%s", keyOut)
 	}
 	if _, err := garage("bucket", "allow", "--read", "--write", bucket, "--key", bucket); err != nil {
 		return err
@@ -213,13 +215,12 @@ func startApp(image string) error {
 		args = append(args, "-e", e)
 	}
 	args = append(args, image)
-	if _, err := run("docker", args...); err != nil {
-		return fmt.Errorf("app container: %w", err)
+	if out, err := run("docker", args...); err != nil {
+		return fmt.Errorf("app container: %w: %s", err, strings.TrimSpace(out))
 	}
 	if err := retry(60*time.Second, checkHealth); err != nil {
 		if out, _ := run("docker", "logs", appC); out != "" {
-			return fmt.Errorf("app never became healthy; logs:
-%s", out)
+			return fmt.Errorf("app never became healthy; logs:\n%s", out)
 		}
 		return err
 	}
@@ -258,9 +259,19 @@ func checkHealth() error {
 }
 
 func teardown() {
-	run("docker", "rm", "-f", appC, garageC)
-	run("docker", "network", "rm", network)
+	cleanupDockerResources()
 	os.RemoveAll(dir)
+}
+
+func cleanupDockerResources() {
+	for _, name := range []string{appC, garageC} {
+		if _, err := run("docker", "rm", "-f", name); err == nil {
+			fmt.Println("E2E: removed previous container", name)
+		}
+	}
+	if _, err := run("docker", "network", "rm", network); err == nil {
+		fmt.Println("E2E: removed previous network", network)
+	}
 }
 
 // --- small plumbing ----------------------------------------------------
@@ -294,8 +305,7 @@ var hexRe = regexp.MustCompile(`^[0-9a-f]{8,}$`)
 
 // firstHexToken extracts the node id from garage status output.
 func firstHexToken(s string) string {
-	for _, line := range strings.Split(s, "
-") {
+	for _, line := range strings.Split(s, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) > 0 && hexRe.MatchString(fields[0]) {
 			return fields[0]
@@ -305,8 +315,7 @@ func firstHexToken(s string) string {
 }
 
 func lineValue(s, prefix string) string {
-	for _, line := range strings.Split(s, "
-") {
+	for _, line := range strings.Split(s, "\n") {
 		t := strings.TrimSpace(line)
 		if strings.HasPrefix(t, prefix) {
 			return strings.TrimSpace(strings.TrimPrefix(t, prefix))
@@ -476,62 +485,32 @@ func s3Exists(t *testing.T, key string) bool {
 // extraction of the application works.
 func makePDF(lines []string) []byte {
 	var content strings.Builder
-	content.WriteString("BT /F1 12 Tf 72 720 Td
-")
+	content.WriteString("BT /F1 12 Tf 72 720 Td\n")
 	for _, l := range lines {
-		content.WriteString("(" + pdfEscape(l) + ") Tj 0 -18 Td
-")
+		content.WriteString("(" + pdfEscape(l) + ") Tj 0 -18 Td\n")
 	}
 	content.WriteString("ET")
-	stream := content.String() + "
-"
+	stream := content.String() + "\n"
 
 	var buf bytes.Buffer
-	buf.WriteString("%PDF-1.4
-")
+	buf.WriteString("%PDF-1.4\n")
 	off := func() int { return buf.Len() }
 	o1 := off()
-	buf.WriteString("1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
-endobj
-")
+	buf.WriteString("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
 	o2 := off()
-	buf.WriteString("2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
-endobj
-")
+	buf.WriteString("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n")
 	o3 := off()
-	buf.WriteString("3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
-endobj
-")
+	buf.WriteString("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n")
 	o4 := off()
-	buf.WriteString(fmt.Sprintf("4 0 obj
-<< /Length %d >>
-stream
-%sendstream
-endobj
-", len(stream), stream))
+	buf.WriteString(fmt.Sprintf("4 0 obj\n<< /Length %d >>\nstream\n%sendstream\nendobj\n", len(stream), stream))
 	o5 := off()
-	buf.WriteString("5 0 obj
-<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
-endobj
-")
+	buf.WriteString("5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n")
 	xref := off()
-	buf.WriteString("xref
-0 6
-0000000000 65535 f 
-")
+	buf.WriteString("xref\n0 6\n0000000000 65535 f \n")
 	for _, o := range []int{o1, o2, o3, o4, o5} {
-		buf.WriteString(fmt.Sprintf("%010d 00000 n 
-", o))
+		buf.WriteString(fmt.Sprintf("%010d 00000 n \n", o))
 	}
-	buf.WriteString(fmt.Sprintf("trailer
-<< /Size 6 /Root 1 0 R >>
-startxref
-%d
-%%%%EOF
-", xref))
+	buf.WriteString(fmt.Sprintf("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", xref))
 	return buf.Bytes()
 }
 
@@ -889,8 +868,7 @@ func TestE2E(t *testing.T) {
 	t.Run("restart: state survives a container restart", func(t *testing.T) {
 		before := listRecords(t, "documents", "", "")
 		if out, err := run("docker", "restart", appC); err != nil {
-			t.Fatalf("docker restart: %v
-%s", err, out)
+			t.Fatalf("docker restart: %v\n%s", err, out)
 		}
 		if err := retry(60*time.Second, checkHealth); err != nil {
 			t.Fatalf("app never came back: %v", err)
@@ -1245,8 +1223,7 @@ func TestE2E(t *testing.T) {
 		// Restart: the startup cleanup drops "savings" - no document uses
 		// it - and keeps "bank".
 		if out, err := run("docker", "restart", appC); err != nil {
-			t.Fatalf("docker restart: %v
-%s", err, out)
+			t.Fatalf("docker restart: %v\n%s", err, out)
 		}
 		if err := retry(60*time.Second, checkHealth); err != nil {
 			t.Fatalf("app never came back: %v", err)

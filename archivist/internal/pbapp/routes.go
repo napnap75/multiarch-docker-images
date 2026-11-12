@@ -156,7 +156,7 @@ func handlePdf(re *core.RequestEvent, s3 *storage.Client) error {
 	if err != nil {
 		return re.JSON(500, map[string]any{"message": "S3 download failed", "error": err.Error()})
 	}
-	re.Response.Header().Set("Content-Disposition", "inline; filename=""+fileName(key)+""")
+	re.Response.Header().Set("Content-Disposition", "inline; filename=\""+fileName(key)+"\"")
 	return re.Blob(200, "application/pdf", data)
 }
 
