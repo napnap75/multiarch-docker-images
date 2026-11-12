@@ -32,10 +32,23 @@ async function init() {
   var res = await api("GET", "/api/archivist/tools");
   if (res.status !== 200) return;
   renderTools(res.data.tools || []);
-  if (res.data.job) {
-    renderJob(res.data.job);
-    if (res.data.job.status === "running") poll(res.data.job.id);
+  var job = res.data && res.data.job;
+  if (job && job.id) {
+    renderJob(job);
+    if (job.status === "running") poll(job.id);
+  } else {
+    hideJob();
   }
+}
+
+// hideJob clears and hides the progress/summary block: nothing to show
+// when no job is running and no result is worth restoring.
+function hideJob() {
+  stopPoll();
+  currentJobId = null;
+  var panel = $("jobpanel");
+  panel.hidden = true;
+  panel.innerHTML = "";
 }
 
 function renderTools(tools) {
@@ -70,6 +83,10 @@ function poll(jobId) {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(async function () {
     var res = await api("GET", "/api/archivist/tools/jobs/" + encodeURIComponent(jobId));
+    if (res.status === 404) {
+      hideJob();
+      return;
+    }
     if (res.status !== 200) {
       stopPoll();
       return;
@@ -85,10 +102,13 @@ function stopPoll() {
 }
 
 function renderJob(job) {
+  job = job || {};
   var panel = $("jobpanel");
   panel.hidden = false;
   var running = job.status === "running";
-  var pct = job.total > 0 ? Math.round((job.processed / job.total) * 100) : 0;
+  var processed = job.processed || 0;
+  var total = job.total || 0;
+  var pct = total > 0 ? Math.round((processed / total) * 100) : 0;
 
   var html = '<div class="card jobcard">';
   if (running) {
@@ -97,13 +117,14 @@ function renderJob(job) {
   } else {
     var label = job.status === "done" ? "Tâche terminée"
       : job.status === "cancelled" ? "Tâche annulée"
-      : job.status === "failed" ? "Tâche échouée" : "Tâche " + job.status;
+      : job.status === "failed" ? "Tâche échouée"
+      : job.status ? "Tâche " + job.status : "Tâche";
     html += '<div class="jobhead"><h3>' + esc(label) + "</h3></div>";
   }
 
   html += '<div class="progress" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100">' +
     '<div class="progressbar" style="width:' + pct + '%"></div></div>' +
-    '<div class="progressinfo">' + job.processed + " / " + job.total + " fichiers analysés" +
+    '<div class="progressinfo">' + processed + " / " + total + " fichiers analysés" +
     (running && job.current ? " — " + '<span class="mono">' + esc(job.current) + "</span>" : "") + "</div>";
 
   var summary = job.summary || {};
