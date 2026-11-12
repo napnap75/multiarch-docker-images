@@ -40,7 +40,7 @@ so that the persistence schema always reflects the declared extraction fields.
 Acceptance criteria:
 
 - Given the `documents` collection does not exist, when the application starts, then it is created with the fixed columns (`sha256` unique-indexed, `file_key`, `pages` as a JSON array, `status`), the standard PocketBase `created`/`updated` autodate columns, plus one column per field declared in `fields`.
-- Given a declared field, when its column is created, then the column type maps from the field type: `text`→text, `number`→number, `date`→date, `boolean`→bool, `enum`→select (single value).
+- Given a declared field, when its column is created, then the column type maps from the field type: `text`→text, `number`→number, `date`→date, `boolean`→bool, `enum`→select (single value, its value list managed by the application — US-37).
 - Given the `documents` collection exists and a field was added to `config.jsonc`, when the application starts, then the matching column is added without data loss.
 - Given a field was removed from `config.jsonc`, when the application starts, then the matching column is removed and the operation is logged; existing values in that column are lost by design (they remain in the event history snapshots).
 - Given a field type changed in `config.jsonc`, when the application starts, then the application refuses to start with an explicit migration error listing the field, rather than silently coercing existing values.
@@ -177,6 +177,7 @@ Acceptance criteria:
 ## Epic: Data visualization (standard PocketBase UI)
 
 The standard PocketBase collections UI is the nominal interface for reading and correcting documents. Field edits and status changes made through it (or through any PocketBase API client) are intercepted by the application's `OnRecordUpdateRequest` hook on `documents`, which records the change in the event history (US-22) and enforces the status rules (US-23) — but deliberately performs no re-filing: the UI edits one field at a time and shows no preview of the resulting file name, so an inconsistent draft cannot trigger irreversible side effects. The full correction — all fields at once, dry-run of the resulting name, re-filing and validation — is the review dashboard's job (US-34 to US-36), and record deletions propagate to S3 (US-24).
+
 ### US-20 — Browse documents in the collections UI
 
 As the user,
@@ -214,6 +215,7 @@ Acceptance criteria:
 - Given a save where no declared field actually changed, when the hook runs, then no event is appended.
 - Given the save also changes the status, when the hook runs, then the status rules of US-23 apply on their own: `processed` → `validated` is appended as a separate `validated` event, anything else is refused.
 - Given a `pending` document, when fields are edited this way, then it stays `pending` and its object stays in `pending/`; leaving the review queue requires the full correction of the review dashboard (US-36), whose form shows all fields and the resulting name before saving.
+
 ### US-23 — Validate a document from the standard PocketBase UI
 
 As the user,
@@ -239,9 +241,10 @@ Acceptance criteria:
 - Given the object at `file_key` is already gone from the bucket, when the hook runs, then the deletion is idempotent: the record is removed.
 - Given the bucket is versioned, when the object is deleted, then a delete marker keeps it recoverable; without versioning the deletion is final (same caveat as US-01).
 - Given a superuser issues the DELETE, when the hook runs, then the hook applies: like the append-only protection of US-04, it cannot rely on API rules alone.
+
 ## Epic: Review Dashboard (US-30 to US-36)
 
-The static frontend served from `pb_public/` (arch.md section 7): a document list and a document detail page, entirely driven by the configuration metadata route. No build toolchain, vendored dependencies only (100% offline). Every persistence goes through the standard PocketBase API and its hooks; the only application routes are those the standard API cannot express (config metadata, PDF proxy, dry-run, full correction). Visual design: Beszel reference (arch.md section 7.5).
+The static frontend served from `pb_public/` (arch.md section 7): a document list and a document detail page, entirely driven by the configuration metadata route. No build toolchain, vendored dependencies only (100% offline). Every persistence goes through the standard PocketBase API and its hooks; the only application routes are those the standard API cannot express (config metadata, PDF proxy, dry-run, full correction, enum value registration). Visual design: Beszel reference (arch.md section 7.5).
 
 ### US-30 — Serve the dashboard as static files
 
@@ -264,7 +267,7 @@ so that the UI is entirely driven by the configuration.
 
 Acceptance criteria:
 
-- Given an authenticated request to `GET /api/archivist/config`, when it is served, then it returns the declared fields (name, type, mandatory), the enum vocabularies computed from the constants the rules assign, and the template names — and nothing sensitive (no S3 credentials).
+- Given an authenticated request to `GET /api/archivist/config`, when it is served, then it returns the declared fields (name, type, mandatory), the enum vocabularies read from the `documents` collection schema (dummy placeholder excluded), and the template names — and nothing sensitive (no S3 credentials).
 - Given an unauthenticated request, when it is served, then it is refused.
 - Given the configuration is reloaded only on restart, when the route is called, then it serves the in-memory compiled configuration (the same the pipeline uses).
 
@@ -335,6 +338,20 @@ Acceptance criteria:
 - Given a `pending` document, when the correction succeeds, then the `pending/` object is removed and the document leaves the review queue.
 - Given an unauthenticated client, when it calls the route, then it is refused.
 - Given the implementation, when it is reviewed, then it reuses the engine internals (`FieldsFromRecord`, `ValidateValue`, `Render`, `ResolveConflict`, `DiffSnapshots`, `AppendEvent`) with no parallel business logic.
+
+### US-37 — Manage the enum value lists
+
+As the user,
+I want the possible values of an enum field stored in the `documents` schema and maintained by the application itself,
+so that the dropdowns never show an empty or stale list and the values stay consistent between the pipeline and the dashboard.
+
+Acceptance criteria:
+
+- Given an enum field, when its column is created, then the select holds the single dummy value `-----`; for the `template` field, the list is initialized to the template names of the configuration and always follows it.
+- Given a document is processed (import or full correction), when a rule assigns a value missing from the field's list, then the value is added to the list before the record is saved.
+- Given the dashboard, when I pick the add-a-value entry in an enum dropdown, then a modal asks for the value, the `POST /api/archivist/fields/{field}/values` route registers it in the list, and the dropdown offers only the possible values afterwards.
+- Given the route, when it is called with an unknown or non-enum field, an empty value, the reserved dummy `-----`, or the `template` field, then it is refused; the list of `template` follows the configuration alone.
+- Given a startup, when the cleanup pass runs, then every enum value no document uses anymore is removed from the list; the dummy `-----` is kept only when the list would otherwise be empty; removals are logged.
 
 ## Stories deferred to later epics
 

@@ -31,8 +31,7 @@ Everything runs offline on the server infrastructure: no cloud APIs, no outbound
 
 ## 3. S3 Layout
 
-A single bucket. Versioning is not required, but it is strongly recommended: without it, any deletion performed by the application (or by a bug) is final; with it, delete markers keep deleted objects rec
-overable.
+A single bucket. Versioning is not required, but it is strongly recommended: without it, any deletion performed by the application (or by a bug) is final; with it, delete markers keep deleted objects recoverable.
 
 ```
 inbox/       # drop zone for new PDFs (via Nextcloud / S3 client)
@@ -64,9 +63,8 @@ The payload is self-contained: each event carries its own type, its own timestam
 Common payload keys:
 
 - `event_type`: `imported` | `corrected` | `validated`
-- `timestamp`: RFC 3339 date of the
- event
-- `before` / `after`: the event's diff, never full snapshots — a key appears on a side only when its value changes in the event: same value on both sides, it is omitted; absent from `before` and present in `after`, the field was added (every `after` key at import, since nothing existed before); present in `before` and absent from `after`, it was deleted. `file_key` (the S3 key, unified with the `documents` record field) follows the same rule and appears only when the object actually moves; at import the status does not exist before, so `before` carries no `status`. A missing key means the value is unknown, there is no `null`
+- `timestamp`: RFC 3339 date of the event
+- `before` / `after`: the event's diff, never full snapshots — a key appears on a side only when its value changes in the event: same value on both sides, it is omitted; absent from `before` and present in `after`, the field was added (every `after` key at import, since nothing existed before); present in `before` and absent from `after`, the field was deleted. `file_key` (the S3 key, unified with the `documents` record field) follows the same rule and appears only when the object actually moves; at import the status does not exist before, so `before` carries no `status`. A missing key means the value is unknown, there is no `null`
 
 Per event type:
 
@@ -107,8 +105,7 @@ On classification failure, the document is routed to `pending/` and the payload 
   "timestamp": "2026-01-15T14:23:07Z",
   "errors": ["mandatory field missing: emittingCompany"],
   "before": {
-    "file_key": "inbox/scan
-_2026-01-15.pdf"
+    "file_key": "inbox/scan_2026-01-15.pdf"
   },
   "after": {
     "file_key": "pending/scan_2026-01-15.pdf",
@@ -166,8 +163,7 @@ The diff is derived by comparing the two snapshots: a field present in `before` 
 A `config.jsonc` file kept alongside the binary, reloaded on restart. Three sections:
 
 1. `fields`: declaration of fields to extract from the files:
-   - `na
-me`: name of the field
+   - `name`: name of the field
    - `type`: `text` | `number` | `date` | `boolean` | `enum`
    - `mandatory`: true | false
 
@@ -175,7 +171,7 @@ me`: name of the field
    - `number` and `boolean` expose native values
    - `date` exposes a native Go `time.Time` (comparable, arithmetic via `duration()`, usable with the `date()`/`now()` builtins)
    - `text` and `enum` expose strings
-   - `enum` does not declare its values: the application builds the field's vocabulary from the constants the rules assign to it; the dashboard correction form offers this vocabulary as a dropdown, with free entry allowed
+   - `enum` does not declare its values: the possible values live in the `documents` schema itself (a PocketBase select field, single value) and are managed by the application — at collection creation the list holds the single dummy value `-----`, a value assigned by the rules or entered from the dashboard is added to the list when missing, a startup pass removes the values no document uses anymore (the dummy stays only if the list would otherwise be empty), and the `template` field is the exception: its list always equals the template names of the configuration; the dashboard dropdowns offer only the possible values, completed by an add-a-value modal
    - assigning a value that does not match the field type (e.g. a raw string to a `date` field, a non-numeric value to a `number` field) is a rule error and routes the document to `pending/`
 
 2. `rules`: an ordered tree of rules. Each rule contains four keys:
@@ -186,8 +182,7 @@ me`: name of the field
 
    The expression environment provides expr's standard `date(value, layout)` builtin plus three built-in helpers registered by the application:
 
-   - `date(value, layout)`: expr's standard builtin. Parses a string into a native date using a Go date layout (e.g. `date(`15/01/2026`, `02/01/2006`)`). The format is carried by the parsing rule, so it can differ per document type. It only knows English month names: see 
-`frDate` below for French text.
+   - `date(value, layout)`: expr's standard builtin. Parses a string into a native date using a Go date layout (e.g. `date(`15/01/2026`, `02/01/2006`)`). The format is carried by the parsing rule, so it can differ per document type. It only knows English month names: see `frDate` below for French text.
    - `firstMatch(regex, texts?)`: returns the first match of the regex in the document text (first capture group when present), or an empty string when no match is found — e.g. `firstMatch(`[0-9]{2}/[0-9]{2}/[0-9]{4}`, pages[0])`. The optional second argument is an expression evaluated to the text(s) to search:
      - a single page: `pages[0]` (the first page)
      - a slice: `pages[0:3]` (pages 1 to 3, expr's standard slice syntax, end exclusive)
@@ -202,8 +197,7 @@ me`: name of the field
      - `value`: a native date (e.g. `emissionDate`); a missing or invalid date is a rule error and routes the document to `pending/`.
      - `unit`: `month` | `quarter` | `half` | `year`.
      - `shift`: `-1` (previous period), `0` (period containing the date) or `+1` (next period) — e.g. a rent receipt issued mid-month uses the containing month, a service-charge call issued at the end of a quarter uses the next quarter, a bank statement uses the previous month.
-     - Returns a French string: `Janvier 2026`, `T2 2026`, `S1 2026` or `202
-6`.
+     - Returns a French string: `Janvier 2026`, `T2 2026`, `S1 2026` ou `2026`.
      - The optional `layout` argument is a standard Go reference-date layout applied to the period's first day, with month names rendered in French by the application (default layouts: `January 2006` for `month`, `2006` for `year`); it is ignored for `quarter` and `half`, whose formats (`T<quarter> <year>`, `S<half> <year>`) are fixed.
 
 3. `templates`: named naming templates (e.g. `bank_statement: {emittingCompany}/{emissionDate.Format(`2006-01-02`)}_{documentType}_{bankAccount}.pdf`). A template is a literal string containing `{...}` placeholders:
@@ -220,16 +214,14 @@ Validation on load: JSON schema, regex compilation, `expr` expression compilatio
 
 ## 6. Processing Pipeline
 
-Executed by the PocketBase cron job (
-configurable interval, e.g. every minute):
+Executed by the PocketBase cron job (configurable interval, e.g. every minute):
 
 1. **Poll**: list objects in `inbox/`; an object is a candidate only if no `documents` record references its key yet, and its size and ETag are stable across two consecutive polls (write-completion wait). The same pass also picks up interrupted filings: any `documents` record whose `file_key` is still under `inbox/` (a filing that was interrupted between record creation and the physical move) is completed as described below.
 2. **Download**: fetch the object into memory (streamed), no disk writes. The sha256 is computed during download; if a `documents` record with the same hash already exists, the object is a duplicate: the `inbox/` key is deleted (a no-data-loss case — the original with the same content stays filed), a message is logged via the PocketBase logger (section 9), and processing stops there. By design, no `document_events` entry is recorded: the duplicate is not a document of its own, and the trace lives in the PocketBase logs only.
 3. **Extraction**: page-by-page text (one entry per page, for rule evaluation and the FTS index) via `ledongthuc/pdf`, including headers and footers
 4. **Rule evaluation**: rules evaluated in order against the document pages and the fields set so far; full evaluation log written to the PocketBase logger at Debug level (section 9; the same trace feeds the built-in dry-run mode for debugging from the dashboard).
 5. **Validation**: a result is valid if and only if: all rules have been processed with no error, all mandatory fields are identified, the selected template exists in the configuration, and the naming template evaluated with no error. Otherwise: route directly to `pending/`.
-6. **Record**: create the `documents` record (sha256, current inbox key, pages, fields, status) and add an `imported` event including the original key (`before.file_key`). The record exists before any physical move, so an interrupted filing leaves a state the poller recovers automatically on its ne
-xt pass.
+6. **Record**: create the `documents` record (sha256, current inbox key, pages, fields, status) and add an `imported` event including the original key (`before.file_key`); for enum fields, any value missing from the field's possible-values list is registered in the list before the record is saved (section 5). The record exists before any physical move, so an interrupted filing leaves a state the poller recovers automatically on its next pass.
 7. **Filing**:
    - valid → resolve the target name first: if a file with the same name already exists in the target prefix, append a number to the filename; then copy to the new key (`files/` + rendered template — the template renders the full object path, there is no separate prefix), verify the target object exists, and delete the `inbox/` key only after the copy is confirmed; finally update the `documents` record with the final, conflict-resolved filename (`file_key`, status `processed`); the whole import is recorded as the single `imported` event of section 4.
    - invalid → move to `pending/` (incremental suffix on name conflict); update `file_key`; status `pending`.
@@ -243,8 +235,7 @@ The review dashboard is a static frontend — plain HTML/CSS/JS files, no build 
 ### 7.1 Document list (US-32 / US-33)
 
 - Table: one row per document, paginated (50 by default), default columns: all mandatory fields plus `status` and `file_key`; a column chooser exposes every declared field plus `created`/`updated`, and the choice persists in the browser (`localStorage`).
-- Sorting: click on 
-a column header, ascending/descending, executed server-side through the standard PocketBase `sort` parameter.
+- Sorting: click on a column header, ascending/descending, executed server-side through the standard PocketBase `sort` parameter.
 - Per-column filters, typed from the field declaration: contains for `text`, dropdown for `enum` and `status` (vocabulary from the config metadata route), date range for `date`, tri-state for `boolean`; translated client-side into a PocketBase filter expression.
 - Quick tabs with the per-status counts pre-filter the review queue (`pending` first).
 - Combined search over full text (FTS5) + metadata/fields: the search runs server-side through a dedicated search route querying the FTS5 index via `app.DB()`, no search logic in the browser (US-4x).
@@ -255,19 +246,18 @@ a column header, ascending/descending, executed server-side through the standard
 - Layout: two columns — the PDF preview embedded via the proxy route of section 7.3, and the correction form; below them, the document's event history, read-only, sorted by timestamp, payloads rendered as before/after diffs.
 - Form: one typed control per declared field, pre-filled with the current values; mandatory fields marked; the classification errors of the `imported` event, if any, displayed at the top.
 - Pipeline proposals (US-35): under each field whose value the pipeline would extract differently today, a discreet banner offers the proposed value with one-click adoption. The proposals come from the classification dry-run (section 7.3), re-run against the stored pages.
-- Live name (US-35): as the form changes, the rendered target name under `files/` is recomputed by the render dry-run and displayed with its errors; the draft save remains available, but the full correction refuses to run while errors remai
-n.
+- Live name (US-35): as the form changes, the rendered target name under `files/` is recomputed by the render dry-run and displayed with its errors; the draft save remains available, but the full correction refuses to run while errors remain.
 - Exits, three and distinct: draft save (standard PATCH, US-22: values persist, no re-filing, no status change); full correction (US-36: the `/correct` route, re-filing and validation in one confirmed step); simple validation of a `processed` document (standard PATCH, US-23). A `pending` document only leaves the review queue through the full correction.
 
 ### 7.3 Application routes
 
 Beyond the standard PocketBase API, authenticated only:
 
-- `GET /api/archivist/config` — the configuration metadata the UI needs: declared fields (name, type, mandatory), the enum vocabularies computed from the constants the rules assign, the template names. Read-only; the dashboard is entirely driven by it (columns, filters, controls).
+- `GET /api/archivist/config` — the configuration metadata the UI needs: declared fields (name, type, mandatory), the enum vocabularies read from the `documents` collection schema (dummy placeholder excluded), the template names. Read-only; the dashboard is entirely driven by it (columns, filters, controls).
+- `POST /api/archivist/fields/{field}/values` — registers a value in the possible-values list of an enum field (JSON body `{"value": "..."}`); refused on an unknown or non-enum field, an empty value, the reserved dummy `-----` and the `template` field (its list follows the configuration alone); returns the field's updated list. The add-a-value modal of the dashboard dropdowns calls it; the pipeline registers new values on its own before saving.
 - `GET /api/archivist/documents/{id}/pdf` — proxy route streaming the document from S3; the browser never reaches the S3 cluster.
 - `POST /api/archivist/documents/{id}/dry-run` — two exclusive modes, one response shape (`fields`, `template`, `rendered`, `errors`), persisting nothing. Without a body: a classification re-run — the rule tree evaluated against the stored pages, returning the proposed fields (the source of the pipeline proposals). With field values: a template render — the values converted to their native types (per-field error on type mismatch), merged with the record values, rendered against the stored pages (placeholders may call `firstMatch`/`frDate` on the document text), returning the target name and its errors. The modes are never hybrid: user values never enter the rule-evaluation context, so the proposal always stays what the pipeline would do alone.
-- `POST /api/archivist/documents/{id}/correct` — the full correction of US-36: transactional orchestration (conflict-suffix resolution, S3 copy, verification, old key deletion, record update with `file_key` and status `validated`, `corrected` event carrying the full diff, S3 rollback on mid-failure with the save refused). It reuses the engine internals (`FieldsFromRecord`, `Va
-lidateValue`, `Render`, `ResolveConflict`, `DiffSnapshots`, `AppendEvent`), no parallel business logic. A route rather than a standard PATCH because the intent (re-file + validate) is not expressible in record data, the standard PATCH must stay side-effect-free for every client and the bulk edit (US-22 / US-33), and the operation is a multi-step transaction rather than a record save — the same line drawn by `POST /api/archivist/poll`.
+- `POST /api/archivist/documents/{id}/correct` — the full correction of US-36: transactional orchestration (conflict-suffix resolution, S3 copy, verification, old key deletion, record update with `file_key` and status `validated`, `corrected` event carrying the full diff, S3 rollback on mid-failure with the save refused). It reuses the engine internals (`FieldsFromRecord`, `ValidateValue`, `Render`, `ResolveConflict`, `DiffSnapshots`, `AppendEvent`), no parallel business logic. A route rather than a standard PATCH because the intent (re-file + validate) is not expressible in record data, the standard PATCH must stay side-effect-free for every client and the bulk edit (US-22 / US-33), and the operation is a multi-step transaction rather than a record save — the same line drawn by `POST /api/archivist/poll`.
 
 ### 7.4 Standard collections UI and hooks
 
@@ -276,14 +266,14 @@ lidateValue`, `Render`, `ResolveConflict`, `DiffSnapshots`, `AppendEvent`), no p
 - Deletion: deleting a `documents` record from the same interface first deletes the S3 object at `file_key` (US-24); on S3 failure the deletion is refused and the record stays. The cascade delete of the `document_events` relation removes the history with the record; with versioning the object stays recoverable via its delete marker.
 
 The static pages themselves carry no data and are public by nature; every fetch is authenticated against the PocketBase API. An unauthenticated visitor is prompted to sign in with the superuser account; the dashboard exchanges those credentials through PocketBase's standard auth endpoint, stores the returned token locally, and retries the blocked request. The API continues to enforce superuser access. The configuration is reloaded only on restart; there is no runtime reload.
+
 ### 7.5 Design (Beszel reference)
 
 The dashboard's visual design takes Beszel (https://github.com/henrygd/beszel) as its reference. Beszel is built on shadcn/ui + Tailwind with semantic HSL CSS variables and a light/dark pair; archivist reproduces its palette, token names and layout feel in a single hand-written stylesheet (`pb_public/styles.css`) — no Tailwind, no CSS framework, consistent with the no-build-toolchain constraint of section 7.
 
-- Semantic tokens, same names and values as Beszel's own stylesheet. Light theme: `--background: hsl(30 8% 98%)`, `--foreground: hsl(30 0% 10%)`, `--card: hsl(30 0% 100%)`, `--card-foreground: hsl(240 6% 12%)`, `--primary: hsl(240 5.88% 10%)`, `--primary-foreground: hsl(30 0% 100%)`, `--secondary: hsl(240 4.76% 95.88%)`, `--muted: hsl(26 6% 94%)`, `--muted-foreground: hsl(24 2.79% 35.1%)`, `--accent: hsl(20 23.08% 94%)`, `--destructive: hsl(0 66% 53%)`, `--border: hsl(30 8.11% 85.49%)`, `--input: hsl(30 4.29% 72.55%)`, `--ring: hsl(30 3.97% 49.41%)`, `--table-header: hsl(225 6% 97%)`, `--radius: 0.8rem`.
+- Semantic tokens, same names and values as Beszel's own stylesheet. Light theme: `--background: hsl(30 8% 98%)`, `--foreground: hsl(30 0% 10%)`, `--card: hsl(30 8% 100%)`, `--card-foreground: hsl(240 6% 12%)`, `--primary: hsl(240 5.88% 10%)`, `--primary-foreground: hsl(30 0% 100%)`, `--secondary: hsl(240 4.76% 95.88%)`, `--muted: hsl(26 6% 94%)`, `--muted-foreground: hsl(24 2.79% 35.1%)`, `--accent: hsl(20 23.08% 94%)`, `--destructive: hsl(0 66% 53%)`, `--border: hsl(30 8.11% 85.49%)`, `--input: hsl(30 4.29% 72.55%)`, `--ring: hsl(30 3.97% 49.41%)`, `--table-header: hsl(225 6% 97%)`, `--radius: 0.8rem`.
 - Dark theme: `--background: hsl(220 5.5% 9%)`, `--foreground: hsl(220 2% 97%)`, `--card: hsl(220 5.5% 10.5%)`, `--card-foreground: hsl(220 2% 97%)`, `--primary: hsl(220 2% 96%)`, `--primary-foreground: hsl(220 4% 10%)`, `--secondary: hsl(220 4% 16%)`, `--muted: hsl(220 6% 16%)`, `--muted-foreground: hsl(220 4% 67%)`, `--accent: hsl(220 5% 15.5%)`, `--destructive: hsl(0 62% 46%)`, `--border: hsl(220 3% 17%)`, `--input: hsl(220 4% 22%)`, `--ring: hsl(220 4% 80%)`, `--table-header: hsl(220 6% 13%)`, plus `color-scheme: dark` so native controls follow.
-- Theme switching, same scheme as Beszel: a `dark` class on `<html>`, defaulted from the OS `prefers-color-scheme`, with a manual toggle persisted in `localStorage`; the class is set by an inline script in the page head to avoid a flash of the wrong theme on first
- paint.
+- Theme switching, same scheme as Beszel: a `dark` class on `<html>`, defaulted from the OS `prefers-color-scheme`, with a manual toggle persisted in `localStorage`; the class is set by an inline script in the page head to avoid a flash of the wrong theme on first paint.
 - Component language: cards on `--card` over `--background`, hairline `--border`, `--radius` rounding, sticky table headers on `--table-header` (the document list), secondary actions on `--secondary`/`--muted`, `--destructive` reserved for destructive actions and errors, focus rings on `--ring`.
 - Status colors, the only domain additions to Beszel's tokens: `pending` maps to a warm badge on `--accent`, `validated` to a green from Beszel's chart scale (`hsl(140 50% 48%)` light / `hsl(140 49% 60%)` dark), `processed` to a neutral `--muted` badge.
 - Typography: Beszel ships InterVariable; archivist does not ship a font file — it uses the system font stack with Inter as the preferred family when installed, to keep the image lean. A vendored Inter subset remains an accepted option if rendering proves unsatisfactory.
@@ -294,6 +284,7 @@ The dashboard's visual design takes Beszel (https://github.com/henrygd/beszel) a
 - Unreadable PDF: `pending` status, reason recorded in the `errors` key of the `imported` event payload.
 - Target key conflict (two files renamed identically, whether filing to `files/` or moving to `pending/`): automatic incremental suffix, event logged.
 - Invalid config: error message displayed and the application does not start.
+
 ## 9. Logging
 
 Two channels, split by lifecycle:
@@ -303,11 +294,11 @@ Two channels, split by lifecycle:
 
 Levels used:
 
-- `Erro
-r`: a failed operation (S3 error, event append failure).
+- `Error`: a failed operation (S3 error, event append failure).
 - `Warn`: a degraded but non-fatal state (versioning disabled, schema column removed, stuck record whose inbox object disappeared).
 - `Info`: pipeline outcomes (document imported, duplicate removed, interrupted filing recovered).
 - `Debug`: the per-rule evaluation trace of section 6, step 4.
+
 ## 10. Testing
 
 A single E2E regression gate, run after building the image and before publishing it:
@@ -329,8 +320,7 @@ The scenarios form one narrative; each subtest names the US it proves:
 2. Import — a valid simulated statement is classified and filed to `files/` with its `imported` event (US-10 to US-17).
 3. Duplicate — the same content re-uploaded is deleted from `inbox/`, no record, no event (US-12).
 4. Pending — a missing mandatory date routes the document to `pending/` with `errors` in the imported event and the recognized fields kept (US-13 to US-15).
-5. Correction — a field PATCH through the API persists the values with no side effect (no re-fil
-ing, no status change), `corrected` event carrying the field diff (US-22).
+5. Correction — a field PATCH through the API persists the values with no side effect (no re-filing, no status change), `corrected` event carrying the field diff (US-22).
 6. Validation — a status-only PATCH appends the `validated` event, `file_key` untouched (US-23).
 7. Append-only — PATCH and DELETE on `document_events` are refused (US-04).
 8. Deletion — a deleted record removes the S3 object; the history follows via the cascade delete (US-24).
@@ -341,17 +331,17 @@ ing, no status change), `corrected` event carrying the field diff (US-22).
 13. Dry-run — both modes return the shared response shape and persist nothing (US-35).
 14. Full correction — a pending document is re-filed and validated; value errors leave everything unchanged; an unchanged name skips the S3 move and the diff drops file_key (US-36).
 15. Static dashboard — the review pages are served from pb_public/ with no external resource (US-30).
+16. Enum lifecycle — the value-registration route extends the possible-values list and its refusals hold; a restart drops an unused added value, keeps a used one, and the `template` list follows the configuration (US-37).
 
 `POST /api/archivist/poll` (superuser only) runs one poll pass immediately. It exists so the gate and the operator trigger passes on demand instead of waiting for the cron; a fresh upload needs two calls because the poller waits for size/ETag stability across two passes (US-10).
 
-The dashboard application routes are covered by the gate: the config metadata route, both dry-run modes, the `/correct` orchestration and the PDF proxy (US-30 to US-36). The gate is a regression detector for dependency upgrades (PocketBase, minio-go, ledongthuc/pdf, expr, Garage), not an acceptance proof: acceptance criteria are reviewed on the stories themselves. `E2E_KEEP=1` leaves the containers running after the run for debugging.
+The dashboard application routes are covered by the gate: the config metadata route, the enum value-registration route, both dry-run modes, the `/correct` orchestration and the PDF proxy (US-30 to US-37). The gate is a regression detector for dependency upgrades (PocketBase, minio-go, ledongthuc/pdf, expr, Garage), not an acceptance proof: acceptance criteria are reviewed on the stories themselves. `E2E_KEEP=1` leaves the containers running after the run for debugging.
 
 ## 11. Packaging
 
 `Dockerfile`, two-stage build:
 
 - Builder: `golang:1.27-alpine` (matches the `go 1.27` directive of PocketBase v0.41.1), CGO disabled, static binary, `TARGETARCH` honored for multi-platform builds under buildx. `go mod tidy` runs there because `go.sum` is not committed; once it is committed, the line becomes `go mod download` for fully reproducible builds.
-- Runtime: `scratch` with the `/archivist` binary, the CA bundle (the S3 endpoint is HTTPS by default), the timezone database (the cron and date rendering honor `TZ`), the static review-dashboard frontend copied to `/app/pb_public/` (read-only at runtime), and `/app/pb_data` + `/tmp`, the only writable directories, owned by
- the unprivileged runtime user 65532. `config.jsonc` is never baked in: it is mounted at runtime, `ARCHIVIST_CONFIG` defaulting to `config.jsonc` relative to `/app`.
+- Runtime: `scratch` with the `/archivist` binary, the CA bundle (the S3 endpoint is HTTPS by default), the timezone database (the cron and date rendering honor `TZ`), the static review-dashboard frontend copied to `/app/pb_public/` (read-only at runtime), and `/app/pb_data` + `/tmp`, the only writable directories, owned by the unprivileged runtime user 65532. `config.jsonc` is never baked in: it is mounted at runtime, `ARCHIVIST_CONFIG` defaulting to `config.jsonc` relative to `/app`.
 
 The container runs as 65532:65532 (non-root), exposes 8090, declares `/app/pb_data` as a volume, and has no shell: `docker exec` is not available. `.dockerignore` keeps the build context to the Go sources and the dashboard frontend; the E2E harness is not part of the image.
