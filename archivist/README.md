@@ -14,6 +14,8 @@ The application is 100% offline: no cloud APIs, no data ever leaves your server.
 
 Duplicates (same sha256) are ignored: the `inbox/` copy is deleted, the original stays in place — no data is lost, the content is identical.
 
+Files in `inbox/` that are not PDFs (no `%PDF-` header) are left as-is: they are never imported and stay in place until you remove or rename them.
+
 ## Prerequisites
 
 - An S3 bucket, with three prefixes: `inbox/`, `pending/`, `files/`. The prefixes are created on first startup if they do not exist. Versioning is not required, but it is strongly recommended: without it, a file deleted by the application or by a bug is lost for good; with it, deleted objects stay recoverable via delete markers. The application logs a warning at startup when versioning is disabled (visible in the admin dashboard, Dashboard > Logs).
@@ -156,7 +158,7 @@ Without `E2E_IMAGE` the suite skips. The suite drives the poller through the sup
 
 ## Troubleshooting
 
-- A file stays in `inbox/`: check the logs — admin dashboard, Dashboard > Logs (`docker logs archivist` shows startup errors). Frequent causes: unreadable PDF (goes to `pending/`), transient S3 error (retried on the next pass).
+- A file stays in `inbox/`: check the logs — admin dashboard, Dashboard > Logs (`docker logs archivist` shows startup errors). Frequent causes: the file is not a PDF (left in place by design), unreadable PDF (goes to `pending/`), transient S3 error (retried on the next pass).
 - A file goes to `pending/`: open its detail view in the dashboard; the classification error(s) are displayed there.
 - The container does not start: invalid `config.jsonc`. The full error message is in the container logs; the application refuses to start with a partially valid configuration.
 - After editing `config.jsonc`: `docker restart archivist`.

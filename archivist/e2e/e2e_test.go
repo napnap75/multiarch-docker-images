@@ -688,6 +688,24 @@ func TestE2E(t *testing.T) {
 		}
 	})
 
+	// 3b. Non-PDF (US-12): an object that is not a PDF is left as-is in
+	// inbox/, never imported — no record, no event.
+	t.Run("non-pdf: a non-PDF object is left in place, not imported", func(t *testing.T) {
+		data := []byte("not a pdf at all\n")
+		if _, err := s3.PutObject(context.Background(), bucket, "inbox/notes.txt",
+			bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{}); err != nil {
+			t.Fatalf("PutObject notes.txt: %v", err)
+		}
+		poll(t)
+		poll(t)
+		if !s3Exists(t, "inbox/notes.txt") {
+			t.Fatal("non-PDF object was removed from inbox/")
+		}
+		if docs := listRecords(t, "documents", "(file_key='inbox/notes.txt')", ""); len(docs) != 0 {
+			t.Fatalf("non-PDF object was imported: %d record(s)", len(docs))
+		}
+	})
+
 	// 4. Pending (US-13 to US-15): a missing mandatory date routes the
 	// document to pending/ with the causes in the imported event and the
 	// recognized fields kept for the correction form.

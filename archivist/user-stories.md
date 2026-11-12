@@ -108,6 +108,8 @@ Acceptance criteria:
 - Given an eligible candidate, when it is downloaded, then it is streamed in memory with no disk write and its sha256 is computed on the fly.
 - Given the computed sha256 matches an existing `documents` record, when the download completes, then the `inbox/` key is deleted (a no-data-loss case — the original with the same content stays filed; with versioning enabled the deleted copy is additionally recoverable via delete markers), the duplicate is logged in the PocketBase logs only (Dashboard > Logs; no `document_events` entry, by design), and processing stops for that object.
 - Given the sha256 is new, when the download completes, then processing continues to extraction.
+- Given an object under `inbox/` whose content does not start with the `%PDF-` header, when it is processed, then it is left as-is in `inbox/`: it is never imported, gets no record and no event, and the skip is logged (PocketBase logger, Warn level, once per unchanged content).
+- Given an object already skipped as non-PDF, when a later pass lists it with an unchanged ETag, then it is not re-downloaded; when its content changes (new ETag), then it is checked again.
 
 ### US-13 — Extract the text page by page
 
