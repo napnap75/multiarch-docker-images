@@ -1,6 +1,6 @@
 "use strict";
 
-// Shared helpers of the review-dashboard pages (US-30 to US-36).
+// Shared helpers of the review-dashboard pages (US-30 to US-36, US-37).
 // The pages carry no data; everything goes through authenticated API calls.
 
 var memoryToken = "";
@@ -192,6 +192,12 @@ function addOption(sel, value, label) {
   sel.appendChild(o);
 }
 
+// buildEnumControl builds the enum dropdown (US-32, US-33, US-34, US-37):
+// only the official values of the field's select list, plus the
+// "Ajouter une valeur…" entry that opens the registration modal. A value
+// the record carries but the list does not know (e.g. a pipeline
+// proposal) appears as a temporary option; it is registered by the
+// correction or the import path.
 function buildEnumControl(meta, vocab, value) {
   var current = value === null || value === undefined ? "" : String(value);
   var wrapper = document.createElement("div");
@@ -201,49 +207,91 @@ function buildEnumControl(meta, vocab, value) {
   var select = document.createElement("select");
   addOption(select, "", "—");
   (vocab || []).forEach(function (item) { addOption(select, item, item); });
-  if (current && !(vocab || []).includes(current)) addOption(select, current, current);
-  addOption(select, "__archivist_custom_value__", "Ajouter une valeur…");
-
-  var custom = document.createElement("input");
-  custom.type = "text";
-  custom.placeholder = "Saisir une valeur";
-  custom.setAttribute("aria-label", "Nouvelle valeur pour " + meta.name);
-  custom.hidden = true;
+  if (current && !(vocab || []).includes(current)) insertEnumOption(select, current);
+  addOption(select, "__archivist_add_value__", "Ajouter une valeur…");
 
   select.value = current;
   select.addEventListener("change", function () {
-    var adding = select.value === "__archivist_custom_value__";
-    custom.hidden = !adding;
-    if (adding) {
-      custom.value = "";
-      custom.focus();
-    } else {
-      custom.value = "";
+    if (select.value === "__archivist_add_value__") {
+      select.value = "";
+      promptNewEnumValue(meta, select);
     }
   });
 
   Object.defineProperty(wrapper, "value", {
-    get: function () { return custom.hidden ? select.value : custom.value; },
+    get: function () { return select.value; },
     set: function (next) {
       var nextValue = next === null || next === undefined ? "" : String(next);
       var optionExists = Array.from(select.options).some(function (option) {
         return option.value === nextValue;
       });
-      if (optionExists) {
-        select.value = nextValue;
-        custom.value = "";
-        custom.hidden = true;
-      } else {
-        select.value = "__archivist_custom_value__";
-        custom.value = nextValue;
-        custom.hidden = false;
-      }
+      if (!optionExists && nextValue !== "") insertEnumOption(select, nextValue);
+      select.value = nextValue;
     }
   });
 
   wrapper.appendChild(select);
-  wrapper.appendChild(custom);
   return wrapper;
+}
+
+// insertEnumOption adds an option before the "Ajouter une valeur…" entry.
+function insertEnumOption(select, value) {
+  var addEntry = null;
+  Array.from(select.options).forEach(function (option) {
+    if (option.value === "__archivist_add_value__") addEntry = option;
+  });
+  var o = document.createElement("option");
+  o.value = value;
+  o.textContent = value;
+  if (addEntry) select.insertBefore(o, addEntry); else select.appendChild(o);
+}
+
+// promptNewEnumValue is the modal behind "Ajouter une valeur…" (US-37):
+// the value is registered on the field's official select list through the
+// dedicated route, then selected in the dropdown.
+function promptNewEnumValue(meta, select) {
+  var dialog = document.createElement("dialog");
+  dialog.className = "auth-dialog";
+  dialog.setAttribute("aria-labelledby", "enum-value-title");
+  dialog.innerHTML = '<div class="auth-card">' +
+    '<h2 id="enum-value-title">Nouvelle valeur</h2>' +
+    '<p>Ajout au champ ' + meta.name + '.</p>' +
+    '<form class="auth-form">' +
+    '<label>Valeur<input name="value" type="text" required autofocus></label>' +
+    '<p class="auth-error" role="alert" aria-live="polite"></p>' +
+    '<div class="auth-actions"><button class="btn secondary" type="button">Annuler</button>' +
+    '<button class="btn primary" type="submit">Ajouter</button></div>' +
+    '</form></div>';
+
+  var form = dialog.querySelector("form");
+  var error = dialog.querySelector(".auth-error");
+  dialog.querySelector("button[type=button]").addEventListener("click", function () {
+    dialog.close();
+  });
+  dialog.addEventListener("close", function () {
+    if (select.value === "__archivist_add_value__") select.value = "";
+    dialog.remove();
+  });
+  form.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    error.textContent = "";
+    var value = form.elements.value.value.trim();
+    if (!value) {
+      error.textContent = "La valeur ne peut pas être vide.";
+      return;
+    }
+    var res = await api("POST", "/api/archivist/fields/" + encodeURIComponent(meta.name) + "/values", { value: value });
+    if (res.status !== 200) {
+      error.textContent = errMsg(res);
+      return;
+    }
+    insertEnumOption(select, value);
+    select.value = value;
+    dialog.close();
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  document.body.appendChild(dialog);
+  dialog.showModal();
 }
 
 // buildValueControl builds the typed control of one field (US-33 bulk
