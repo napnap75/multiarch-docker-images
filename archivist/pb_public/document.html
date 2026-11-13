@@ -60,6 +60,17 @@
         <h3>Historique</h3>
         <div id="history"></div>
       </div>
+      <div class="card tracecard">
+        <div class="tracehead">
+          <h3>Trace des règles</h3>
+          <span id="traceBadge" class="badge trace-badge" hidden></span>
+          <button id="traceToggle" type="button" class="btn secondary trace-toggle" aria-expanded="false" aria-controls="tracePanel">Afficher</button>
+        </div>
+        <div id="tracePanel" hidden>
+          <div id="traceErrors" class="errbox" hidden></div>
+          <div id="traceList" class="trace-list"></div>
+        </div>
+      </div>
     </section>
   </div>
 </main>
