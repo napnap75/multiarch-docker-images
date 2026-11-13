@@ -248,3 +248,18 @@ h3 { margin: 0 0 .5rem; font-size: .9rem; }
 .jobdetails { margin-top: .5rem; }
 .jobdetails summary { cursor: pointer; color: var(--muted-foreground); }
 .mono-list { margin: .35rem 0 0 1rem; padding: 0; }
+
+
+/* Rule trace panel (US-42): collapsed by default under the history. */
+.tracecard { margin-top: 1rem; }
+.tracehead { display: flex; align-items: center; gap: .5rem; }
+.tracehead h3 { margin: 0; font-size: 1rem; flex: 1; }
+.trace-toggle { font-size: 12px; padding: .15rem .6rem; }
+.trace-badge { background: var(--destructive); color: var(--destructive-foreground); border-color: transparent; }
+.trace-list { display: grid; gap: .35rem; margin-top: .6rem; }
+.trace-line { display: grid; gap: .15rem; padding: .5rem .75rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--secondary); font-size: 13px; word-break: break-all; }
+.trace-line.trace-error { border-color: var(--destructive); color: var(--destructive); }
+.trace-line .trace-rule { color: var(--muted-foreground); }
+.trace-line.trace-error .trace-rule { color: var(--destructive); opacity: .8; }
+.trace-expr { color: var(--muted-foreground); }
+.trace-deleted { color: var(--muted-foreground); font-style: italic; }
