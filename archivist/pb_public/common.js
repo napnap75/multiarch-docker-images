@@ -171,7 +171,10 @@ function initTheme(btnId) {
 function fmtVal(v) {
   if (v === null || v === undefined || v === "") return "—";
   if (typeof v === "boolean") return v ? "true" : "false";
-  if (typeof v === "string") return v;
+  if (typeof v === "string") {
+    if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return fmtDate(v);
+    return v;
+  }
   return String(v);
 }
 

@@ -503,7 +503,7 @@ func FrPeriod(args ...any) (any, error) {
 		}
 		first := time.Date(y2, time.Month(m2)+1, 1, 0, 0, 0, 0, time.UTC)
 		s := first.Format(layout)
-		return strings.Replace(s, "January", month, 1), nil
+		return strings.Replace(s, first.Format("January"), month, 1), nil
 	case "quarter":
 		q := (m-1)/3 + shift
 		for q < 0 {

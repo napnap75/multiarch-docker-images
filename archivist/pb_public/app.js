@@ -20,6 +20,7 @@ var state = {
   totalPages: 1,
   counts: {}
 };
+var docsLoadSequence = 0;
 
 function $(id) { return document.getElementById(id); }
 
@@ -163,16 +164,21 @@ function buildFilterQuery() {
 }
 
 async function loadDocs() {
+  var sequence = ++docsLoadSequence;
   var sort = state.sort
     ? ("&sort=" + (state.sort.dir === "desc" ? "-" : "") + encodeURIComponent(state.sort.field))
     : "";
+  var listQuery = sort + buildFilterQuery();
   var q = "/api/collections/documents/records?page=" + state.page +
-    "&perPage=" + state.perPage + sort + buildFilterQuery();
+    "&perPage=" + state.perPage + listQuery;
   var r = await api("GET", q);
-  if (r.status !== 200) return;
+  if (r.status !== 200 || sequence !== docsLoadSequence) return;
   state.docs = r.data.items || [];
   state.total = r.data.totalItems || 0;
   state.totalPages = r.data.totalPages || 1;
+  try {
+    sessionStorage.setItem("archivist.documentIds", JSON.stringify(state.docs.map(function (doc) { return doc.id; })));
+  } catch (e) {}
   renderHead();
   renderRows();
   renderPager();

@@ -25,6 +25,23 @@ func TestDefaultConfigExpressionHelpers(t *testing.T) {
 	}
 }
 
+func TestRangeStartDateExpression(t *testing.T) {
+	cfg, err := Load("../../tests/config.jsonc")
+	if err != nil {
+		t.Fatalf("load test config: %v", err)
+	}
+
+	fields, errs := cfg.Classify([]string{
+		"821099447 QUITTANCE 2 avenue des Champs-Elysées Periode : du 10 au 30 septembre 2026",
+	})
+	if len(errs) != 0 {
+		t.Fatalf("classify range date: %v", errs)
+	}
+	got, ok := fields["emissionDate"].(time.Time)
+	if !ok || got.Format("02/01/2006") != "10/09/2026" {
+		t.Fatalf("emissionDate = %v, want 10/09/2026", fields["emissionDate"])
+	}
+}
 
 func TestFrenchDate(t *testing.T) {
 	cases := []struct {
@@ -52,5 +69,15 @@ func TestFrenchDate(t *testing.T) {
 	}
 	if _, err := FrenchDate("le 31 février 2026"); err == nil {
 		t.Fatal("frDate: expected an error on an invalid date")
+	}
+}
+
+func TestFrPeriodUsesFrenchMonthNames(t *testing.T) {
+	got, err := FrPeriod(time.Date(2026, time.September, 10, 0, 0, 0, 0, time.UTC), "month", 0)
+	if err != nil {
+		t.Fatalf("frPeriod: %v", err)
+	}
+	if got != "Septembre 2026" {
+		t.Fatalf("frPeriod = %q, want %q", got, "Septembre 2026")
 	}
 }

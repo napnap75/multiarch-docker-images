@@ -61,6 +61,7 @@ body {
 }
 
 .wrap { max-width: 1200px; margin: 0 auto; padding: 0 1rem; }
+.document-page .wrap { max-width: 1600px; }
 
 a { color: var(--foreground); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -69,6 +70,10 @@ a:hover { text-decoration: underline; }
 .topbar .wrap { display: flex; align-items: center; justify-content: space-between; height: 3.5rem; }
 .topbar h1 { font-size: 1rem; font-weight: 600; margin: 0; }
 .topbar nav { display: flex; gap: .5rem; align-items: center; }
+.topbar .icon-control { display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem; padding: 0; border: 1px solid var(--border); border-radius: calc(var(--radius) - 4px); background: var(--secondary); color: var(--secondary-foreground); cursor: pointer; }
+.topbar .icon-control:hover { background: var(--accent); text-decoration: none; }
+.topbar .icon-control:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.topbar .icon-control svg { width: 1rem; height: 1rem; fill: currentColor; }
 
 .card {
   background: var(--card);
@@ -154,10 +159,17 @@ tbody tr:hover { background: var(--accent); }
 .pager { display: flex; gap: 1rem; align-items: center; padding: .75rem 0; color: var(--muted-foreground); }
 
 .detailhead { display: flex; align-items: center; gap: .75rem; margin: 1rem 0 0; flex-wrap: wrap; }
-.detailhead h2 { font-size: 1rem; margin: 0; font-weight: 600; word-break: break-all; }
+.detailtitle { display: flex; align-items: center; gap: .75rem; flex: 1 1 auto; min-width: 0; }
+.detailhead h2 { min-width: 0; font-size: 1rem; margin: 0; font-weight: 600; word-break: break-all; }
+.docnav { display: flex; gap: .4rem; margin-left: auto; }
+.docnav-link { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border: 1px solid var(--border); border-radius: calc(var(--radius) - 4px); background: var(--secondary); color: var(--secondary-foreground); }
+.docnav-link:hover { text-decoration: none; background: var(--accent); }
+.docnav-link[aria-disabled="true"] { opacity: .4; pointer-events: none; }
+.docnav-link:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.docnav-link svg { width: 1rem; height: 1rem; fill: currentColor; }
 
-.detailgrid { display: grid; grid-template-columns: minmax(320px, 2fr) 3fr; gap: 1rem; align-items: start; margin-top: 1rem; }
-@media (max-width: 900px) { .detailgrid { grid-template-columns: 1fr; } }
+.detailgrid { display: grid; grid-template-columns: minmax(320px, 3fr) 2fr; gap: 1rem; align-items: start; margin-top: 1rem; }
+@media (max-width: 1000px) { .detailgrid { grid-template-columns: 1fr; } }
 
 .pdfpane { padding: 0; overflow: hidden; height: 75vh; }
 .pdfpane iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--muted); }

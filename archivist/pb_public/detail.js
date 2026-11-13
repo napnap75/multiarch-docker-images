@@ -13,6 +13,7 @@ var originals = {};  // field name -> control value at load
 var dirty = {};      // field name -> boolean
 var dryErrors = [];
 var dryTimer = null;
+var dryRunSequence = 0;
 
 function $(id) { return document.getElementById(id); }
 
@@ -27,6 +28,7 @@ async function init() {
 
   initTheme("themeBtn");
   renderHead();
+  renderDocumentNavigation();
   loadPdf();
   var evs = await loadEvents();
   renderImportErrors(evs);
@@ -34,8 +36,32 @@ async function init() {
   renderForm();
   bindActions();
   if (record.status === "processed") $("validateBtn").hidden = false;
-  $("targetname").textContent = "Fichier actuel : " + (record.file_key || "—");
+  loadCurrentTarget();
   loadProposals();
+}
+
+function renderDocumentNavigation() {
+  var ids = [];
+  try {
+    var stored = JSON.parse(sessionStorage.getItem("archivist.documentIds") || "[]");
+    if (Array.isArray(stored)) ids = stored;
+  } catch (e) {}
+  var index = ids.indexOf(docId);
+  setDocumentLink("prevDoc", index > 0 ? ids[index - 1] : null);
+  setDocumentLink("nextDoc", index >= 0 && index < ids.length - 1 ? ids[index + 1] : null);
+}
+
+function setDocumentLink(id, targetId) {
+  var link = $(id);
+  if (targetId) {
+    link.href = "/document.html?id=" + encodeURIComponent(targetId);
+    link.removeAttribute("aria-disabled");
+    link.removeAttribute("tabindex");
+  } else {
+    link.removeAttribute("href");
+    link.setAttribute("aria-disabled", "true");
+    link.setAttribute("tabindex", "-1");
+  }
 }
 
 async function loadEvents() {
@@ -46,8 +72,10 @@ async function loadEvents() {
 }
 
 function renderHead() {
-  document.title = "Archivist — " + (record.file_key || docId);
-  $("docname").textContent = record.file_key || ("Document " + docId);
+  var fileKey = record.file_key || ("Document " + docId);
+  var fileName = fileKey.substring(fileKey.lastIndexOf("/") + 1);
+  document.title = "Archivist — " + fileName;
+  $("docname").textContent = fileName;
   var st = $("docstatus");
   st.textContent = record.status || "";
   st.className = "badge st-" + record.status;
@@ -136,6 +164,8 @@ function renderForm() {
 
 function fieldChanged(f) {
   dirty[f.name] = controls[f.name].value !== originals[f.name];
+  dryRunSequence++;
+  renderTargetName("");
   if (dryTimer) clearTimeout(dryTimer);
   dryTimer = setTimeout(runDryRun, 400);
 }
@@ -161,17 +191,33 @@ function dirtyBody() {
 }
 
 async function runDryRun() {
+  var sequence = ++dryRunSequence;
   var d = dirtyBody();
-  if (d.error) { renderDryErrors([d.error]); return; }
+  if (d.error) { renderTargetName(""); renderDryErrors([d.error]); return; }
   var res = await api("POST", "/api/archivist/documents/" + docId + "/dry-run", d.body);
-  if (res.status !== 200) { renderDryErrors(["dry-run : " + errMsg(res)]); return; }
+  if (sequence !== dryRunSequence) return;
+  if (res.status !== 200) {
+    renderTargetName("");
+    renderDryErrors(["dry-run : " + errMsg(res)]);
+    return;
+  }
   dryErrors = res.data.errors || [];
   renderDryErrors(dryErrors);
-  if (dryErrors.length) {
-    $("targetname").textContent = "";
-  } else {
-    $("targetname").textContent = "Nom cible : files/" + (res.data.rendered || "");
-  }
+  renderTargetName(dryErrors.length ? "" : res.data.rendered);
+}
+
+async function loadCurrentTarget() {
+  var sequence = ++dryRunSequence;
+  var res = await api("POST", "/api/archivist/documents/" + docId + "/dry-run", {});
+  if (sequence !== dryRunSequence || res.status !== 200) return;
+  var errors = res.data.errors || [];
+  renderTargetName(errors.length ? "" : res.data.rendered);
+}
+
+function renderTargetName(rendered) {
+  var targetKey = rendered ? "files/" + rendered : "";
+  $("targetname").textContent = targetKey && targetKey !== record.file_key
+    ? "Clé cible : " + targetKey : "";
 }
 
 function renderDryErrors(errs) {
