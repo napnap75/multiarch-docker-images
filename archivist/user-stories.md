@@ -137,7 +137,7 @@ Acceptance criteria:
 - Given a field assignment whose value does not match the declared field type (raw string to a `date`, non-numeric to a `number`), when it executes, then it is a rule error and the document is routed to `pending/`.
 - Given `firstMatch` finds no match, when its result is used, then it returns an empty string (parsing an empty string with `date()` is a rule error).
 - Given `delete` is executed, when the rule fires, then the named fields become undefined again for later rules and template rendering.
-- Given the whole evaluation, when it runs, then every rule evaluation and action is written in detail to the PocketBase logger at Debug level (visible in Dashboard > Logs; the same trace feeds the future dry-run mode).
+- Given the whole evaluation, when it runs, then every rule evaluation and action is written in detail to the PocketBase logger at Debug level (visible in Dashboard > Logs; the same structured trace — modifying and failing rules — is returned by the classification dry-run, US-42).
 
 ### US-15 — Decide the verdict
 
@@ -321,6 +321,7 @@ so that I see the effect of a correction before committing it.
 Acceptance criteria:
 
 - Given the detail page, when it opens, then it calls `POST /api/archivist/documents/{id}/dry-run` with no body; the route re-runs the rule tree against the stored pages and returns the proposed fields, the selected template, the rendered name and the errors, persisting nothing.
+- Given the classification dry-run, when it runs, then the response also carries a `trace` field: the flat, ordered list of the rules that modified a value (`set`/`delete`) or errored — rule name, field, final value after the operation (marked as unset for a `delete`), the literal `eval` expression that produced it (a constant `set` returns its own value) and the error message for a failing rule; rules that match without modifying anything and non-matching rules are omitted (US-42).
 - Given a field whose proposed value differs from the current value, when the response arrives, then a discreet banner under the control offers the proposed value with one-click adoption.
 - Given the form is modified, when the typing settles, then the page calls the dry-run route with the proposed field values; the route converts them to their native types (per-field error on mismatch), merges them with the record values, renders the template against the stored pages and returns the target name and its errors in the same response shape.
 - Given the two modes, when either runs, then they are exclusive: user values never enter the rule-evaluation context, and no record, event or S3 object is touched.
@@ -354,6 +355,19 @@ Acceptance criteria:
 - Given the dashboard, when I pick the add-a-value entry in an enum dropdown, then a modal asks for the value, the `POST /api/archivist/fields/{field}/values` route registers it in the list, and the dropdown offers only the possible values afterwards.
 - Given the route, when it is called with an unknown or non-enum field, an empty value, the reserved dummy `-----`, or the `template` field, then it is refused; the list of `template` follows the configuration alone.
 - Given a startup, when the cleanup pass runs, then every enum value no document uses anymore is removed from the list; the dummy `-----` is kept only when the list would otherwise be empty; removals are logged.
+
+### US-42 — Show how the rules evaluated a document
+
+As the user,
+I want to see, on the detail page, how the rules evaluate the document today — the processing errors and every rule that changed a value —
+so that I understand where the proposed values come from and why a document is pending.
+
+Acceptance criteria:
+
+- Given the detail page, when it opens, then a panel below the event history, collapsed by default, holds the rule evaluation trace fetched with the classification dry-run in the same request (no extra call when unfolding).
+- Given the panel header, when the dry-run returned errors (classification or name rendering), then they are displayed at the top of the panel in the existing error style, and the collapsed header shows a badge with their count.
+- Given the trace, when the panel is unfolded, then each entry shows the rule name, the field, the producing `eval` expression and the final value; deletions are marked as unset, failing rules show their error message.
+- Given the evaluation, when it runs, then nothing is persisted: the trace reflects what the rules would do today against the stored pages, not what happened at import.
 
 ## Epic: Tools (dashboard)
 
