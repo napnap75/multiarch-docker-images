@@ -250,8 +250,30 @@ func ValidateValue(f Field, v any) error {
 // Classify evaluates the ordered rule tree against the document pages and
 // returns the extracted fields plus the list of rule errors (US-14).
 func (c *Config) Classify(pages []string) (map[string]any, []string) {
+	fields, errs, _ := c.ClassifyTraced(pages)
+	return fields, errs
+}
+
+// TraceEntry is one entry of the rule evaluation trace (US-42): a rule that
+// modified a value (set/delete) or errored. The rule is identified by its
+// `when` expression, the only name a rule carries in the configuration.
+type TraceEntry struct {
+	Rule    string `json:"rule"`              // the rule's `when` expression
+	Field   string `json:"field"`             // the field concerned (empty for a `when` error)
+	Op      string `json:"op"`                // set | delete | error
+	Value   any    `json:"value,omitempty"`   // final value after the operation; omitted for delete and error
+	Deleted bool   `json:"deleted,omitempty"` // true for a delete
+	Expr    string `json:"expr,omitempty"`    // the literal eval expression; empty for a constant set
+	Error   string `json:"error,omitempty"`   // the error message for a failing rule or assignment
+}
+
+// ClassifyTraced is Classify with the evaluation trace (US-42): a flat,
+// ordered list of the rules that modified a value or errored. Rules that
+// match without modifying anything and non-matching rules are omitted.
+func (c *Config) ClassifyTraced(pages []string) (map[string]any, []string, []TraceEntry) {
 	fields := map[string]any{}
 	var errs []string
+	var trace []TraceEntry
 
 	var walk func(rules []*Rule)
 	walk = func(rules []*Rule) {
@@ -260,11 +282,13 @@ func (c *Config) Classify(pages []string) (map[string]any, []string) {
 			program, err := CompileExpr(r.When)
 			if err != nil {
 				errs = append(errs, fmt.Sprintf("when: %v", err))
+				trace = append(trace, TraceEntry{Rule: r.When, Op: "error", Error: fmt.Sprintf("when: %v", err)})
 				continue
 			}
 			res, err := expr.Run(program, env)
 			if err != nil {
 				errs = append(errs, fmt.Sprintf("when: %v", err))
+				trace = append(trace, TraceEntry{Rule: r.When, Op: "error", Error: fmt.Sprintf("when: %v", err)})
 				continue
 			}
 			if !truthy(res) {
@@ -276,11 +300,13 @@ func (c *Config) Classify(pages []string) (map[string]any, []string) {
 					program, err := CompileExpr(s.Eval)
 					if err != nil {
 						errs = append(errs, fmt.Sprintf("eval %s: %v", s.Field, err))
+						trace = append(trace, TraceEntry{Rule: r.When, Field: s.Field, Op: "error", Expr: s.Eval, Error: fmt.Sprintf("eval %s: %v", s.Field, err)})
 						continue
 					}
 					v, err = expr.Run(program, env)
 					if err != nil {
 						errs = append(errs, fmt.Sprintf("eval %s: %v", s.Field, err))
+						trace = append(trace, TraceEntry{Rule: r.When, Field: s.Field, Op: "error", Expr: s.Eval, Error: fmt.Sprintf("eval %s: %v", s.Field, err)})
 						continue
 					}
 				} else {
@@ -288,18 +314,21 @@ func (c *Config) Classify(pages []string) (map[string]any, []string) {
 				}
 				if err := ValidateValue(c.Fields[s.Field], v); err != nil {
 					errs = append(errs, err.Error())
+					trace = append(trace, TraceEntry{Rule: r.When, Field: s.Field, Op: "error", Expr: s.Eval, Error: err.Error()})
 					continue
 				}
 				fields[s.Field] = v
+				trace = append(trace, TraceEntry{Rule: r.When, Field: s.Field, Op: "set", Value: v, Expr: s.Eval})
 			}
 			for _, d := range r.Delete {
 				delete(fields, d)
+				trace = append(trace, TraceEntry{Rule: r.When, Field: d, Op: "delete", Deleted: true})
 			}
 			walk(r.Rules)
 		}
 	}
 	walk(c.Rules)
-	return fields, errs
+	return fields, errs, trace
 }
 
 func truthy(v any) bool {
@@ -319,7 +348,13 @@ func truthy(v any) bool {
 // It returns the fields, the rendered file name (empty when invalid) and the
 // per-cause error list.
 func (c *Config) Evaluate(pages []string) (map[string]any, string, []string) {
-	fields, errs := c.Classify(pages)
+	fields, rendered, errs, _ := c.EvaluateWithTrace(pages)
+	return fields, rendered, errs
+}
+
+// EvaluateWithTrace is Evaluate with the rule evaluation trace (US-42).
+func (c *Config) EvaluateWithTrace(pages []string) (map[string]any, string, []string, []TraceEntry) {
+	fields, errs, trace := c.ClassifyTraced(pages)
 
 	// Mandatory fields.
 	for _, f := range c.FieldList {
@@ -338,14 +373,14 @@ func (c *Config) Evaluate(pages []string) (map[string]any, string, []string) {
 	tpl, ok := c.Templates[tplName]
 	if !ok {
 		errs = append(errs, "unknown template: "+tplName)
-		return fields, "", errs
+		return fields, "", errs, trace
 	}
 	rendered, err := tpl.Render(fields, pages)
 	if err != nil {
 		errs = append(errs, err.Error())
-		return fields, "", errs
+		return fields, "", errs, trace
 	}
-	return fields, rendered, errs
+	return fields, rendered, errs, trace
 }
 
 // FirstMatch is the firstMatch(regex, texts?) helper (US-14 / arch.md §5).
