@@ -1,8 +1,9 @@
 "use strict";
 
 // Document detail page (US-34 to US-36): PDF preview, typed form,
-// pipeline proposals, live rendered-name dry-run, event history, and
-// the three distinct exits - draft save, full correction, validation.
+// pipeline proposals, live rendered-name dry-run, event history, the
+// rule trace panel (US-42), and the three distinct exits - draft save,
+// full correction, validation.
 
 var docId = new URLSearchParams(window.location.search).get("id");
 
@@ -14,6 +15,8 @@ var dirty = {};      // field name -> boolean
 var dryErrors = [];
 var dryTimer = null;
 var dryRunSequence = 0;
+var traceData = null;   // US-42: rule evaluation trace from the classification dry-run
+var traceErrors = [];   // US-42: dry-run errors shown at the top of the trace panel
 
 function $(id) { return document.getElementById(id); }
 
@@ -243,7 +246,10 @@ function renderDryErrors(errs) {
 // the pipeline value with one-click adoption (US-35).
 async function loadProposals() {
   var res = await api("POST", "/api/archivist/documents/" + docId + "/dry-run");
-  if (res.status !== 200) return;
+  if (res.status !== 200) { traceData = null; renderTracePanel(); return; }
+  traceData = res.data.trace || [];
+  traceErrors = res.data.errors || [];
+  renderTracePanel();
   var props = res.data.fields || {};
   cfg.fields.forEach(function (f) {
     var p = props[f.name];
@@ -278,6 +284,98 @@ function bindActions() {
   $("draftBtn").addEventListener("click", draftSave);
   $("correctBtn").addEventListener("click", fullCorrect);
   $("validateBtn").addEventListener("click", validate);
+  $("traceToggle").addEventListener("click", toggleTracePanel);
+}
+
+// toggleTracePanel unfolds or folds the rule trace panel (US-42). The
+// trace was fetched with the classification dry-run: no extra call.
+function toggleTracePanel() {
+  var panel = $("tracePanel");
+  panel.hidden = !panel.hidden;
+  $("traceToggle").textContent = panel.hidden ? "Afficher" : "Masquer";
+  $("traceToggle").setAttribute("aria-expanded", panel.hidden ? "false" : "true");
+}
+
+// renderTracePanel fills the collapsed-by-default rule trace panel
+// (US-42): the dry-run errors first, then one line per traced rule.
+function renderTracePanel() {
+  var badge = $("traceBadge");
+  if (traceErrors.length) {
+    badge.textContent = String(traceErrors.length) + " erreur" + (traceErrors.length > 1 ? "s" : "");
+    badge.hidden = false;
+  } else {
+    badge.hidden = true;
+  }
+  var errsBox = $("traceErrors");
+  if (traceErrors.length) {
+    errsBox.hidden = false;
+    errsBox.innerHTML = "";
+    var head = document.createElement("div");
+    head.textContent = "Erreurs du dry-run :";
+    errsBox.appendChild(head);
+    var ul = document.createElement("ul");
+    traceErrors.forEach(function (e) {
+      var li = document.createElement("li");
+      li.textContent = e;
+      ul.appendChild(li);
+    });
+    errsBox.appendChild(ul);
+  } else {
+    errsBox.hidden = true;
+    errsBox.innerHTML = "";
+  }
+  var list = $("traceList");
+  list.innerHTML = "";
+  if (traceData === null) {
+    var na = document.createElement("div");
+    na.className = "muted";
+    na.textContent = "Trace indisponible.";
+    list.appendChild(na);
+    return;
+  }
+  if (!traceData.length) {
+    var empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "Aucune règle n'a modifié de valeur ni produit d'erreur.";
+    list.appendChild(empty);
+    return;
+  }
+  traceData.forEach(function (t) {
+    var line = document.createElement("div");
+    line.className = "trace-line" + (t.op === "error" ? " trace-error" : "");
+    var rule = document.createElement("div");
+    rule.className = "trace-rule mono";
+    rule.textContent = "when " + t.rule;
+    line.appendChild(rule);
+    var body = document.createElement("div");
+    body.className = "trace-body";
+    var field = document.createElement("span");
+    field.className = "k";
+    field.textContent = t.field + " : ";
+    body.appendChild(field);
+    if (t.op === "delete" || t.deleted) {
+      var del = document.createElement("span");
+      del.className = "trace-deleted";
+      del.textContent = "valeur supprimée";
+      body.appendChild(del);
+    } else if (t.op === "error") {
+      var err = document.createElement("span");
+      err.textContent = t.error || "erreur";
+      body.appendChild(err);
+    } else {
+      var val = document.createElement("span");
+      val.textContent = fmtVal(t.value);
+      body.appendChild(val);
+      if (t.expr) {
+        var expr = document.createElement("div");
+        expr.className = "trace-expr mono";
+        expr.textContent = "eval " + t.expr;
+        body.appendChild(expr);
+      }
+    }
+    line.appendChild(body);
+    list.appendChild(line);
+  });
 }
 
 // Draft save: a standard PATCH, no re-filing, no status change (US-22).
