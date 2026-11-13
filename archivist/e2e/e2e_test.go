@@ -1015,10 +1015,36 @@ func TestE2E(t *testing.T) {
 			t.Fatalf("unexpected errors: %v", errs)
 		}
 
-		// Mode B - values: the merged render, same response shape.
+		// US-42: the classification mode returns the rule trace - the
+		// modifying rules only, in evaluation order, each with the field,
+		// the final value and the producing eval expression.
+		trace, _ := out["trace"].([]any)
+		if len(trace) != 6 {
+			t.Fatalf("classification trace: want 6 entries (one per set), got %d: %v", len(trace), out["trace"])
+		}
+		first, _ := trace[0].(map[string]any)
+		if first["op"] != "set" || first["field"] != "template" || first["value"] != "bank_statement" || first["expr"] != nil {
+			t.Fatalf("first trace entry (constant set): %v", first)
+		}
+		var evalEntry map[string]any
+		for _, e := range trace {
+			m, _ := e.(map[string]any)
+			if m["field"] == "emittingCompany" {
+				evalEntry = m
+			}
+		}
+		if evalEntry == nil || evalEntry["op"] != "set" || evalEntry["value"] != "BRED" || evalEntry["expr"] == "" {
+			t.Fatalf("eval trace entry: %v", evalEntry)
+		}
+
+		// Mode B - values: the merged render, same response shape; the
+		// render mode carries no trace.
 		status, out = call(t, http.MethodPost, path, map[string]any{"bankAccount": "Nappez"})
 		if status != 200 {
 			t.Fatalf("dry-run with values: %d %v", status, out)
+		}
+		if _, has := out["trace"]; has {
+			t.Fatalf("render mode must not return a trace: %v", out["trace"])
 		}
 		fields, _ = out["fields"].(map[string]any)
 		if fields["bankAccount"] != "Nappez" {
