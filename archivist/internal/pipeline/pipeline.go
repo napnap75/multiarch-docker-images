@@ -102,6 +102,7 @@ func processOne(app core.App, cfg *config.Config, s3 *storage.Client, ctx contex
 	pages, extractErr := extractPages(data)
 	var errs []string
 	var fields map[string]any
+	var trace []config.TraceEntry
 	rendered := ""
 	if extractErr != nil {
 		// US-13: an unreadable PDF goes straight to pending/ with the
@@ -111,8 +112,13 @@ func processOne(app core.App, cfg *config.Config, s3 *storage.Client, ctx contex
 	} else {
 		// US-14 / US-15: classification and verdict.
 		var evalErrs []string
-		fields, rendered, evalErrs = cfg.Evaluate(pages)
+		fields, rendered, evalErrs, trace = cfg.EvaluateWithTrace(pages)
 		errs = append(errs, evalErrs...)
+		// arch.md section 6, step 4: the evaluation trace is logged at
+		// Debug level (the same trace feeds the classification dry-run).
+		for _, t := range trace {
+			app.Logger().Debug("rule trace", "rule", t.Rule, "field", t.Field, "op", t.Op, "value", t.Value, "expr", t.Expr, "error", t.Error)
+		}
 	}
 	valid := len(errs) == 0 && rendered != ""
 
