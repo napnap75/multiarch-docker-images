@@ -168,12 +168,14 @@ func fileName(key string) string {
 }
 
 // dryRunResponse is the single response shape of the two exclusive
-// dry-run modes (US-35).
+// dry-run modes (US-35). The trace is filled only by the classification
+// mode (US-42); the render mode leaves it nil.
 type dryRunResponse struct {
-	Fields   map[string]any `json:"fields"`
-	Template string         `json:"template"`
-	Rendered string         `json:"rendered"`
-	Errors   []string       `json:"errors"`
+	Fields   map[string]any      `json:"fields"`
+	Template string              `json:"template"`
+	Rendered string              `json:"rendered"`
+	Errors   []string            `json:"errors"`
+	Trace    []config.TraceEntry `json:"trace,omitempty"`
 }
 
 func handleDryRun(re *core.RequestEvent, cfg *config.Config) error {
@@ -193,14 +195,16 @@ func handleDryRun(re *core.RequestEvent, cfg *config.Config) error {
 	}
 
 	// Mode A - no body: the pipeline proposal, the rule tree re-evaluated
-	// against the stored pages. User values never take part.
+	// against the stored pages. User values never take part. The response
+	// carries the rule evaluation trace (US-42).
 	if len(bytes.TrimSpace(body)) == 0 {
-		fields, rendered, errs := cfg.Evaluate(pages)
+		fields, rendered, errs, trace := cfg.EvaluateWithTrace(pages)
 		return re.JSON(200, dryRunResponse{
 			Fields:   fields,
 			Template: templateName(fields),
 			Rendered: rendered,
 			Errors:   nonNil(errs),
+			Trace:    nonNilTrace(trace),
 		})
 	}
 
@@ -460,4 +464,11 @@ func nonNil(errs []string) []string {
 		return []string{}
 	}
 	return errs
+}
+
+func nonNilTrace(t []config.TraceEntry) []config.TraceEntry {
+	if t == nil {
+		return []config.TraceEntry{}
+	}
+	return t
 }
