@@ -86,13 +86,12 @@ Per event type:
     "file_key": "inbox/scan_2026-01-15.pdf"
   },
   "after": {
-    "file_key": "files/BRED/Decembre 2025_Relevé de compte_Compte Thomas.pdf",
+    "file_key": "files/BRED/Decembre 2025_Relevé de compte.pdf",
     "status": "processed",
     "emittingCompany": "BRED",
     "documentType": "Relevé de compte",
     "emissionDate": "2026-01-15T00:00:00Z",
-    "template": "bank_statement",
-    "bankAccount": "Compte Thomas"
+    "template": "bank_statement"
   }
 }
 ```
@@ -127,11 +126,10 @@ On classification failure, the document is routed to `pending/` and the payload 
     "file_key": "pending/scan_2026-01-15.pdf",
     "status": "pending",
     "emittingCompany": "BRED",
-    "emissionDate": "2026-01-15T00:00:00Z",
-    "bankAccount": "Compte Thomas"
+    "emissionDate": "2026-01-15T00:00:00Z"
   },
   "after": {
-    "file_key": "files/Fortunéo/Janvier 2026_Relevé de compte_Compte Thomas.pdf",
+    "file_key": "files/Fortunéo/Janvier 2026_Relevé de compte.pdf",
     "status": "validated",
     "emittingCompany": "Fortunéo",
     "emissionDate": "2026-02-15T00:00:00Z",
@@ -164,10 +162,10 @@ The diff is derived by comparing the two snapshots: a field present in `before` 
   "event_type": "relocated",
   "timestamp": "2026-02-01T10:12:44Z",
   "before": {
-    "file_key": "files/BRED/Decembre 2025_Relevé de compte_Compte Thomas.pdf"
+    "file_key": "files/BRED/Decembre 2025_Relevé de compte.pdf"
   },
   "after": {
-    "file_key": "files/BRED/Archives/Decembre 2025_Relevé de compte_Compte Thomas.pdf"
+    "file_key": "files/BRED/Archives/Decembre 2025_Relevé de compte.pdf"
   }
 }
 ```
@@ -284,18 +282,7 @@ Beyond the standard PocketBase API, authenticated only:
 
 The static pages themselves carry no data and are public by nature; every fetch is authenticated against the PocketBase API. An unauthenticated visitor is prompted to sign in with the superuser account; the dashboard exchanges those credentials through PocketBase's standard auth endpoint, stores the returned token locally, and retries the blocked request. The API continues to enforce superuser access. The configuration is reloaded only on restart; there is no runtime reload.
 
-### 7.5 Design (Beszel reference)
-
-The dashboard's visual design takes Beszel (https://github.com/henrygd/beszel) as its reference. Beszel is built on shadcn/ui + Tailwind with semantic HSL CSS variables and a light/dark pair; archivist reproduces its palette, token names and layout feel in a single hand-written stylesheet (`pb_public/styles.css`) — no Tailwind, no CSS framework, consistent with the no-build-toolchain constraint of section 7.
-
-- Semantic tokens, same names and values as Beszel's own stylesheet. Light theme: `--background: hsl(30 8% 98%)`, `--foreground: hsl(30 0% 10%)`, `--card: hsl(30 8% 100%)`, `--card-foreground: hsl(240 6% 12%)`, `--primary: hsl(240 5.88% 10%)`, `--primary-foreground: hsl(30 0% 100%)`, `--secondary: hsl(240 4.76% 95.88%)`, `--muted: hsl(26 6% 94%)`, `--muted-foreground: hsl(24 2.79% 35.1%)`, `--accent: hsl(20 23.08% 94%)`, `--destructive: hsl(0 66% 53%)`, `--border: hsl(30 8.11% 85.49%)`, `--input: hsl(30 4.29% 72.55%)`, `--ring: hsl(30 3.97% 49.41%)`, `--table-header: hsl(225 6% 97%)`, `--radius: 0.8rem`.
-- Dark theme: `--background: hsl(220 5.5% 9%)`, `--foreground: hsl(220 2% 97%)`, `--card: hsl(220 5.5% 10.5%)`, `--card-foreground: hsl(220 2% 97%)`, `--primary: hsl(220 2% 96%)`, `--primary-foreground: hsl(220 4% 10%)`, `--secondary: hsl(220 4% 16%)`, `--muted: hsl(220 6% 16%)`, `--muted-foreground: hsl(220 4% 67%)`, `--accent: hsl(220 5% 15.5%)`, `--destructive: hsl(0 62% 46%)`, `--border: hsl(220 3% 17%)`, `--input: hsl(220 4% 22%)`, `--ring: hsl(220 4% 80%)`, `--table-header: hsl(220 6% 13%)`, plus `color-scheme: dark` so native controls follow.
-- Theme switching, same scheme as Beszel: a `dark` class on `<html>`, defaulted from the OS `prefers-color-scheme`, with a manual toggle persisted in `localStorage`; the class is set by an inline script in the page head to avoid a flash of the wrong theme on first paint.
-- Component language: cards on `--card` over `--background`, hairline `--border`, `--radius` rounding, sticky table headers on `--table-header` (the document list), secondary actions on `--secondary`/`--muted`, `--destructive` reserved for destructive actions and errors, focus rings on `--ring`.
-- Status colors, the only domain additions to Beszel's tokens: `pending` maps to a warm badge on `--accent`, `validated` to a green from Beszel's chart scale (`hsl(140 50% 48%)` light / `hsl(140 49% 60%)` dark), `processed` to a neutral `--muted` badge.
-- Typography: Beszel ships InterVariable; archivist does not ship a font file — it uses the system font stack with Inter as the preferred family when installed, to keep the image lean. A vendored Inter subset remains an accepted option if rendering proves unsatisfactory.
-
-### 7.6 Tools page (US-40, US-41)
+### 7.5 Tools page (US-40, US-41)
 
 A third static page, `tools.html` + `tools.js`, linked from the dashboard's top bar: one card per tool, with its description and a run button; while a job runs, a progress bar (processed / total objects, current key) refreshed by polling; when it ends, a summary (per-outcome counts) plus the detail lists (missing keys, per-object errors). One job at a time; a running job can be cancelled at the next object boundary. The panel is restored on page reload from the latest job state.
 

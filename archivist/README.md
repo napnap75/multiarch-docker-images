@@ -100,6 +100,12 @@ A commented `config.jsonc` example file is provided in the repository. The dashb
   ],
   "rules": [
     {
+      "when": "pages[0] contains `BRED`",
+      "set": [
+        { "field": "emittingCompany", "value": "BRED" },
+      ]
+    },
+    {
       "when": "pages[0] contains `Relevé de compte`",
       "set": [
         { "field": "documentType", "value": "Relevé de compte" },

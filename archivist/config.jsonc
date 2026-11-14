@@ -108,7 +108,7 @@
         // Personal accounts, matched on the account number printed on page 1
         {
           "when": "pages[0] contains `12345678901`",
-          "set": [ { "field": "bankAccount", "value": "Compte Thomas" } ]
+          "set": [ { "field": "bankAccount", "value": "Compte perso" } ]
         },
         {
           "when": "pages[0] contains `98765432109`",
