@@ -31,6 +31,7 @@ async function init() {
 
   initTheme("themeBtn");
   renderHead();
+  renderDocumentPages();
   renderDocumentNavigation();
   loadPdf();
   var evs = await loadEvents();
@@ -82,6 +83,18 @@ function renderHead() {
   var st = $("docstatus");
   st.textContent = record.status || "";
   st.className = "badge st-" + record.status;
+}
+
+function renderDocumentPages() {
+  var pages = record.pages;
+  if (typeof pages === "string") {
+    try { pages = JSON.parse(pages); } catch (e) { pages = [pages]; }
+  }
+  if (!Array.isArray(pages)) pages = [];
+  var text = pages.map(function (page, index) {
+    return "Page " + (index + 1) + "\n\n" + String(page || "");
+  }).join("\n\n");
+  $("pagesText").textContent = text || "Aucun texte extrait.";
 }
 
 async function loadPdf() {
@@ -284,16 +297,16 @@ function bindActions() {
   $("draftBtn").addEventListener("click", draftSave);
   $("correctBtn").addEventListener("click", fullCorrect);
   $("validateBtn").addEventListener("click", validate);
-  $("traceToggle").addEventListener("click", toggleTracePanel);
+  $("pagesToggle").addEventListener("click", function () { togglePanel("pagesPanel", "pagesToggle"); });
+  $("historyToggle").addEventListener("click", function () { togglePanel("historyPanel", "historyToggle"); });
+  $("traceToggle").addEventListener("click", function () { togglePanel("tracePanel", "traceToggle"); });
 }
 
-// toggleTracePanel unfolds or folds the rule trace panel (US-42). The
-// trace was fetched with the classification dry-run: no extra call.
-function toggleTracePanel() {
-  var panel = $("tracePanel");
+function togglePanel(panelId, buttonId) {
+  var panel = $(panelId);
   panel.hidden = !panel.hidden;
-  $("traceToggle").textContent = panel.hidden ? "Afficher" : "Masquer";
-  $("traceToggle").setAttribute("aria-expanded", panel.hidden ? "false" : "true");
+  $(buttonId).textContent = panel.hidden ? "Afficher" : "Masquer";
+  $(buttonId).setAttribute("aria-expanded", panel.hidden ? "false" : "true");
 }
 
 // renderTracePanel fills the collapsed-by-default rule trace panel

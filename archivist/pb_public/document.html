@@ -57,14 +57,28 @@
         </div>
       </div>
       <div class="card">
-        <h3>Historique</h3>
-        <div id="history"></div>
+        <div class="panel-head">
+          <h3>Texte du document</h3>
+          <button id="pagesToggle" type="button" class="btn secondary panel-toggle" aria-expanded="false" aria-controls="pagesPanel">Afficher</button>
+        </div>
+        <div id="pagesPanel" hidden>
+          <pre id="pagesText" class="document-pages"></pre>
+        </div>
+      </div>
+      <div class="card">
+        <div class="panel-head">
+          <h3>Historique</h3>
+          <button id="historyToggle" type="button" class="btn secondary panel-toggle" aria-expanded="false" aria-controls="historyPanel">Afficher</button>
+        </div>
+        <div id="historyPanel" hidden>
+          <div id="history"></div>
+        </div>
       </div>
       <div class="card tracecard">
-        <div class="tracehead">
+        <div class="panel-head">
           <h3>Trace des règles</h3>
           <span id="traceBadge" class="badge trace-badge" hidden></span>
-          <button id="traceToggle" type="button" class="btn secondary trace-toggle" aria-expanded="false" aria-controls="tracePanel">Afficher</button>
+          <button id="traceToggle" type="button" class="btn secondary panel-toggle" aria-expanded="false" aria-controls="tracePanel">Afficher</button>
         </div>
         <div id="tracePanel" hidden>
           <div id="traceErrors" class="errbox" hidden></div>
