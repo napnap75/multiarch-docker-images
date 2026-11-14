@@ -38,10 +38,10 @@ function store(key, val) {
 
 function fixedMeta() {
   return [
-    { name: "status", type: "status", fixed: true },
-    { name: "file_key", type: "text", fixed: true },
-    { name: "created", type: "date", fixed: true },
-    { name: "updated", type: "date", fixed: true }
+    { name: "status", french: "Statut", type: "status", fixed: true },
+    { name: "file_key", french: "Chemin du fichier", type: "text", fixed: true },
+    { name: "created", french: "Créé le", type: "date", fixed: true },
+    { name: "updated", french: "Mis à jour le", type: "date", fixed: true }
   ];
 }
 
@@ -52,12 +52,16 @@ function fieldMeta(name) {
   return null;
 }
 
+function fieldLabel(meta) {
+  return meta.french || meta.name;
+}
+
 async function init() {
   var r = await api("GET", "/api/archivist/config");
   if (r.status !== 200) return;
   state.config = r.data;
   state.meta = state.config.fields.map(function (f) {
-    return { name: f.name, type: f.type, mandatory: !!f.mandatory };
+    return { name: f.name, french: f.french, type: f.type, mandatory: !!f.mandatory };
   }).concat(fixedMeta());
 
   var defaults = state.config.fields.filter(function (f) { return f.mandatory; })
@@ -92,7 +96,7 @@ function buildChooser() {
       loadDocs();
     });
     label.appendChild(cb);
-    label.appendChild(document.createTextNode(" " + m.name));
+    label.appendChild(document.createTextNode(" " + fieldLabel(m)));
     grid.appendChild(label);
   });
 }
@@ -204,7 +208,8 @@ function renderHead() {
   trh.appendChild(thAll);
   state.columns.forEach(function (name) {
     var th = document.createElement("th");
-    th.textContent = name + (state.sort && state.sort.field === name
+    var m = fieldMeta(name);
+    th.textContent = fieldLabel(m || { name: name }) + (state.sort && state.sort.field === name
       ? (state.sort.dir === "desc" ? " ↓" : " ↑") : "");
     th.addEventListener("click", function () {
       if (!state.sort || state.sort.field !== name) {
@@ -347,7 +352,7 @@ function renderPager() {
 function bindBulk() {
   var sel = $("bulkfield");
   sel.innerHTML = "";
-  state.config.fields.forEach(function (f) { addOption(sel, f.name, f.name); });
+  state.config.fields.forEach(function (f) { addOption(sel, f.name, f.french); });
   sel.addEventListener("change", rebuildBulkValue);
   $("bulkapply").addEventListener("click", applyBulk);
   $("bulkclear").addEventListener("click", function () {

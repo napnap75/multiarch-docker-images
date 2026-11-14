@@ -179,6 +179,7 @@ A `config.jsonc` file kept alongside the binary, reloaded on restart. Three sect
 
 1. `fields`: declaration of fields to extract from the files:
    - `name`: name of the field
+    - `french`: required French title displayed by the dashboard
    - `type`: `text` | `number` | `date` | `boolean` | `enum`
    - `mandatory`: true | false
 
@@ -225,7 +226,7 @@ A `config.jsonc` file kept alongside the binary, reloaded on restart. Three sect
 
    The template is chosen by the rules themselves: `template` is a field declared in the `fields` section like any other and set with `set` (e.g. `set template = `bank_statement`` when `emittingCompany in [`BRED`, `Fortunéo`] and documentType == `Relevé de compte``). If no rule sets `template`, the special `default` template is used. A `template` value with no matching entry renders the result invalid and routes the file to `pending/`.
 
-Validation on load: JSON schema, regex compilation, `expr` expression compilation (`when`, `eval` and template placeholder expressions) against a typed context (`Document{Pages, Fields}`) with the `firstMatch`, `frDate` and `frPeriod` helpers, regex precompilation and caching. Full rejection if invalid, no partial processing.
+Validation on load: JSONC decoding and field declaration checks (including a non-empty `french` title), regex compilation, `expr` expression compilation (`when`, `eval` and template placeholder expressions) against a typed context (`Document{Pages, Fields}`) with the `firstMatch`, `frDate` and `frPeriod` helpers, regex precompilation and caching. Full rejection if invalid, no partial processing.
 
 ## 6. Processing Pipeline
 
@@ -269,7 +270,7 @@ The review dashboard is a static frontend — plain HTML/CSS/JS files, no build 
 
 Beyond the standard PocketBase API, authenticated only:
 
-- `GET /api/archivist/config` — the configuration metadata the UI needs: declared fields (name, type, mandatory), the enum vocabularies read from the `documents` collection schema (dummy placeholder excluded), the template names. Read-only; the dashboard is entirely driven by it (columns, filters, controls).
+- `GET /api/archivist/config` — the configuration metadata the UI needs: declared fields (name, french, type, mandatory), the enum vocabularies read from the `documents` collection schema (dummy placeholder excluded), the template names. Read-only; the dashboard is entirely driven by it (columns, filters, controls).
 - `POST /api/archivist/fields/{field}/values` — registers a value in the possible-values list of an enum field (JSON body `{"value": "..."}`); refused on an unknown or non-enum field, an empty value, the reserved dummy `-----` and the `template` field (its list follows the configuration alone); returns the field's updated list. The add-a-value modal of the dashboard dropdowns calls it; the pipeline registers new values on its own before saving.
 - `GET /api/archivist/documents/{id}/pdf` — proxy route streaming the document from S3; the browser never reaches the S3 cluster.
 - `POST /api/archivist/documents/{id}/dry-run` — two exclusive modes, one response shape (`fields`, `template`, `rendered`, `errors`), persisting nothing. Without a body: a classification re-run — the rule tree evaluated against the stored pages, returning the proposed fields (the source of the pipeline proposals) plus a `trace` field: the flat, ordered list of the rules that modified a value (`set`/`delete`) or errored during the evaluation — each entry carrying the rule name, the field, the final value after the operation (marked as unset for a `delete`), the literal `eval` expression that produced it (a constant `set` returns its own value) and the error message for a failing rule; rules that match without modifying anything and non-matching rules are omitted. The trace reflects what the rules would do today, not what happened at import (US-42). With field values: a template render — the values converted to their native types (per-field error on type mismatch), merged with the record values, rendered against the stored pages (placeholders may call `firstMatch`/`frDate` on the document text), returning the target name and its errors. The modes are never hybrid: user values never enter the rule-evaluation context, so the proposal always stays what the pipeline would do alone.

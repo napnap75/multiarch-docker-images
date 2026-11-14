@@ -82,7 +82,7 @@ The `pb_data` volume holds the PocketBase SQLite database (documents, history, f
 
 Three sections:
 
-- `fields`: fields to extract, with name, type (`text`, `number`, `date`, `boolean`, `enum`) and whether they are mandatory. An unidentified mandatory field sends the document to `pending/`.
+- `fields`: fields to extract, with a technical `name`, a required French display title (`french`), a type (`text`, `number`, `date`, `boolean`, `enum`) and whether they are mandatory. An unidentified mandatory field sends the document to `pending/`.
 - `rules`: an ordered tree of rules. Each rule activates if its `when` expression is true, then assigns fields (`set`), removes some (`delete`), and evaluates its child rules.
 - `templates`: naming templates. A template produces the full path under `files/`, with `{...}` expressions evaluated in the document context.
 
@@ -93,10 +93,10 @@ A commented `config.jsonc` example file is provided in the repository. The dashb
 ```jsonc
 {
   "fields": [
-    { "name": "emittingCompany", "type": "text", "mandatory": true },
-    { "name": "documentType",    "type": "enum", "mandatory": true },
-    { "name": "emissionDate",    "type": "date", "mandatory": true },
-    { "name": "template",        "type": "text", "mandatory": false }
+    { "name": "emittingCompany", "french": "Société émettrice", "type": "text", "mandatory": true },
+    { "name": "documentType",    "french": "Type de document",   "type": "enum", "mandatory": true },
+    { "name": "emissionDate",    "french": "Date d'émission",    "type": "date", "mandatory": true },
+    { "name": "template",        "french": "Modèle de nommage",  "type": "text", "mandatory": false }
   ],
   "rules": [
     {

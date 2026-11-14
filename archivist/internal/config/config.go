@@ -19,6 +19,7 @@ import (
 // Field is one declared extraction field.
 type Field struct {
 	Name      string `json:"name"`
+	French    string `json:"french"`
 	Type      string `json:"type"` // text | number | date | boolean | enum
 	Mandatory bool   `json:"mandatory"`
 }
@@ -78,6 +79,9 @@ func Load(path string) (*Config, error) {
 	for _, f := range raw.Fields {
 		if f.Name == "" {
 			return nil, fmt.Errorf("field with empty name")
+		}
+		if strings.TrimSpace(f.French) == "" {
+			return nil, fmt.Errorf("field %q: french title is required", f.Name)
 		}
 		if seen[f.Name] {
 			return nil, fmt.Errorf("duplicate field %q", f.Name)

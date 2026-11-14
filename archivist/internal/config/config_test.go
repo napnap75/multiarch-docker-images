@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -9,6 +11,9 @@ func TestDefaultConfigExpressionHelpers(t *testing.T) {
 	cfg, err := Load("../../config.jsonc")
 	if err != nil {
 		t.Fatalf("load default config: %v", err)
+	}
+	if got := cfg.Fields["emissionDate"].French; got != "Date d'émission" {
+		t.Fatalf("emissionDate french title = %q, want %q", got, "Date d'émission")
 	}
 
 	fields, rendered, errs := cfg.Evaluate([]string{
@@ -22,6 +27,16 @@ func TestDefaultConfigExpressionHelpers(t *testing.T) {
 	}
 	if rendered == "" {
 		t.Fatal("default config rendered an empty file name")
+	}
+}
+
+func TestLoadRequiresFrenchFieldTitle(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.jsonc")
+	if err := os.WriteFile(path, []byte(`{"fields":[{"name":"company","type":"text"}]}`), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("Load accepted a field without a French title")
 	}
 }
 

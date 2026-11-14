@@ -181,6 +181,8 @@ func ensureSuperuser(app core.App, email, password string) error {
 	if err != nil || rec == nil {
 		rec = core.NewRecord(superusers)
 		rec.SetEmail(email)
+	} else if rec.ValidatePassword(password) {
+		return nil
 	}
 	rec.SetPassword(password)
 	return app.Save(rec)

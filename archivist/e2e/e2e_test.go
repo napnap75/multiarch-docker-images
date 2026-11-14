@@ -537,12 +537,12 @@ func putPDF(t *testing.T, key string, lines ...string) string {
 var testConfigRaw = `
 {
   "fields": [
-    { "name": "template", "type": "enum" },
-    { "name": "emittingCompany", "type": "text", "mandatory": true },
-    { "name": "documentType", "type": "text", "mandatory": true },
-    { "name": "emissionDate", "type": "date", "mandatory": true },
-    { "name": "bankAccount", "type": "text" },
-    { "name": "statementType", "type": "enum" }
+	{ "name": "template", "french": "Modèle de nommage", "type": "enum" },
+	{ "name": "emittingCompany", "french": "Société émettrice", "type": "text", "mandatory": true },
+	{ "name": "documentType", "french": "Type de document", "type": "text", "mandatory": true },
+	{ "name": "emissionDate", "french": "Date d'émission", "type": "date", "mandatory": true },
+	{ "name": "bankAccount", "french": "Compte bancaire", "type": "text" },
+	{ "name": "statementType", "french": "Type de relevé", "type": "enum" }
   ],
   "rules": [
     {

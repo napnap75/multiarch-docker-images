@@ -5,18 +5,19 @@
 
   // ==========================================================================
   // fields: declaration of every field handled by the rules.
+  // french: French title displayed in the dashboard.
   // A missing mandatory field at the end of the pipeline marks the document
   // invalid and routes it to pending/ for human review.
   // "template" is a regular field: rules select the naming template with it.
   // ==========================================================================
   "fields": [
-    { "name": "emittingCompany", "type": "text", "mandatory": true  },
-    { "name": "documentType",    "type": "enum", "mandatory": true  },
-    { "name": "emissionDate",    "type": "date", "mandatory": true  },
-    { "name": "template",        "type": "enum", "mandatory": false },
-    { "name": "bankAccount",     "type": "enum", "mandatory": false },
-    { "name": "address",         "type": "text", "mandatory": false },
-    { "name": "reference",       "type": "text", "mandatory": false }
+    { "name": "emittingCompany", "french": "Société émettrice", "type": "text", "mandatory": true  },
+    { "name": "documentType",    "french": "Type de document",   "type": "enum", "mandatory": true  },
+    { "name": "emissionDate",    "french": "Date d'émission",    "type": "date", "mandatory": true  },
+    { "name": "template",        "french": "Modèle de nommage",  "type": "enum", "mandatory": false },
+    { "name": "bankAccount",     "french": "Compte bancaire",    "type": "enum", "mandatory": false },
+    { "name": "address",         "french": "Adresse",            "type": "text", "mandatory": false },
+    { "name": "reference",       "french": "Référence",          "type": "text", "mandatory": false }
   ],
 
   // ==========================================================================

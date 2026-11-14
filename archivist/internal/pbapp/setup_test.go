@@ -49,6 +49,35 @@ func TestEnsureDocumentsCreatesSelectEnums(t *testing.T) {
 	}
 }
 
+func TestEnsureSuperuserPreservesTokenKeyWhenPasswordIsUnchanged(t *testing.T) {
+	app := pocketbase.NewWithConfig(pocketbase.Config{DefaultDataDir: t.TempDir()})
+	if err := app.Bootstrap(); err != nil {
+		t.Fatalf("bootstrap PocketBase: %v", err)
+	}
+	defer app.ClearBootstrap()
+
+	cfg := &config.Config{}
+	if err := Setup(app, "admin@example.net", "password-123456", cfg); err != nil {
+		t.Fatalf("initial setup: %v", err)
+	}
+	record, err := app.FindFirstRecordByFilter(core.CollectionNameSuperusers, "email = {:e}", map[string]any{"e": "admin@example.net"})
+	if err != nil {
+		t.Fatalf("find initial superuser: %v", err)
+	}
+	originalTokenKey := record.TokenKey()
+
+	if err := Setup(app, "admin@example.net", "password-123456", cfg); err != nil {
+		t.Fatalf("repeated setup: %v", err)
+	}
+	record, err = app.FindRecordById(core.CollectionNameSuperusers, record.Id)
+	if err != nil {
+		t.Fatalf("find superuser after repeated setup: %v", err)
+	}
+	if record.TokenKey() != originalTokenKey {
+		t.Fatal("superuser token key changed despite an unchanged password")
+	}
+}
+
 // TestCleanupEnumValues covers the startup cleanup (US-37): a value kept
 // because a document uses it, an unused value dropped, the dummy
 // placeholder kept only while alone, and the template field forced to the

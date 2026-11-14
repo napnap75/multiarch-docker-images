@@ -160,7 +160,7 @@ function renderForm() {
     var row = document.createElement("div");
     row.className = "fieldrow";
     var label = document.createElement("label");
-    label.textContent = f.name + (f.mandatory ? " *" : "");
+    label.textContent = fieldTitle(f.name) + (f.mandatory ? " *" : "");
     var ctl = buildValueControl(f, (cfg.enums || {})[f.name] || [], record[f.name]);
     controls[f.name] = ctl;
     originals[f.name] = ctl.value;
@@ -176,6 +176,13 @@ function renderForm() {
     row.appendChild(prop);
     form.appendChild(row);
   });
+}
+
+function fieldTitle(name) {
+  for (var i = 0; i < cfg.fields.length; i++) {
+    if (cfg.fields[i].name === name) return cfg.fields[i].french || name;
+  }
+  return name;
 }
 
 function fieldChanged(f) {
@@ -364,7 +371,7 @@ function renderTracePanel() {
     body.className = "trace-body";
     var field = document.createElement("span");
     field.className = "k";
-    field.textContent = t.field + " : ";
+    field.textContent = fieldTitle(t.field) + " : ";
     body.appendChild(field);
     if (t.op === "delete" || t.deleted) {
       var del = document.createElement("span");
@@ -455,7 +462,7 @@ function renderHistory(evs) {
       line.className = "diff";
       var ks = document.createElement("span");
       ks.className = "k";
-      ks.textContent = k + " : ";
+      ks.textContent = fieldTitle(k) + " : ";
       var bv = document.createElement("span");
       bv.textContent = fmtVal(before[k]);
       var ar = document.createElement("span");

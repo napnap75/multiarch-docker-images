@@ -25,9 +25,9 @@ so that no document is ever processed against a partially understood configurati
 
 Acceptance criteria:
 
-- Given a syntactically valid `config.jsonc` mounted in the container, when the application starts, then the file is parsed with comments allowed and validated against the JSON schema generated from the configuration structs.
+- Given a syntactically valid `config.jsonc` mounted in the container, when the application starts, then the file is parsed with comments allowed and validated against the configuration format, including a non-empty `french` title on every field.
 - Given the schema is valid, when the application validates further, then every regex compiles, every `expr` expression (`when`, `eval`, template placeholders) compiles against the typed context `Document{Pages, Fields}` with the `firstMatch`, `frDate` and `frPeriod` helpers, and every compiled expression is cached for later use.
-- Given any validation error (unknown key, bad type, non-compiling regex or expression, unknown field referenced in `set`/`delete`), when the application starts, then it exits with a non-zero code, an error message pinpointing the file location of the first error, and processes nothing. Cross-references are also checked: every template name used in the rules must exist in `templates`.
+- Given any validation error (unknown key, bad type, missing or empty `french` field title, non-compiling regex or expression, unknown field referenced in `set`/`delete`), when the application starts, then it exits with a non-zero code, an error message pinpointing the file location of the first error, and processes nothing. Cross-references are also checked: every template name used in the rules must exist in `templates`.
 - Given the configuration is valid, when a field declaration references a type, then the declared type is one of `text`, `number`, `date`, `boolean`, `enum` (schema-enforced).
 - Given the configuration is valid, when the application starts, then the effective configuration (fields, rules, templates) is logged in a condensed form for traceability.
 
@@ -269,7 +269,7 @@ so that the UI is entirely driven by the configuration.
 
 Acceptance criteria:
 
-- Given an authenticated request to `GET /api/archivist/config`, when it is served, then it returns the declared fields (name, type, mandatory), the enum vocabularies read from the `documents` collection schema (dummy placeholder excluded), and the template names — and nothing sensitive (no S3 credentials).
+- Given an authenticated request to `GET /api/archivist/config`, when it is served, then it returns the declared fields (name, French title, type, mandatory), the enum vocabularies read from the `documents` collection schema (dummy placeholder excluded), and the template names — and nothing sensitive (no S3 credentials).
 - Given an unauthenticated request, when it is served, then it is refused.
 - Given the configuration is reloaded only on restart, when the route is called, then it serves the in-memory compiled configuration (the same the pipeline uses).
 

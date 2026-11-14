@@ -3,30 +3,67 @@
 // Shared helpers of the review-dashboard pages (US-30 to US-36, US-37).
 // The pages carry no data; everything goes through authenticated API calls.
 
-var memoryToken = "";
+var memoryAuth = null;
 var loginPromise = null;
 
-function storedToken() {
-  if (memoryToken) return memoryToken;
+function storedAuth() {
   try {
-    return localStorage.getItem("archivist.token") || "";
+    var shared = JSON.parse(localStorage.getItem("pocketbase_auth") || "null");
+    if (shared && shared.token) return { token: shared.token, record: shared.record || null };
+    var legacyToken = localStorage.getItem("archivist.token") || "";
+    return legacyToken ? { token: legacyToken, record: null, legacy: true } : null;
   } catch (e) {
-    return "";
+    return memoryAuth;
   }
 }
 
-function saveToken(token) {
-  memoryToken = token;
+function storedToken() {
+  var auth = storedAuth();
+  return auth ? auth.token : "";
+}
+
+function saveAuth(auth) {
+  memoryAuth = { token: auth.token, record: auth.record || null };
   try {
-    localStorage.setItem("archivist.token", token);
+    localStorage.setItem("pocketbase_auth", JSON.stringify({
+      token: auth.token,
+      record: auth.record || null
+    }));
+    localStorage.removeItem("archivist.token");
   } catch (e) {}
 }
 
 function clearToken() {
-  memoryToken = "";
+  memoryAuth = null;
   try {
+    localStorage.removeItem("pocketbase_auth");
     localStorage.removeItem("archivist.token");
   } catch (e) {}
+}
+
+function tokenExpiresSoon(token) {
+  try {
+    var payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return !payload.exp || payload.exp * 1000 < Date.now() + 24 * 60 * 60 * 1000;
+  } catch (e) {
+    return true;
+  }
+}
+
+async function refreshStoredToken() {
+  var auth = storedAuth();
+  if (!auth) return "";
+  if (!auth.legacy && !tokenExpiresSoon(auth.token)) return auth.token;
+
+  try {
+    var result = await rawFetch("POST", "/api/collections/_superusers/auth-refresh", undefined, auth.token);
+    if (result.status === 200 && result.data && result.data.token) {
+      saveAuth(result.data);
+      return result.data.token;
+    }
+    if (result.status === 401) clearToken();
+  } catch (e) {}
+  return storedToken();
 }
 
 function requestLogin() {
@@ -65,7 +102,7 @@ function requestLogin() {
           submit.disabled = false;
           return;
         }
-        saveToken(token);
+        saveAuth(result.data);
         dialog.close();
         dialog.remove();
         resolve(token);
@@ -90,7 +127,7 @@ function requestLogin() {
 // api retries the blocked request after sign-in. A stale token is cleared
 // first; the server still enforces superuser access on every protected route.
 async function api(method, path, body) {
-  var token = storedToken();
+  var token = await refreshStoredToken();
   var res = await rawFetch(method, path, body, token);
   if (res.status === 401 && token) {
     clearToken();
@@ -108,7 +145,7 @@ async function api(method, path, body) {
 // An iframe cannot attach the dashboard's Authorization header, so protected
 // binary resources use fetch and are assigned to the frame as object URLs.
 async function apiBlob(path) {
-  var token = storedToken();
+  var token = await refreshStoredToken();
   var res = await rawBlob(path, token);
   if (res.status === 401 && token) {
     clearToken();
