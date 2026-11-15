@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/jpeg"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -247,10 +248,13 @@ func CreateEbook(param Parameters, household Household, recipes []Recipe) (*epub
 	// Process each chapter
 	for _, chapter := range strings.Split(param.RecipeChapters, ",") {
 		// Add a section for each specified chapter
+		chapter = strings.TrimSpace(chapter)
 		section, err := book.AddSection("<h1>"+chapter+"</h1>", chapter, "", "")
 		if err != nil {
 			fmt.Println("Error creating section: ", err)
 		}
+
+		log.Printf("Processing chapter: %s", chapter)
 
 		// Add recipes that belong to the current chapter
 		for _, recipe := range recipes {
@@ -262,6 +266,7 @@ func CreateEbook(param Parameters, household Household, recipes []Recipe) (*epub
 				}
 			}
 			if hasTag {
+				log.Printf("Adding recipe: %s", recipe.Name)
 				content := "<h1>" + recipe.Name + "</h1>"
 
 				content += "<h2>Ingrédients</h2>"
@@ -304,6 +309,8 @@ func CreateEbook(param Parameters, household Household, recipes []Recipe) (*epub
 }
 
 func main() {
+	log.SetOutput(os.Stdout)
+
 	// Capture interrupt signal for graceful shutdown
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
