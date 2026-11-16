@@ -244,9 +244,9 @@ Acceptance criteria:
 - Given the bucket is versioned, when the object is deleted, then a delete marker keeps it recoverable; without versioning the deletion is final (same caveat as US-01).
 - Given a superuser issues the DELETE, when the hook runs, then the hook applies: like the append-only protection of US-04, it cannot rely on API rules alone.
 
-## Epic: Review Dashboard (US-30 to US-36)
+## Epic: Review Dashboard (US-30 to US-42)
 
-The static frontend served from `pb_public/` (arch.md section 7): a document list and a document detail page, entirely driven by the configuration metadata route. No build toolchain, vendored dependencies only (100% offline). Every persistence goes through the standard PocketBase API and its hooks; the only application routes are those the standard API cannot express (config metadata, PDF proxy, dry-run, full correction, enum value registration). Visual design: Beszel reference (arch.md section 7.5).
+The static frontend served from `pb_public/` (arch.md section 7): document list, document detail and tools pages, driven by the configuration metadata route. No build toolchain, vendored dependencies only (100% offline). Document persistence goes through the standard PocketBase API and its hooks; application routes handle operations the standard API cannot express (config metadata, PDF proxy, dry-run, full correction, enum value registration). The configuration editor is specified separately in US-50 to US-52.
 
 ### US-30 — Serve the dashboard as static files
 
@@ -259,7 +259,6 @@ Acceptance criteria:
 - Given the image is built and running, when I open `http://<server>:8090/`, then the dashboard pages are served from `pb_public/` — plain HTML/CSS/JS, no build toolchain, dependencies vendored locally, nothing loaded from a CDN.
 - Given a page is opened, when it renders, then it carries no document data by itself; everything is loaded through authenticated API calls.
 - Given an unauthenticated visitor, when a page requests data, then the page prompts for superuser credentials, authenticates through PocketBase, and retries the request; the API refuses access until authentication succeeds.
-- Given the pages, when they are styled, then they follow the Beszel design reference (section 7.5): same semantic HSL tokens, light/dark pair switched by a class on `<html>`, cards, hairline borders, sticky table headers — reproduced in one hand-written stylesheet, no Tailwind or CSS framework.
 
 ### US-31 — Expose the configuration metadata
 
@@ -271,7 +270,7 @@ Acceptance criteria:
 
 - Given an authenticated request to `GET /api/archivist/config`, when it is served, then it returns the declared fields (name, French title, type, mandatory), the enum vocabularies read from the `documents` collection schema (dummy placeholder excluded), and the template names — and nothing sensitive (no S3 credentials).
 - Given an unauthenticated request, when it is served, then it is refused.
-- Given the configuration is reloaded only on restart, when the route is called, then it serves the in-memory compiled configuration (the same the pipeline uses).
+- Given the configuration is loaded at startup or successfully saved through the configuration editor, when the route is called, then it serves metadata from the currently active compiled configuration used by the pipeline.
 
 ### US-32 — Browse documents in a configurable table
 
@@ -284,6 +283,7 @@ Acceptance criteria:
 - Given the list page, when it opens, then it shows a paginated table whose default columns are all mandatory fields plus `status` and `file_key`, and a column chooser exposing every declared field plus `created`/`updated`; the choice persists in the browser.
 - Given a column header, when I click it, then the list is sorted by that column server-side and the state persists.
 - Given a column, when I open its filter, then the control matches the field type (contains for `text`, dropdown for `enum` and `status`, range for `date`, tri-state for `boolean`) and the filter is applied server-side through a PocketBase filter expression.
+- Given the list page, when I type a search term, then after a short pause the list shows documents where any page contains that term, case-insensitively, without displaying a text excerpt.
 - Given the list, when I open it, then quick tabs show the per-status counts and pre-filter the review queue (`pending` first).
 
 ### US-33 — Change one field for a selection of documents
@@ -371,7 +371,7 @@ Acceptance criteria:
 
 ## Epic: Tools (dashboard)
 
-The tools page (arch.md section 7.6): maintenance tasks started by hand from a dedicated page — one card per tool with its description, a run button, live progress while the job runs, and a final summary. One job at a time, cancellable. The first tool reconciles the bucket with the database when files have been moved by hand (e.g. through Nextcloud).
+The tools page (arch.md section 7.5): maintenance tasks started by hand from a dedicated page — one card per tool with its description, a run button, live progress while the job runs, and a final summary. One job at a time, cancellable. The first tool reconciles the bucket with the database when files have been moved by hand (e.g. through Nextcloud).
 
 ### US-40 — A tools page with run, progress and summary
 
@@ -395,7 +395,7 @@ so that files moved by hand are re-attached to their record and unknown files re
 
 Acceptance criteria:
 
-- Given the tool runs, when it scans, then it lists every object of the bucket except `inbox/`, stream-computes each object's sha256 and looks up a `documents` record by hash.
+- Given the tool runs, when it scans, then it lists only objects under `pending/` or `files/` whose filename ends in `.pdf` (case-insensitive), stream-computes each object's sha256 and looks up a `documents` record by hash; objects under `inbox/`, elsewhere in the bucket, or with another extension are ignored.
 - Given an object whose record's `file_key` equals its key, when it is scanned, then nothing happens (`ok`).
 - Given an object whose record's `file_key` no longer exists in the bucket, when it is scanned, then the record's `file_key` is corrected to the found key (the object itself never moves), a `relocated` event is appended with the `file_key` diff, and the correction is refused when another record already references the key (`corrected`).
 - Given an object whose record's `file_key` still exists elsewhere, when it is scanned, then the stray copy is left in place and reported (`duplicates`).
@@ -403,7 +403,49 @@ Acceptance criteria:
 - Given a record whose `file_key` exists nowhere in the bucket and is not an interrupted filing under `inbox/`, when the scan ends, then it is reported in the summary (`missing`) with its key, never acted upon.
 - Given a per-object failure (S3 error, lookup error), when it occurs, then it is logged, counted in the summary and listed, and the scan continues with the next object.
 
-## Stories deferred to later epics
+## Epic: Configuration Editor
 
-- US-5x (Config editor): pages to declare fields and build rules with user assistance — guided rule construction, test bench against existing documents through the dry-run routes.
-- US-4x (FTS5): full-text index synchronization via hooks.
+### US-50 — Edit the active functional configuration
+
+As the operator,
+I want to edit the active functional configuration from a dedicated dashboard page,
+so that I can maintain fields, classification rules and naming templates without editing the file outside the application.
+
+Acceptance criteria:
+
+- Given an authenticated superuser opens the configuration editor, when the page loads, then it fetches the complete active JSONC source from `GET /api/archivist/config/source`; unauthenticated requests are refused.
+- Given the source is displayed, when I edit it, then `fields` appears as a table of name, French title, type and mandatory controls; rows can be added or removed.
+- Given the rules are displayed, when I expand a section, then its JSONC rule text is editable; section headings and boundaries are determined by comments beginning `// --- `, and the original separator comments and group order are preserved when the draft is serialized.
+- Given the templates are displayed, when I edit them, then a table exposes each template name and template text; rows can be added or removed.
+- Given the page is opened from the document list, then the test input is empty and document navigation is hidden.
+- Given the page is opened from a document detail page, then the test input is initialized with that record's `pages` JSON array and previous/next navigation follows the same document order as the list.
+- Given a configuration draft is being edited, when I navigate to another document, then the draft is retained and tested against that document's pages.
+
+### US-51 — Test a configuration draft against document text
+
+As the operator,
+I want to test my edited configuration against pasted page text or an existing document,
+so that I can inspect the extracted values, target name, errors and rule trace before activating it.
+
+Acceptance criteria:
+
+- Given the draft or page array changes, when typing settles, then the page calls `POST /api/archivist/config/dry-run` with the full draft source and a JSON array of page texts.
+- Given the submitted configuration is valid, when the dry-run completes, then the response shows the proposed fields, selected template, rendered target under `files/`, classification/rendering errors and the ordered rule trace using the same presentation as the document detail page.
+- Given the JSONC or configuration is invalid, when the dry-run runs, then it reports the configuration errors and does not display stale results as if they came from the current draft.
+- Given any draft dry-run, when it runs, then it compiles and evaluates the draft independently of the active configuration and persists nothing: no record, event, file or enum schema is changed.
+- Given the dry-run route is called without superuser authentication, then the request is refused.
+
+### US-52 — Save and activate a valid configuration
+
+As the operator,
+I want to save and activate a valid configuration draft,
+so that subsequent polls and dashboard operations use the changes without a container restart.
+
+Acceptance criteria:
+
+- Given a draft, when I explicitly choose save and activate, then `PUT /api/archivist/config` validates and compiles the complete source before writing it to the active path selected by `ARCHIVIST_CONFIG` or `--config`.
+- Given the containing directory is writable, when validation succeeds, then the source is written using a temporary sibling file and atomic rename; the newly compiled configuration becomes active for subsequent pipeline polls and API requests.
+- Given configuration validation fails, when save is attempted, then the file and active configuration remain unchanged, the validation errors are shown, and the draft remains editable.
+- Given writing or activation fails, when save is attempted, then the previous file and active configuration remain in use and the error is displayed.
+- Given the active config path's containing directory is read-only, then save is refused with a clear error; the draft remains available for correction or export outside this page.
+- Given save and activate is called without superuser authentication, then the request is refused.

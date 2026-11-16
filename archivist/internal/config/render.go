@@ -21,20 +21,21 @@ type tplPart struct {
 
 // CompiledTemplate is a naming template with pre-compiled {expr} placeholders.
 type CompiledTemplate struct {
-	Name  string
-	parts []tplPart
+	Name      string
+	parts     []tplPart
+	fieldList []Field
 }
 
 // CompileTemplate parses and compiles every placeholder expression (US-02).
-func CompileTemplate(name, src string) (*CompiledTemplate, error) {
-	ct := &CompiledTemplate{Name: name}
+func CompileTemplate(name, src string, fields []Field) (*CompiledTemplate, error) {
+	ct := &CompiledTemplate{Name: name, fieldList: append([]Field(nil), fields...)}
 	last := 0
 	for _, loc := range placeholderRe.FindAllStringSubmatchIndex(src, -1) {
 		if loc[0] > last {
 			ct.parts = append(ct.parts, tplPart{literal: src[last:loc[0]]})
 		}
 		inner := src[loc[2]:loc[3]]
-		prog, err := CompileExpr(inner)
+		prog, err := compileExpr(inner, fields)
 		if err != nil {
 			return nil, fmt.Errorf("placeholder {%s}: %w", inner, err)
 		}
@@ -51,7 +52,7 @@ func CompileTemplate(name, src string) (*CompiledTemplate, error) {
 // the result. Unset optional fields render as an empty string; a rendered
 // value containing "/" is invalid (it is the S3 key delimiter) (US-15).
 func (ct *CompiledTemplate) Render(fields map[string]any, pages []string) (string, error) {
-	env := ExprEnv(pages, fields)
+	env := exprEnv(pages, fields, ct.fieldList)
 	var b strings.Builder
 	for _, p := range ct.parts {
 		if !p.hasExpr {

@@ -11,7 +11,7 @@ import (
 )
 
 // BindHooks registers the request hooks (US-04, US-22, US-23, US-24).
-func BindHooks(app core.App, cfg *config.Config, s3 *storage.Client) {
+func BindHooks(app core.App, manager *config.Manager, s3 *storage.Client) {
 	// US-04: document_events is append-only for everyone, superusers included.
 	app.OnRecordUpdateRequest(eventsName).BindFunc(func(e *core.RecordRequestEvent) error {
 		return errAppendOnly
@@ -37,7 +37,9 @@ func BindHooks(app core.App, cfg *config.Config, s3 *storage.Client) {
 
 	// US-22 / US-23: draft corrections and validations through the standard UI.
 	app.OnRecordUpdateRequest("documents").BindFunc(func(e *core.RecordRequestEvent) error {
-		return handleDocumentUpdate(app, cfg, e)
+		return manager.Read(func(snapshot *config.Snapshot) error {
+			return handleDocumentUpdate(app, snapshot.Config, e)
+		})
 	})
 }
 

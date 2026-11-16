@@ -22,10 +22,10 @@ type fakeS3 struct {
 	objects map[string][]byte
 }
 
-func (f *fakeS3) ListAll(ctx context.Context) ([]storage.InboxObject, error) {
+func (f *fakeS3) ListReconciliationPDFs(ctx context.Context) ([]storage.InboxObject, error) {
 	var keys []string
 	for k := range f.objects {
-		if strings.HasPrefix(k, "inbox/") {
+		if !isReconciliationPDFKey(k) {
 			continue
 		}
 		keys = append(keys, k)
@@ -242,6 +242,35 @@ func TestFindLostFilesInboxExcluded(t *testing.T) {
 	}
 	if _, ok := s3.objects["inbox/upload.pdf"]; !ok {
 		t.Fatalf("inbox object should stay: %v", s3.objects)
+	}
+}
+
+func TestFindLostFilesScopesToPDFsInPendingAndFiles(t *testing.T) {
+	app := newTestApp(t)
+	s3 := &fakeS3{objects: map[string][]byte{
+		"pending/subdir/review.PDF": []byte("pending-content"),
+		"files/subdir/archived.pdf": []byte("files-content"),
+		"archive/other.pdf":         []byte("outside-content"),
+		"files/readme.txt":          []byte("text-content"),
+		"inbox/upload.pdf":          []byte("inbox-content"),
+	}}
+	addDocument(t, app, mustHash("pending-content"), "pending/subdir/review.PDF")
+	addDocument(t, app, mustHash("files-content"), "files/subdir/archived.pdf")
+	addDocument(t, app, mustHash("outside-content"), "archive/other.pdf")
+	addDocument(t, app, mustHash("text-content"), "files/readme.txt")
+	addDocument(t, app, mustHash("inbox-content"), "inbox/upload.pdf")
+
+	job := runScan(t, app, s3)
+	if job.Total != 2 || job.Processed != 2 || job.Summary["scanned"] != 2 || job.Summary["ok"] != 2 {
+		t.Fatalf("total=%d processed=%d summary=%v, want only two eligible PDFs scanned", job.Total, job.Processed, job.Summary)
+	}
+	if len(job.Missing) != 0 {
+		t.Fatalf("missing = %v, want empty", job.Missing)
+	}
+	for _, key := range []string{"archive/other.pdf", "files/readme.txt", "inbox/upload.pdf"} {
+		if _, ok := s3.objects[key]; !ok {
+			t.Errorf("ignored object %q was changed or removed", key)
+		}
 	}
 }
 

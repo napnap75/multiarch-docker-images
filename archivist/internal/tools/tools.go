@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -32,7 +33,7 @@ var registry = []Descriptor{
 	{
 		ID:   "find-lost-files",
 		Name: "Recherche des fichiers perdus",
-		Description: "Parcourt tout le bucket (hors inbox/), recalcule l'empreinte sha256 de chaque objet et la compare à la base. " +
+		Description: "Parcourt les fichiers PDF de pending/ et files/, recalcule leur empreinte sha256 et la compare à la base. " +
 			"Un objet à sa place connue ne bouge pas ; un objet déplacé hors de l'application voit son file_key corrigé avec un événement relocated dans l'historique ; " +
 			"un objet inconnu de la base est déplacé vers inbox/ pour être traité automatiquement ; " +
 			"les enregistrements dont le fichier a disparu du bucket sont signalés dans le résumé, sans action automatique.",
@@ -56,7 +57,7 @@ func descriptor(id string) (Descriptor, bool) {
 // S3Store is the surface of the storage client the tools use; a seam kept
 // for unit tests.
 type S3Store interface {
-	ListAll(ctx context.Context) ([]storage.InboxObject, error)
+	ListReconciliationPDFs(ctx context.Context) ([]storage.InboxObject, error)
 	Hash(ctx context.Context, key string) (string, error)
 	Exists(ctx context.Context, key string) bool
 	Copy(ctx context.Context, srcKey, dstKey string) error
@@ -238,14 +239,13 @@ func runTool(ctx context.Context, app core.App, s3 S3Store, toolID string, job *
 	return fmt.Errorf("unknown tool: %s", toolID)
 }
 
-// runFindLostFiles reconciles the bucket with the database (US-41): every
-// object outside inbox/ is hashed and matched against documents by sha256.
+// runFindLostFiles reconciles pending/ and files/ PDFs with the database (US-41).
 // In place: nothing. Moved in the bucket outside the application: the
 // record's file_key is corrected and a relocated event is appended. Unknown
 // of the database: moved to inbox/ for automatic processing. A record whose
 // file_key exists nowhere is only reported.
 func runFindLostFiles(ctx context.Context, app core.App, s3 S3Store, job *Job) error {
-	objects, err := s3.ListAll(ctx)
+	objects, err := s3.ListReconciliationPDFs(ctx)
 	if err != nil {
 		return fmt.Errorf("list bucket: %w", err)
 	}
@@ -277,7 +277,7 @@ func runFindLostFiles(ctx context.Context, app core.App, s3 S3Store, job *Job) e
 	missing := []string{}
 	for _, r := range records {
 		key := r.GetString("file_key")
-		if key == "" || keySet[key] || strings.HasPrefix(key, "inbox/") {
+		if key == "" || !isReconciliationPDFKey(key) || keySet[key] {
 			continue
 		}
 		missing = append(missing, key)
@@ -293,6 +293,11 @@ func runFindLostFiles(ctx context.Context, app core.App, s3 S3Store, job *Job) e
 			"duplicates", job.Summary["duplicates"], "errors", job.Summary["errors"], "missing", len(missing))
 	})
 	return nil
+}
+
+func isReconciliationPDFKey(key string) bool {
+	return (strings.HasPrefix(key, "pending/") || strings.HasPrefix(key, "files/")) &&
+		strings.EqualFold(path.Ext(key), ".pdf")
 }
 
 // findRecord wraps FindFirstRecordByFilter: a missing record is a nil

@@ -13,6 +13,7 @@ var state = {
   sort: null,
   columns: [],
   statusTab: "",
+  pageSearch: "",
   filters: {},
   selected: {},
   docs: [],
@@ -21,6 +22,7 @@ var state = {
   counts: {}
 };
 var docsLoadSequence = 0;
+var pageSearchTimer = null;
 
 function $(id) { return document.getElementById(id); }
 
@@ -40,6 +42,7 @@ function fixedMeta() {
   return [
     { name: "status", french: "Statut", type: "status", fixed: true },
     { name: "file_key", french: "Chemin du fichier", type: "text", fixed: true },
+    { name: "file_name", french: "Nom du fichier", type: "derived", fixed: true, virtual: true },
     { name: "created", french: "Créé le", type: "date", fixed: true },
     { name: "updated", french: "Mis à jour le", type: "date", fixed: true }
   ];
@@ -72,6 +75,14 @@ async function init() {
   state.sort = savedSort && savedSort.field ? savedSort : null;
 
   initTheme("themeBtn");
+  $("pageSearch").addEventListener("input", function () {
+    if (pageSearchTimer) clearTimeout(pageSearchTimer);
+    pageSearchTimer = setTimeout(function () {
+      state.pageSearch = $("pageSearch").value.trim();
+      state.page = 1;
+      loadDocs();
+    }, 1500);
+  });
   buildChooser();
   bindBulk();
   renderTabs();
@@ -147,11 +158,12 @@ function renderTabs() {
 function buildFilterQuery() {
   var parts = [];
   if (state.statusTab) parts.push("(status='" + esc(state.statusTab) + "')");
+  if (state.pageSearch) parts.push("(pages~'" + esc(state.pageSearch) + "')");
   state.columns.forEach(function (name) {
     if (name === "status") return; // owned by the tabs
     var m = fieldMeta(name);
     var f = state.filters[name];
-    if (!m || !f || m.type === "number") return;
+    if (!m || m.virtual || !f || m.type === "number") return;
     if (m.type === "date") {
       if (f.from) parts.push("(" + name + ">='" + esc(f.from) + "')");
       if (f.to) parts.push("(" + name + "<='" + esc(f.to) + "')");
@@ -211,18 +223,20 @@ function renderHead() {
     var m = fieldMeta(name);
     th.textContent = fieldLabel(m || { name: name }) + (state.sort && state.sort.field === name
       ? (state.sort.dir === "desc" ? " ↓" : " ↑") : "");
-    th.addEventListener("click", function () {
-      if (!state.sort || state.sort.field !== name) {
-        state.sort = { field: name, dir: "asc" };
-      } else if (state.sort.dir === "asc") {
-        state.sort.dir = "desc";
-      } else {
-        state.sort = null;
-      }
-      store("archivist.sort", state.sort);
-      state.page = 1;
-      loadDocs();
-    });
+    if (!m || !m.virtual) {
+      th.addEventListener("click", function () {
+        if (!state.sort || state.sort.field !== name) {
+          state.sort = { field: name, dir: "asc" };
+        } else if (state.sort.dir === "asc") {
+          state.sort.dir = "desc";
+        } else {
+          state.sort = null;
+        }
+        store("archivist.sort", state.sort);
+        state.page = 1;
+        loadDocs();
+      });
+    }
     trh.appendChild(th);
   });
   thead.appendChild(trh);
@@ -233,7 +247,7 @@ function renderHead() {
     var td = document.createElement("td");
     if (name !== "status") {
       var m = fieldMeta(name);
-      if (m && m.type !== "number") {
+      if (m && !m.virtual && m.type !== "number") {
         td.appendChild(buildFilterControl(m));
       }
     }
@@ -312,6 +326,8 @@ function renderRows() {
         b.className = "badge st-" + doc.status;
         b.textContent = doc.status;
         td.appendChild(b);
+      } else if (m && m.virtual && name === "file_name") {
+        td.textContent = fmtVal(String(doc.file_key || "").split("/").pop());
       } else if (m && m.type === "date") {
         td.textContent = fmtDate(doc[name]);
       } else {

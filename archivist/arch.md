@@ -26,7 +26,7 @@ Everything runs offline on the server infrastructure: no cloud APIs, no outbound
 | Regex | stdlib `regexp` (RE2); `regexp2` only if a lookaround proves indispensable |
 | Config validation | `santhosh-tekuri/jsonschema` (schema generated from structs via `invopop/jsonschema`) |
 | Database | SQLite (embedded in PocketBase) |
-| Full-text search | SQLite FTS5 index synchronized via hooks |
+| Full-text search | Standard PocketBase record filter on the `pages` JSON field; no separate index |
 | Logging | PocketBase `app.Logger()` (Dashboard > Logs); stderr before bootstrap |
 
 ## 3. S3 Layout
@@ -48,7 +48,7 @@ One row per processed PDF file:
 
 - `sha256`: a unique-indexed column — the system rejects as duplicate any file with the same hash
 - `file_key`: current S3 key of the file
-- `pages`: page-by-page extracted text as a JSON array (0-based, `pages[0]` = page 1); the FTS5 full-text index is built from the concatenation of all pages
+- `pages`: page-by-page extracted text as a JSON array (0-based, `pages[0]` = page 1); the list's full-text search applies a server-side contains filter to this field, covering the whole document
 - `status`: `pending` | `processed` | `validated`
 - `created` / `updated`: the standard PocketBase autodate columns, added for convenience in the admin UI; the authoritative history remains `document_events`
 + all the fields declared by the user in the configuration file
@@ -155,7 +155,7 @@ The diff is derived by comparing the two snapshots: a field present in `before` 
 }
 ```
 
-`relocated` — emitted by the consistency tools (section 7.6) when an object of the bucket was moved outside the application: the record's `file_key` is corrected to the key where the object was found (the object itself never moves), and the diff carries `file_key` alone:
+`relocated` — emitted by the consistency tools (section 7.5) when an object of the bucket was moved outside the application: the record's `file_key` is corrected to the key where the object was found (the object itself never moves), and the diff carries `file_key` alone:
 
 ```json
 {
@@ -220,7 +220,6 @@ A `config.jsonc` file kept alongside the binary, reloaded on restart. Three sect
    - unset optional fields evaluate to an empty string
    - a missing mandatory field or an evaluation error renders the result invalid and routes the file to `pending/`
    - all placeholder expressions are compiled at config load
-   - "/" must not appear in the result (it is the S3 key delimiter)
 
    The template is chosen by the rules themselves: `template` is a field declared in the `fields` section like any other and set with `set` (e.g. `set template = `bank_statement`` when `emittingCompany in [`BRED`, `Fortunéo`] and documentType == `Relevé de compte``). If no rule sets `template`, the special `default` template is used. A `template` value with no matching entry renders the result invalid and routes the file to `pending/`.
 
@@ -244,7 +243,7 @@ When the bucket is versioned, any deletion creates a delete marker and the data 
 
 ## 7. Review Dashboard
 
-The review dashboard is a static frontend — plain HTML/CSS/JS files, no build toolchain, vendored dependencies only (no CDN: the application is 100% offline) — served by PocketBase's built-in static file serving from the `pb_public/` directory shipped in the image next to `pb_data/`. Three pages: the document list, the document detail, and the tools page (section 7.6). The browser persists everything through the standard PocketBase API, whose request hooks already carry the correction, validation and deletion semantics (US-22 / US-23 / US-24): the dashboard never implements its own save path. Only what the standard API cannot express goes through the dedicated JSON routes of section 7.3.
+The review dashboard is a static frontend — plain HTML/CSS/JS files, no build toolchain, vendored dependencies only (no CDN: the application is 100% offline) — served by PocketBase's built-in static file serving from the `pb_public/` directory shipped in the image next to `pb_data/`. Four pages: the document list, the document detail, the tools page (section 7.5), and the configuration editor (section 7.6). Document data persists through the standard PocketBase API and its request hooks (US-22 / US-23 / US-24); the configuration editor uses dedicated superuser-only JSON routes because it edits and activates the functional configuration rather than a record.
 
 ### 7.1 Document list (US-32 / US-33)
 
@@ -252,7 +251,7 @@ The review dashboard is a static frontend — plain HTML/CSS/JS files, no build 
 - Sorting: click on a column header, ascending/descending, executed server-side through the standard PocketBase `sort` parameter.
 - Per-column filters, typed from the field declaration: contains for `text`, dropdown for `enum` and `status` (vocabulary from the config metadata route), date range for `date`, tri-state for `boolean`; translated client-side into a PocketBase filter expression.
 - Quick tabs with the per-status counts pre-filter the review queue (`pending` first).
-- Combined search over full text (FTS5) + metadata/fields: the search runs server-side through a dedicated search route querying the FTS5 index via `app.DB()`, no search logic in the browser (US-4x).
+- Full-text search: a field above the table searches case-insensitively across every page in `pages`; after 1.5 seconds without typing, it adds a server-side PocketBase contains filter on `pages`. It combines with status tabs and per-column filters, returns matching documents without excerpts, and uses no dedicated route or FTS index.
 - Bulk edit (US-33): row selection — page or whole filtered set — then one declared field and its new value in a control matching the type; applied as one standard PATCH per document, so the US-22 hook runs per record: a `corrected` event each, no re-filing, no status change; per-document success and failure are reported, one failure does not stop the rest.
 
 ### 7.2 Document detail (US-34 to US-36)
@@ -269,6 +268,9 @@ The review dashboard is a static frontend — plain HTML/CSS/JS files, no build 
 Beyond the standard PocketBase API, authenticated only:
 
 - `GET /api/archivist/config` — the configuration metadata the UI needs: declared fields (name, french, type, mandatory), the enum vocabularies read from the `documents` collection schema (dummy placeholder excluded), the template names. Read-only; the dashboard is entirely driven by it (columns, filters, controls).
+- `GET /api/archivist/config/source` — returns the active functional configuration source as JSON (`{"source":"..."}`), including its JSONC comments, for the configuration editor. Superuser-only.
+- `POST /api/archivist/config/dry-run` — accepts `{"source":"...","pages":[...]}` and validates/compiles the submitted JSONC independently of the active configuration. If valid, evaluates its rules and templates against the supplied page texts and returns `fields`, `template`, `rendered`, `errors`, and `trace`, matching the document classification dry-run response. Configuration parse/validation failures return an error response and never change active state; classification and rendering errors are returned in `errors`. It persists nothing and does not access S3 or the database. Superuser-only.
+- `PUT /api/archivist/config` — accepts `{"source":"..."}`, fully validates and compiles it, writes it to the active configuration path using a temporary sibling file and atomic rename, then activates the compiled configuration for the poller and API routes. The containing directory must be writable. On validation or write failure, the active configuration and file remain unchanged and the response identifies the errors. Superuser-only.
 - `POST /api/archivist/fields/{field}/values` — registers a value in the possible-values list of an enum field (JSON body `{"value": "..."}`); refused on an unknown or non-enum field, an empty value, the reserved dummy `-----` and the `template` field (its list follows the configuration alone); returns the field's updated list. The add-a-value modal of the dashboard dropdowns calls it; the pipeline registers new values on its own before saving.
 - `GET /api/archivist/documents/{id}/pdf` — proxy route streaming the document from S3; the browser never reaches the S3 cluster.
 - `POST /api/archivist/documents/{id}/dry-run` — two exclusive modes, one response shape (`fields`, `template`, `rendered`, `errors`), persisting nothing. Without a body: a classification re-run — the rule tree evaluated against the stored pages, returning the proposed fields (the source of the pipeline proposals) plus a `trace` field: the flat, ordered list of the rules that modified a value (`set`/`delete`) or errored during the evaluation — each entry carrying the rule name, the field, the final value after the operation (marked as unset for a `delete`), the literal `eval` expression that produced it (a constant `set` returns its own value) and the error message for a failing rule; rules that match without modifying anything and non-matching rules are omitted. The trace reflects what the rules would do today, not what happened at import (US-42). With field values: a template render — the values converted to their native types (per-field error on type mismatch), merged with the record values, rendered against the stored pages (placeholders may call `firstMatch`/`frDate` on the document text), returning the target name and its errors. The modes are never hybrid: user values never enter the rule-evaluation context, so the proposal always stays what the pipeline would do alone.
@@ -280,7 +282,7 @@ Beyond the standard PocketBase API, authenticated only:
 - Validation: performed from the same interface by changing the status to `validated`; the hook appends the `validated` event, and any other status change is refused. A `pending` file can only leave the review queue through a full correction from the dashboard (US-36).
 - Deletion: deleting a `documents` record from the same interface first deletes the S3 object at `file_key` (US-24); on S3 failure the deletion is refused and the record stays. The cascade delete of the `document_events` relation removes the history with the record; with versioning the object stays recoverable via its delete marker.
 
-The static pages themselves carry no data and are public by nature; every fetch is authenticated against the PocketBase API. An unauthenticated visitor is prompted to sign in with the superuser account; the dashboard exchanges those credentials through PocketBase's standard auth endpoint, stores the returned token locally, and retries the blocked request. The API continues to enforce superuser access. The configuration is reloaded only on restart; there is no runtime reload.
+The static pages themselves carry no data and are public by nature; every fetch is authenticated against the PocketBase API. An unauthenticated visitor is prompted to sign in with the superuser account; the dashboard exchanges those credentials through PocketBase's standard auth endpoint, stores the returned token locally, and retries the blocked request. The API continues to enforce superuser access. The configuration is loaded at startup and can also be replaced at runtime through the validated configuration editor save flow in section 7.6.
 
 ### 7.5 Tools page (US-40, US-41)
 
@@ -290,13 +292,13 @@ The tools are long-running maintenance tasks started by hand, the exact opposite
 
 First tool, `find-lost-files` (US-41) — reconciling the bucket with the database when files have been moved by hand (e.g. through Nextcloud):
 
-1. List every object of the bucket except `inbox/` (the poller's drop zone).
-2. For each object, stream-compute its sha256 and look up a `documents` record by hash:
+1. List only `.pdf` objects (extension matched case-insensitively) recursively under `pending/` and `files/`. Objects under `inbox/`, other prefixes, or with another extension are ignored.
+2. For each listed object, stream-compute its sha256 and look up a `documents` record by hash:
    - the record's `file_key` equals the object key: nothing to do (`ok`);
    - the record's `file_key` no longer exists in the bucket: the file was moved outside the application — the record's `file_key` is corrected to the found key and a `relocated` event is appended (the object itself never moves); refused if another record already references the key (`corrected`);
    - the record's `file_key` still exists: the scanned object is a stray copy — left in place and reported (`duplicates`);
    - no record at all: the object is unknown of the database — moved to `inbox/` (conflict suffix on name collision) so the poller processes it automatically (`moved`).
-3. After the scan, every record whose `file_key` exists nowhere in the bucket (and is not an interrupted filing under `inbox/`) is reported as missing, never acted upon (`missing`).
+3. After the scan, every record whose `file_key` is a `.pdf` under `pending/` or `files/` but has no corresponding listed object is reported as missing, never acted upon (`missing`). Other keys, including interrupted filings under `inbox/`, are not reported.
 
 Every outcome is logged through the PocketBase logger; per-object failures do not stop the scan and join the job's error list.
 
@@ -306,6 +308,19 @@ Routes (superuser-only, same rules as section 7.3):
 - `POST /api/archivist/tools/{id}/run` — starts the job; refused with 409 while one is running.
 - `GET /api/archivist/tools/jobs/{id}` — the job's live state (progress, summary, lists).
 - `POST /api/archivist/tools/jobs/{id}/cancel` — asks the job to stop at the next object boundary.
+
+### 7.6 Configuration editor (US-50 to US-52)
+
+The `config.html` page is linked from the document list and document detail. It is a static, superuser-only editor for the active JSONC functional configuration. The source is read from the exact path selected by `ARCHIVIST_CONFIG` or `--config`; the containing directory must be writable by the application user for save-and-activate. A successful save updates the file and activates the compiled configuration without a restart.
+
+The page has two columns:
+
+- Left: three editable blocks in configuration order. `fields` is a table with name, French title, type and mandatory controls; rows can be added or removed. `rules` are shown as editable JSONC text, grouped into collapsible sections whose headings are the original comments beginning `// --- `; group order and separator comments are preserved when editing and saving. `templates` is a table of template name and template text; rows can be added or removed.
+- Right: a large textarea accepts the JSON array of page texts stored in `documents.pages`. With no document context it starts empty. With a document context it is populated from that record; previous/next controls use the same document order as the list page. The field proposals, classification/rendering errors, rendered target and rule trace use the same presentation as the document detail page.
+
+Any edit to the configuration or page array schedules a debounced draft dry-run. Draft evaluation compiles the complete draft and runs the normal classification and rendering engine against the supplied pages, including `EvaluateWithTrace`; it does not persist data. Invalid JSONC or configuration displays validation errors and suppresses classification results until corrected. Navigating to the previous or next document preserves the configuration draft and re-runs it against the newly selected document's pages. When opened without a document context, document navigation is hidden.
+
+Saving is explicit. The save action validates and compiles the complete draft before writing. A validation or filesystem error leaves the previous file and in-memory configuration active and keeps the draft on screen with errors. After a successful atomic file replacement, the new compiled configuration becomes active for subsequent polls and requests. Existing requests already in progress may finish using the configuration they started with.
 
 ## 8. Error Handling
 
@@ -361,17 +376,18 @@ The scenarios form one narrative; each subtest names the US it proves:
 14. Full correction — a pending document is re-filed and validated; value errors leave everything unchanged; an unchanged name skips the S3 move and the diff drops file_key (US-36).
 15. Static dashboard — the review pages are served from pb_public/ with no external resource (US-30).
 16. Enum lifecycle — the value-registration route extends the possible-values list and its refusals hold; a restart drops an unused added value, keeps a used one, and the `template` list follows the configuration (US-37).
-17. Tools — the tools route serves the descriptors and refuses unauthenticated calls; a scan over a bucket with an in-place file, a relocated file, an unknown file and a deleted file produces the matching summary (ok, corrected with `relocated` event, moved to `inbox/`, missing reported) (US-40, US-41).
+17. Tools — the tools route serves the descriptors and refuses unauthenticated calls; a scan considers only PDFs under `pending/` and `files/`, ignores other prefixes and extensions, and produces the matching summary for an in-place file, a relocated file, an unknown file and a deleted file (ok, corrected with `relocated` event, moved to `inbox/`, missing reported) (US-40, US-41).
+18. Configuration editor — the source route is superuser-only; the draft dry-run returns fields and trace without persistence; valid save updates the active file and configuration; invalid JSONC or an unwritable directory leaves the old active configuration unchanged (US-50 to US-52).
 
 `POST /api/archivist/poll` (superuser only) runs one poll pass immediately. It exists so the gate and the operator trigger passes on demand instead of waiting for the cron; a fresh upload needs two calls because the poller waits for size/ETag stability across two passes (US-10).
 
-The dashboard application routes are covered by the gate: the config metadata route, the enum value-registration route, both dry-run modes, the `/correct` orchestration and the PDF proxy (US-30 to US-37). The gate is a regression detector for dependency upgrades (PocketBase, minio-go, ledongthuc/pdf, expr, Garage), not an acceptance proof: acceptance criteria are reviewed on the stories themselves. `E2E_KEEP=1` leaves the containers running after the run for debugging.
+The dashboard application routes are covered by the gate: the config metadata/source/draft-test/save routes, the enum value-registration route, both document dry-run modes, the `/correct` orchestration and the PDF proxy (US-30 to US-37, US-50 to US-52). The gate is a regression detector for dependency upgrades (PocketBase, minio-go, ledongthuc/pdf, expr, Garage), not an acceptance proof: acceptance criteria are reviewed on the stories themselves. `E2E_KEEP=1` leaves the containers running after the run for debugging.
 
 ## 11. Packaging
 
 `Dockerfile`, two-stage build:
 
 - Builder: `golang:1.27-alpine` (matches the `go 1.27` directive of PocketBase v0.41.1), CGO disabled, static binary, `TARGETARCH` honored for multi-platform builds under buildx. `go mod tidy` runs there because `go.sum` is not committed; once it is committed, the line becomes `go mod download` for fully reproducible builds.
-- Runtime: `scratch` with the `/archivist` binary, the CA bundle (the S3 endpoint is HTTPS by default), the timezone database (the cron and date rendering honor `TZ`), the static review-dashboard frontend copied to `/app/pb_public/` (read-only at runtime), and `/app/pb_data` + `/tmp`, the only writable directories, owned by the unprivileged runtime user 65532. `config.jsonc` is never baked in: it is mounted at runtime, `ARCHIVIST_CONFIG` defaulting to `config.jsonc` relative to `/app`.
+- Runtime: `scratch` with the `/archivist` binary, the CA bundle (the S3 endpoint is HTTPS by default), the timezone database (the cron and date rendering honor `TZ`), the static review-dashboard frontend copied to `/app/pb_public/` (read-only at runtime), and `/app/pb_data` + `/tmp`, owned by the unprivileged runtime user 65532. `config.jsonc` is never baked in: its containing directory is mounted read-write at runtime so the configuration editor can atomically save it; `ARCHIVIST_CONFIG` defaults to `config.jsonc` relative to `/app`.
 
 The container runs as 65532:65532 (non-root), exposes 8090, declares `/app/pb_data` as a volume, and has no shell: `docker exec` is not available. `.dockerignore` keeps the build context to the Go sources and the dashboard frontend; the E2E harness is not part of the image.

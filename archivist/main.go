@@ -94,6 +94,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("invalid functional configuration: %v", err)
 	}
+	source, err := os.ReadFile(envCfg.ConfigPath)
+	if err != nil {
+		log.Fatalf("read functional configuration: %v", err)
+	}
+	configManager := config.NewManager(cfg, source)
 	log.Printf("configuration loaded: %d fields, %d top-level rules, %d templates",
 		len(cfg.Fields), len(cfg.Rules), len(cfg.Templates))
 
@@ -123,9 +128,9 @@ func main() {
 	}
 
 	// US-04 / US-22 / US-23 / US-24: request hooks on documents and document_events.
-	pbapp.BindHooks(app, cfg, s3)
+	pbapp.BindHooks(app, configManager, s3)
 	// US-31 / US-35 / US-36: the review-dashboard routes (config, pdf, dry-run, correct).
-	pbapp.BindRoutes(app, cfg, s3)
+	pbapp.BindRoutes(app, configManager, envCfg.ConfigPath, s3)
 	// US-40 / US-41: the tools-page routes (list, run, progress, cancel).
 	tools.BindRoutes(app, s3)
 
@@ -136,14 +141,22 @@ func main() {
 			if !re.HasSuperuserAuth() {
 				return re.ForbiddenError("superusers only", nil)
 			}
-			pipeline.RunPoll(re.App, cfg, s3)
+			if err := configManager.Read(func(snapshot *config.Snapshot) error {
+				pipeline.RunPoll(re.App, snapshot.Config, s3)
+				return nil
+			}); err != nil {
+				return re.JSON(500, map[string]any{"message": "poll failed", "error": err.Error()})
+			}
 			return re.JSON(200, map[string]any{"status": "ok"})
 		})
 		return e.Next()
 	})
 	// US-10..US-17: the poller, on the configured cron.
 	if err := app.Cron().Add("archivist-poller", envCfg.PollCron, func() {
-		pipeline.RunPoll(app, cfg, s3)
+		_ = configManager.Read(func(snapshot *config.Snapshot) error {
+			pipeline.RunPoll(app, snapshot.Config, s3)
+			return nil
+		})
 	}); err != nil {
 		log.Fatalf("register archivist poller: %v", err)
 	}

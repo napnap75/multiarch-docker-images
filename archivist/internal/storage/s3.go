@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -54,26 +55,26 @@ func New(endpoint, accessKey, secretKey, bucket, region string, useSSL bool) (*C
 	return c, nil
 }
 
-// InboxObject is one object listed under inbox/.
+// InboxObject is one listed S3 object.
 type InboxObject struct {
 	Key  string
 	Size int64
 	ETag string
 }
 
-// ListAll lists every object of the bucket, all prefixes together. The
-// inbox/ prefix is excluded: it is the poller's drop zone (US-10), the
-// consistency tools never scan it.
-func (c *Client) ListAll(ctx context.Context) ([]InboxObject, error) {
+// ListReconciliationPDFs lists PDFs recursively under pending/ and files/.
+func (c *Client) ListReconciliationPDFs(ctx context.Context) ([]InboxObject, error) {
 	var out []InboxObject
-	for obj := range c.mc.ListObjects(ctx, c.Bucket, minio.ListObjectsOptions{Recursive: true}) {
-		if obj.Err != nil {
-			return nil, obj.Err
+	for _, prefix := range []string{"pending/", "files/"} {
+		for obj := range c.mc.ListObjects(ctx, c.Bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
+			if obj.Err != nil {
+				return nil, obj.Err
+			}
+			if strings.HasSuffix(obj.Key, "/") || !strings.EqualFold(path.Ext(obj.Key), ".pdf") {
+				continue
+			}
+			out = append(out, InboxObject{Key: obj.Key, Size: obj.Size, ETag: obj.ETag})
 		}
-		if strings.HasSuffix(obj.Key, "/") || strings.HasPrefix(obj.Key, "inbox/") {
-			continue
-		}
-		out = append(out, InboxObject{Key: obj.Key, Size: obj.Size, ETag: obj.ETag})
 	}
 	return out, nil
 }

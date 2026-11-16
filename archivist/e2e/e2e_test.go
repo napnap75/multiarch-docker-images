@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -43,7 +44,6 @@ const (
 	appC      = "archivist-e2e-app"
 	garageC   = "archivist-e2e-garage"
 	network   = "archivist-e2e"
-	baseURL   = "http://127.0.0.1:8090"
 	s3Addr    = "127.0.0.1:3900"
 	bucket    = "archivist-e2e"
 	adminMail = "admin@example.net"
@@ -51,6 +51,7 @@ const (
 )
 
 var (
+	baseURL  string
 	token    string
 	s3       *minio.Client
 	s3KeyID  string
@@ -88,6 +89,7 @@ func TestMain(m *testing.M) {
 	if os.Getenv("E2E_KEEP") == "1" {
 		fmt.
 			Println("E2E: E2E_KEEP=1, containers left running:", appC, garageC)
+		fmt.Println("E2E: dashboard URL:", baseURL)
 		return
 	}
 	teardown()
@@ -182,7 +184,24 @@ root_domain = ".s3.garage"
 // startApp runs the image under test wired to Garage, with the cron
 // disabled: the tests drive the poller through POST /api/archivist/poll.
 func startApp(image string) error {
-	cfgPath := filepath.Join(dir, "config.jsonc")
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Errorf("reserve E2E host port: %w", err)
+	}
+	hostPort := fmt.Sprintf("%d", listener.Addr().(*net.TCPAddr).Port)
+	if err := listener.Close(); err != nil {
+		return fmt.Errorf("release E2E host port: %w", err)
+	}
+	baseURL = "http://127.0.0.1:" + hostPort
+
+	configDir := filepath.Join(dir, "config")
+	if err := os.Mkdir(configDir, 0o777); err != nil {
+		return err
+	}
+	if err := os.Chmod(configDir, 0o777); err != nil {
+		return err
+	}
+	cfgPath := filepath.Join(configDir, "config.jsonc")
 	if err := os.WriteFile(cfgPath, []byte(testConfig), 0o644); err != nil {
 		return err
 	}
@@ -202,13 +221,13 @@ func startApp(image string) error {
 		"ARCHIVIST_S3_USE_SSL=false",
 		"ARCHIVIST_ADMIN_EMAIL=" + adminMail,
 		"ARCHIVIST_ADMIN_PASSWORD=" + adminPass,
-		"ARCHIVIST_CONFIG=/config.jsonc",
+		"ARCHIVIST_CONFIG=/config/config.jsonc",
 		// Never fires (February 31st): the timing stays deterministic.
 		"ARCHIVIST_POLL_INTERVAL=0 0 31 2 *",
 	}
 	args := []string{"run", "-d", "--name", appC, "--network", network,
-		"-p", "127.0.0.1:8090:8090",
-		"-v", cfgPath + ":/config.jsonc",
+		"-p", "127.0.0.1:" + hostPort + ":8090",
+		"-v", configDir + ":/config",
 		"-v", dataPath + ":/pb_data",
 		"-v", dataPath + ":/app/pb_data"}
 	for _, e := range env {
@@ -559,7 +578,7 @@ var testConfigRaw = `
   ],
   "templates": {
 		"bank_statement": "{emittingCompany}/{emissionDate.Format(~2006-01~)}_{documentType}_{bankAccount}.pdf",
-    "default": "files/{documentType}.pdf"
+	"default": "Divers/{documentType}.pdf"
   }
 }`
 
@@ -1199,7 +1218,7 @@ func TestE2E(t *testing.T) {
 				t.Fatalf("the dashboard loads an external resource (%s)", marker)
 			}
 		}
-		for _, asset := range []string{"/styles.css", "/common.js", "/app.js", "/detail.js", "/document.html"} {
+		for _, asset := range []string{"/styles.css", "/common.js", "/app.js", "/detail.js", "/document.html", "/config.html", "/config-editor.js"} {
 			r, err := http.Get(baseURL + asset)
 			if err != nil {
 				t.Fatal(err)
@@ -1287,6 +1306,80 @@ func TestE2E(t *testing.T) {
 		tplVocab, _ := enums["template"].([]any)
 		if len(tplVocab) != 2 || tplVocab[0] != "bank_statement" || tplVocab[1] != "default" {
 			t.Fatalf("template vocabulary must follow the configuration: %v", enums)
+		}
+	})
+
+	t.Run("config editor: dry-run and activate validated drafts", func(t *testing.T) {
+		status, out := call(t, http.MethodGet, "/api/archivist/config/source", nil)
+		if status != 200 {
+			t.Fatalf("config source: status %d: %v", status, out)
+		}
+		source, _ := out["source"].(string)
+		if source == "" {
+			t.Fatal("config source route returned an empty source")
+		}
+		status, out = call(t, http.MethodPost, "/api/archivist/config/dry-run", map[string]any{
+			"source": source,
+			"pages":  []string{},
+		})
+		if status != 200 {
+			t.Fatalf("empty config draft dry-run: status %d: %v", status, out)
+		}
+		if errs, _ := out["errors"].([]any); len(errs) != 0 {
+			t.Fatalf("empty draft should wait for page text: %v", errs)
+		}
+
+		pages := []string{"Releve de compte\nBRED\nCompte Thomas\nDate : 15/01/2026"}
+		status, out = call(t, http.MethodPost, "/api/archivist/config/dry-run", map[string]any{
+			"source": source,
+			"pages":  pages,
+		})
+		if status != 200 {
+			t.Fatalf("config draft dry-run: status %d: %v", status, out)
+		}
+		fields, _ := out["fields"].(map[string]any)
+		if fields["emittingCompany"] != "BRED" || fields["statementType"] != "bank" {
+			t.Fatalf("config draft fields: %v", fields)
+		}
+		trace, _ := out["trace"].([]any)
+		if len(trace) == 0 {
+			t.Fatal("config draft dry-run returned no rule trace")
+		}
+
+		if status, _ = call(t, http.MethodPost, "/api/archivist/config/dry-run",
+			map[string]any{"source": "{", "pages": pages}); status != 422 {
+			t.Fatalf("invalid draft must be rejected with 422, got %d", status)
+		}
+		if status, _ = unauth(t, http.MethodGet, "/api/archivist/config/source", nil); status != 403 {
+			t.Fatalf("config source without superuser auth: want 403, got %d", status)
+		}
+		if status, _ = unauth(t, http.MethodPost, "/api/archivist/config/dry-run",
+			map[string]any{"source": source, "pages": pages}); status != 403 {
+			t.Fatalf("config draft dry-run without superuser auth: want 403, got %d", status)
+		}
+		if status, _ = unauth(t, http.MethodPut, "/api/archivist/config",
+			map[string]any{"source": source}); status != 403 {
+			t.Fatalf("config save without superuser auth: want 403, got %d", status)
+		}
+
+		updatedSource := strings.Replace(source, `"value": "bank"`, `"value": "checking"`, 1)
+		if updatedSource == source {
+			t.Fatal("could not find the test rule to update")
+		}
+		status, out = call(t, http.MethodPut, "/api/archivist/config", map[string]any{"source": updatedSource})
+		if status != 200 {
+			t.Fatalf("save config: status %d: %v", status, out)
+		}
+
+		doc := oneRecord(t, "documents", "(file_key='files/BRED/2026-01_Releve de compte_Thomas.pdf')")
+		docID := doc["id"].(string)
+		status, out = call(t, http.MethodPost, "/api/archivist/documents/"+docID+"/dry-run", nil)
+		if status != 200 {
+			t.Fatalf("document dry-run after config activation: status %d: %v", status, out)
+		}
+		activeFields, _ := out["fields"].(map[string]any)
+		if activeFields["statementType"] != "checking" {
+			t.Fatalf("document route did not use active config: %v", activeFields)
 		}
 	})
 }

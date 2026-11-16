@@ -29,7 +29,7 @@ docker run -d --name archivist \
   --restart unless-stopped \
   -p 8090:8090 \
   -v archivist-data:/app/pb_data \
-  -v /path/to/config.jsonc:/app/config.jsonc:ro \
+  -v /path/to/archivist-config:/app/config:rw \
   -e ARCHIVIST_S3_ENDPOINT="s3.mydomain.fr:9000" \
   -e ARCHIVIST_S3_ACCESS_KEY="..." \
   -e ARCHIVIST_S3_SECRET_KEY="..." \
@@ -37,7 +37,7 @@ docker run -d --name archivist \
   -e ARCHIVIST_S3_USE_SSL="true" \
   -e ARCHIVIST_ADMIN_EMAIL="me@mydomain.fr" \
   -e ARCHIVIST_ADMIN_PASSWORD="..." \
-  napnap75/archivist:latest serve --config /app/config.jsonc
+  napnap75/archivist:latest serve --config /app/config/config.jsonc
 ```
 
 The dashboard is available at `http://<server>:8090/`, the PocketBase admin at `http://<server>:8090/_/`.
@@ -48,16 +48,16 @@ The dashboard is available at `http://<server>:8090/`, the PocketBase admin at `
 docker build -t napnap75/archivist:latest archivist/
 ```
 
-The build has two stages: the builder compiles a static binary (CGO disabled), and the runtime image is `scratch` containing only that binary, the CA bundle (the S3 endpoint is HTTPS by default), the timezone database, and the writable data directories. The container runs as the non-root user 65532: a named volume for `/app/pb_data` works out of the box; for a host bind mount, `chown 65532:65532` the directory first. The image has no shell, so `docker exec` is not available.
+The build has two stages: the builder compiles a static binary (CGO disabled), and the runtime image is `scratch` containing only that binary, the CA bundle (the S3 endpoint is HTTPS by default), the timezone database, and the writable data directories. The container runs as the non-root user 65532: a named volume for `/app/pb_data` works out of the box; for host bind mounts, make the directories writable by UID 65532 (`chown 65532:65532` the directories first). The image has no shell, so `docker exec` is not available.
 
 ## Configuration
 
 Two distinct configurations:
 
 - Technical (infrastructure): container environment variables. Holds the S3 server address, credentials, bucket name, admin account.
-- Functional (business): the `config.jsonc` file, mounted into the container. Holds the fields to extract, the classification rules, and the naming templates.
+- Functional (business): the `config.jsonc` file, mounted in a writable configuration directory. It holds the fields to extract, the classification rules, and the naming templates; the dashboard editor can save and activate it.
 
-The functional configuration is reloaded only when the container restarts.
+The functional configuration is loaded at startup. Saving a valid draft from the dashboard writes the file and activates it immediately; manual edits made outside the dashboard require a container restart.
 
 ### Environment variables
 
@@ -74,7 +74,7 @@ The functional configuration is reloaded only when the container restarts.
 | `ARCHIVIST_ADMIN_PASSWORD` | yes | Admin account password |
 | `ARCHIVIST_HTTP_ADDR` | no | Listen address, default `0.0.0.0:8090` |
 
-The PocketBase command is `serve` (the Docker image uses it by default). To load a different functional config file, pass `--config /path/to/config.jsonc` after `serve`. This overrides `ARCHIVIST_CONFIG`, which defaults to `config.jsonc`.
+The PocketBase command is `serve` (the Docker image uses it by default). To load a different functional config file, pass `--config /path/to/config.jsonc` after `serve`. This overrides `ARCHIVIST_CONFIG`, which defaults to `config.jsonc`. The directory containing the active file must be writable by the container user (UID 65532) for dashboard save-and-activate; the editor validates the draft before replacing the file.
 
 The `pb_data` volume holds the PocketBase SQLite database (documents, history, full-text search index): it must persist across restarts.
 
@@ -86,7 +86,7 @@ Three sections:
 - `rules`: an ordered tree of rules. Each rule activates if its `when` expression is true, then assigns fields (`set`), removes some (`delete`), and evaluates its child rules.
 - `templates`: naming templates. A template produces the full path under `files/`, with `{...}` expressions evaluated in the document context.
 
-A commented `config.jsonc` example file is provided in the repository. The dashboard offers a dry-run mode to test rules on an existing document.
+A commented `config.jsonc` example file is provided in the repository. The configuration editor presents `fields` and `templates` as tables and `rules` as collapsible, editable sections grouped by `// --- ` comments. It can test a draft against pasted page JSON or a document's stored pages; the preview includes proposed fields, errors, rendered path and rule trace. Changes are activated only after an explicit save and full validation. Invalid drafts leave the active file and configuration unchanged.
 
 ### Minimal example
 
@@ -128,12 +128,14 @@ A commented `config.jsonc` example file is provided in the repository. The dashb
 - Validation: direct transition from `processed` to `validated`.
 - History: every document has a complete, timestamped trace (import, correction, validation) readable from its detail view.
 - Tools: maintenance tasks run by hand (see Tools below).
+- Tools: maintenance tasks run by hand (see Tools below).
+- Configuration editor: edit fields, rules and templates, test against pasted or stored page text, and save a validated configuration without restarting the container.
 
 ## Tools
 
 The `Outils` page of the dashboard runs maintenance tasks by hand: one card per tool with its description, a run button, a live progress bar while the task runs (cancellable), and a summary with per-outcome counts when it ends. One task at a time.
 
-The first tool, `Recherche des fichiers perdus`, reconciles the bucket with the database when files have been moved by hand (e.g. through Nextcloud). It scans every object outside `inbox/`, computes each object's sha256 and compares it against the database:
+The first tool, `Recherche des fichiers perdus`, reconciles the bucket with the database when files have been moved by hand (e.g. through Nextcloud). It scans only `.pdf` objects (case-insensitive extension) under `pending/` and `files/`, computes each object's sha256 and compares it against the database; objects in `inbox/`, other prefixes, and other file types are ignored:
 
 - the object is at the key its record knows: nothing happens;
 - the object was moved outside the application: the record's `file_key` is corrected to the new key and a `relocated` event is appended to the document's history (the object itself never moves);
@@ -168,3 +170,4 @@ Without `E2E_IMAGE` the suite skips. The suite drives the poller through the sup
 - A file goes to `pending/`: open its detail view in the dashboard; the classification error(s) are displayed there.
 - The container does not start: invalid `config.jsonc`. The full error message is in the container logs; the application refuses to start with a partially valid configuration.
 - After editing `config.jsonc`: `docker restart archivist`.
+- After editing the mounted `config.jsonc` outside the dashboard: `docker restart archivist`. Dashboard edits take effect after a successful save and activate; invalid drafts do not replace the active configuration.

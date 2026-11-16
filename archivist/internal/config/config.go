@@ -62,14 +62,23 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
+	return loadSource(data, path)
+}
+
+// LoadSource parses, validates and compiles a JSONC configuration held in memory.
+func LoadSource(data []byte) (*Config, error) {
+	return loadSource(data, "configuration source")
+}
+
+func loadSource(data []byte, source string) (*Config, error) {
 	// JSONC: standardize to plain JSON before unmarshalling.
 	std, err := hujson.Standardize(data)
 	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		return nil, fmt.Errorf("parse %s: %w", source, err)
 	}
 	var raw rawConfig
 	if err := json.Unmarshal(std, &raw); err != nil {
-		return nil, fmt.Errorf("decode %s: %w", path, err)
+		return nil, fmt.Errorf("decode %s: %w", source, err)
 	}
 
 	c := &Config{Fields: map[string]Field{}, Templates: map[string]*CompiledTemplate{}}
@@ -93,17 +102,16 @@ func Load(path string) (*Config, error) {
 		c.Fields[f.Name] = f
 		c.FieldList = append(c.FieldList, f)
 	}
-	SetKnownFields(c.FieldList)
 
 	// --- rules --------------------------------------------------------------
-	if err := validateRules(raw.Rules, c.Fields); err != nil {
+	if err := validateRules(raw.Rules, c.Fields, c.FieldList); err != nil {
 		return nil, err
 	}
 	c.Rules = raw.Rules
 
 	// --- templates -----------------------------------------------------------
 	for name, src := range raw.Templates {
-		ct, err := CompileTemplate(name, src)
+		ct, err := CompileTemplate(name, src, c.FieldList)
 		if err != nil {
 			return nil, fmt.Errorf("template %q: %w", name, err)
 		}
@@ -138,12 +146,12 @@ func checkRuleTemplates(rules []*Rule, c *Config) error {
 	return nil
 }
 
-func validateRules(rules []*Rule, fields map[string]Field) error {
+func validateRules(rules []*Rule, fields map[string]Field, fieldList []Field) error {
 	for _, r := range rules {
 		if r.When == "" {
 			return fmt.Errorf("rule with empty/missing when expression")
 		}
-		if _, err := CompileExpr(r.When); err != nil {
+		if _, err := compileExpr(r.When, fieldList); err != nil {
 			return fmt.Errorf("when expression: %w", err)
 		}
 		for _, s := range r.Set {
@@ -152,7 +160,7 @@ func validateRules(rules []*Rule, fields map[string]Field) error {
 				return fmt.Errorf("set: unknown field %q", s.Field)
 			}
 			if s.Eval != "" {
-				if _, err := CompileExpr(s.Eval); err != nil {
+				if _, err := compileExpr(s.Eval, fieldList); err != nil {
 					return fmt.Errorf("set %s: %w", s.Field, err)
 				}
 			} else if err := ValidateValue(f, s.Value); err != nil {
@@ -164,7 +172,7 @@ func validateRules(rules []*Rule, fields map[string]Field) error {
 				return fmt.Errorf("delete: unknown field %q", d)
 			}
 		}
-		if err := validateRules(r.Rules, fields); err != nil {
+		if err := validateRules(r.Rules, fields, fieldList); err != nil {
 			return err
 		}
 	}
@@ -173,17 +181,21 @@ func validateRules(rules []*Rule, fields map[string]Field) error {
 
 // CompileExpr compiles one expression against the typed document context.
 func CompileExpr(src string) (*vm.Program, error) {
-	env := ExprEnv(nil, nil)
-	for _, name := range knownFields {
-		switch knownFieldTypes[name] {
+	return compileExpr(src, nil)
+}
+
+func compileExpr(src string, fields []Field) (*vm.Program, error) {
+	env := map[string]any{"pages": []string{}}
+	for _, field := range fields {
+		switch field.Type {
 		case "number":
-			env[name] = float64(0)
+			env[field.Name] = float64(0)
 		case "date":
-			env[name] = time.Time{}
+			env[field.Name] = time.Time{}
 		case "boolean":
-			env[name] = false
+			env[field.Name] = false
 		default:
-			env[name] = ""
+			env[field.Name] = ""
 		}
 	}
 	opts := append([]expr.Option{expr.Env(env)}, exprOptions()...)
@@ -198,31 +210,18 @@ func exprOptions() []expr.Option {
 	}
 }
 
-// ExprEnv builds the evaluation environment: pages + declared fields.
-// Unset fields are exposed as nil so that references to them stay falsy
-// instead of failing at runtime.
-func ExprEnv(pages []string, fields map[string]any) map[string]any {
+// exprEnv builds an evaluation environment with every declared field present.
+// Unset fields are nil so their references remain valid and falsy at runtime.
+func exprEnv(pages []string, fields map[string]any, fieldList []Field) map[string]any {
 	env := map[string]any{}
-	for _, f := range knownFields {
-		env[f] = nil
+	for _, field := range fieldList {
+		env[field.Name] = nil
 	}
 	env["pages"] = pages
 	for k, v := range fields {
 		env[k] = v
 	}
 	return env
-}
-
-var knownFields []string
-var knownFieldTypes map[string]string
-
-func SetKnownFields(fields []Field) {
-	knownFields = nil
-	knownFieldTypes = make(map[string]string, len(fields))
-	for _, f := range fields {
-		knownFields = append(knownFields, f.Name)
-		knownFieldTypes[f.Name] = f.Type
-	}
 }
 
 // ValidateValue checks that a rule-assigned value matches the declared type
@@ -282,8 +281,8 @@ func (c *Config) ClassifyTraced(pages []string) (map[string]any, []string, []Tra
 	var walk func(rules []*Rule)
 	walk = func(rules []*Rule) {
 		for _, r := range rules {
-			env := ExprEnv(pages, fields)
-			program, err := CompileExpr(r.When)
+			env := exprEnv(pages, fields, c.FieldList)
+			program, err := compileExpr(r.When, c.FieldList)
 			if err != nil {
 				errs = append(errs, fmt.Sprintf("when: %v", err))
 				trace = append(trace, TraceEntry{Rule: r.When, Op: "error", Error: fmt.Sprintf("when: %v", err)})
@@ -301,7 +300,7 @@ func (c *Config) ClassifyTraced(pages []string) (map[string]any, []string, []Tra
 			for _, s := range r.Set {
 				var v any
 				if s.Eval != "" {
-					program, err := CompileExpr(s.Eval)
+					program, err := compileExpr(s.Eval, c.FieldList)
 					if err != nil {
 						errs = append(errs, fmt.Sprintf("eval %s: %v", s.Field, err))
 						trace = append(trace, TraceEntry{Rule: r.When, Field: s.Field, Op: "error", Expr: s.Eval, Error: fmt.Sprintf("eval %s: %v", s.Field, err)})
@@ -447,8 +446,8 @@ var frMonths = map[string]time.Month{
 	"janv": time.January, "janvier": time.January,
 	"fevr": time.February, "fevrier": time.February,
 	"mars": time.March,
-	"avr": time.April, "avril": time.April,
-	"mai": time.May,
+	"avr":  time.April, "avril": time.April,
+	"mai":  time.May,
 	"juin": time.June,
 	"juil": time.July, "juillet": time.July,
 	"aout": time.August,
@@ -474,36 +473,39 @@ func foldFrench(s string) string {
 // being optional ("Janvier 2026" gives the first of the month) and
 // abbreviated month names accepted ("1er févr. 2026") — into a native
 // date. Go layouts only know English month names, so date(value, layout)
-// cannot parse these. A text containing no French date is a rule error
-// and routes the document to pending/.
+// cannot parse these. Missing or invalid dates return an empty string so
+// rules can test for a match and continue to later rules.
 func FrenchDate(args ...any) (any, error) {
 	if len(args) == 0 {
-		return nil, fmt.Errorf("frDate: text required")
+		return "", nil
 	}
-	text, _ := args[0].(string)
+	text, ok := args[0].(string)
+	if !ok {
+		return "", nil
+	}
 	m := frDateRe.FindStringSubmatch(text)
 	if m == nil {
-		return nil, fmt.Errorf("frDate: no French date found")
+		return "", nil
 	}
 	day := 1
 	if m[1] != "" && !strings.EqualFold(m[1], "1er") {
 		d, err := strconv.Atoi(m[1])
 		if err != nil {
-			return nil, fmt.Errorf("frDate: %w", err)
+			return "", nil
 		}
 		day = d
 	}
 	month, ok := frMonths[foldFrench(m[2])]
 	if !ok {
-		return nil, fmt.Errorf("frDate: unknown month %q", m[2])
+		return "", nil
 	}
 	year, err := strconv.Atoi(m[3])
 	if err != nil {
-		return nil, fmt.Errorf("frDate: %w", err)
+		return "", nil
 	}
 	d := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 	if d.Month() != month || d.Day() != day {
-		return nil, fmt.Errorf("frDate: %d %s %d is not a valid date", day, m[2], year)
+		return "", nil
 	}
 	return d, nil
 }

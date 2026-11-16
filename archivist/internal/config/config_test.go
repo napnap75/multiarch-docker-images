@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -40,21 +41,32 @@ func TestLoadRequiresFrenchFieldTitle(t *testing.T) {
 	}
 }
 
-func TestRangeStartDateExpression(t *testing.T) {
-	cfg, err := Load("../../tests/config.jsonc")
-	if err != nil {
-		t.Fatalf("load test config: %v", err)
-	}
+func TestLoadSourceKeepsExpressionFieldsIsolated(t *testing.T) {
+	firstSource := []byte(`{
+		// retained JSONC comment
+		"fields": [{"name":"company","french":"Société","type":"text","mandatory":true}],
+		"rules": [{"when":"pages[0] contains ` + "`Acme`" + `","set":[{"field":"company","value":"Acme"}]}],
+		"templates": {"default":"{company}.pdf"}
+	}`)
+	secondSource := []byte(`{
+		"fields": [{"name":"amount","french":"Montant","type":"number","mandatory":true}],
+		"rules": [{"when":"pages[0] contains ` + "`Invoice`" + `","set":[{"field":"amount","value":42}]}],
+		"templates": {"default":"{amount}.pdf"}
+	}`)
 
-	fields, errs := cfg.Classify([]string{
-		"821099447 QUITTANCE 2 avenue des Champs-Elysées Periode : du 10 au 30 septembre 2026",
-	})
-	if len(errs) != 0 {
-		t.Fatalf("classify range date: %v", errs)
+	firstConfig, err := LoadSource(firstSource)
+	if err != nil {
+		t.Fatalf("load first source: %v", err)
 	}
-	got, ok := fields["emissionDate"].(time.Time)
-	if !ok || got.Format("02/01/2006") != "10/09/2026" {
-		t.Fatalf("emissionDate = %v, want 10/09/2026", fields["emissionDate"])
+	if _, err := LoadSource(secondSource); err != nil {
+		t.Fatalf("load second source: %v", err)
+	}
+	fields, rendered, errs := firstConfig.Evaluate([]string{"Acme invoice"})
+	if len(errs) != 0 {
+		t.Fatalf("evaluate first config after second load: %v", errs)
+	}
+	if fields["company"] != "Acme" || rendered != "Acme.pdf" {
+		t.Fatalf("first config result = (%v, %q), want company Acme and Acme.pdf", fields, rendered)
 	}
 }
 
@@ -79,11 +91,32 @@ func TestFrenchDate(t *testing.T) {
 			t.Fatalf("frDate(%q) = %v, want %s", c.in, v, c.want)
 		}
 	}
-	if _, err := FrenchDate("no date in this text 123"); err == nil {
-		t.Fatal("frDate: expected an error when no French date is found")
+	for _, text := range []string{"no date in this text 123", "le 31 février 2026"} {
+		got, err := FrenchDate(text)
+		if err != nil || got != "" {
+			t.Fatalf("frDate(%q) = (%v, %v), want empty string and no error", text, got, err)
+		}
 	}
-	if _, err := FrenchDate("le 31 février 2026"); err == nil {
-		t.Fatal("frDate: expected an error on an invalid date")
+}
+
+func TestFrenchDateMissingAllowsLaterRule(t *testing.T) {
+	source := []byte(strings.ReplaceAll(`
+	{"fields":[{"name":"emissionDate","french":"Date","type":"date","mandatory":false}],
+	"rules":[
+	{"when":"frDate(pages[0]) != @@","set":[{"field":"emissionDate","eval":"frDate(pages[0])"}]},
+	{"when":"firstMatch(@[0-9]{2}/[0-9]{2}/[0-9]{4}@, pages[0]) != @@","set":[{"field":"emissionDate","eval":"date(firstMatch(@[0-9]{2}/[0-9]{2}/[0-9]{4}@, pages[0]), @02/01/2006@)"}]}
+	],"templates":{"default":"document.pdf"}}`, "@", "`"))
+	cfg, err := LoadSource(source)
+	if err != nil {
+		t.Fatalf("load configuration: %v", err)
+	}
+	fields, _, errs := cfg.Evaluate([]string{"Date : 15/01/2026"})
+	if len(errs) != 0 {
+		t.Fatalf("evaluate fallback rule: %v", errs)
+	}
+	got, ok := fields["emissionDate"].(time.Time)
+	if !ok || got.Format("02/01/2006") != "15/01/2026" {
+		t.Fatalf("emissionDate = %v, want 15/01/2026", fields["emissionDate"])
 	}
 }
 

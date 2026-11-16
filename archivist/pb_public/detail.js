@@ -1,9 +1,8 @@
 "use strict";
 
 // Document detail page (US-34 to US-36): PDF preview, typed form,
-// pipeline proposals, live rendered-name dry-run, event history, the
-// rule trace panel (US-42), and the three distinct exits - draft save,
-// full correction, validation.
+// pipeline proposals, live rendered-name dry-run, event history, and
+// the rule trace panel (US-42).
 
 var docId = new URLSearchParams(window.location.search).get("id");
 
@@ -22,6 +21,7 @@ function $(id) { return document.getElementById(id); }
 
 async function init() {
   if (!docId) { window.location.href = "/"; return; }
+  $("configLink").href = "/config.html?id=" + encodeURIComponent(docId);
   var rc = await api("GET", "/api/archivist/config");
   if (rc.status !== 200) return;
   var rr = await api("GET", "/api/collections/documents/records/" + docId);
@@ -39,7 +39,6 @@ async function init() {
   renderHistory(evs);
   renderForm();
   bindActions();
-  if (record.status === "processed") $("validateBtn").hidden = false;
   loadCurrentTarget();
   loadProposals();
 }
@@ -301,9 +300,7 @@ async function loadProposals() {
 }
 
 function bindActions() {
-  $("draftBtn").addEventListener("click", draftSave);
   $("correctBtn").addEventListener("click", fullCorrect);
-  $("validateBtn").addEventListener("click", validate);
   $("pagesToggle").addEventListener("click", function () { togglePanel("pagesPanel", "pagesToggle"); });
   $("historyToggle").addEventListener("click", function () { togglePanel("historyPanel", "historyToggle"); });
   $("traceToggle").addEventListener("click", function () { togglePanel("tracePanel", "traceToggle"); });
@@ -398,16 +395,6 @@ function renderTracePanel() {
   });
 }
 
-// Draft save: a standard PATCH, no re-filing, no status change (US-22).
-async function draftSave() {
-  var d = dirtyBody();
-  if (d.error) { renderDryErrors([d.error]); return; }
-  if (!d.any) return;
-  var res = await api("PATCH", "/api/collections/documents/records/" + docId, d.body);
-  if (res.status !== 200) { renderDryErrors([errMsg(res)]); return; }
-  window.location.reload();
-}
-
 // Full correction: re-filing and validation in one step (US-36).
 async function fullCorrect() {
   if (dryErrors.length) return;
@@ -417,13 +404,6 @@ async function fullCorrect() {
   if (res.status === 200) { window.location.reload(); return; }
   renderDryErrors((res.data && res.data.errors && res.data.errors.length)
     ? res.data.errors : [errMsg(res)]);
-}
-
-// Simple validation of a processed document (US-23).
-async function validate() {
-  var res = await api("PATCH", "/api/collections/documents/records/" + docId, { status: "validated" });
-  if (res.status === 200) { window.location.reload(); return; }
-  renderDryErrors([errMsg(res)]);
 }
 
 function renderHistory(evs) {

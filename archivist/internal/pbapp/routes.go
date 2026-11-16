@@ -25,7 +25,7 @@ import (
 // BindRoutes registers the dashboard application routes. They are
 // superuser-only: the dashboard authenticates through the standard
 // PocketBase auth, but these routes bypass the record API and its hooks.
-func BindRoutes(app core.App, cfg *config.Config, s3 *storage.Client) {
+func BindRoutes(app core.App, manager *config.Manager, configPath string, s3 *storage.Client) {
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		if !e.Router.HasRoute(http.MethodGet, "/{path...}") {
 			e.Router.GET("/{path...}", apis.Static(os.DirFS("pb_public"), true))
@@ -34,25 +34,42 @@ func BindRoutes(app core.App, cfg *config.Config, s3 *storage.Client) {
 			if !re.HasSuperuserAuth() {
 				return re.ForbiddenError("superusers only", nil)
 			}
-			meta, err := configMetadata(re.App, cfg)
-			if err != nil {
-				return re.JSON(500, map[string]any{"message": "config metadata failed", "error": err.Error()})
-			}
-			return re.JSON(200, meta)
+			return manager.Read(func(snapshot *config.Snapshot) error {
+				meta, err := configMetadata(re.App, snapshot.Config)
+				if err != nil {
+					return re.JSON(500, map[string]any{"message": "config metadata failed", "error": err.Error()})
+				}
+				return re.JSON(200, meta)
+			})
+		})
+		e.Router.GET("/api/archivist/config/source", func(re *core.RequestEvent) error {
+			return handleConfigSource(re, manager)
+		})
+		e.Router.POST("/api/archivist/config/dry-run", func(re *core.RequestEvent) error {
+			return handleConfigDraft(re)
+		})
+		e.Router.PUT("/api/archivist/config", func(re *core.RequestEvent) error {
+			return handleSaveConfig(re, manager, configPath)
 		})
 		// US-37: the dashboard "add a value" action registers the value on
 		// the field's official select list before the form save uses it.
 		e.Router.POST("/api/archivist/fields/{field}/values", func(re *core.RequestEvent) error {
-			return handleAddEnumValue(re, cfg)
+			return manager.Read(func(snapshot *config.Snapshot) error {
+				return handleAddEnumValue(re, snapshot.Config)
+			})
 		})
 		e.Router.GET("/api/archivist/documents/{id}/pdf", func(re *core.RequestEvent) error {
 			return handlePdf(re, s3)
 		})
 		e.Router.POST("/api/archivist/documents/{id}/dry-run", func(re *core.RequestEvent) error {
-			return handleDryRun(re, cfg)
+			return manager.Read(func(snapshot *config.Snapshot) error {
+				return handleDryRun(re, snapshot.Config)
+			})
 		})
 		e.Router.POST("/api/archivist/documents/{id}/correct", func(re *core.RequestEvent) error {
-			return handleCorrect(re, cfg, s3)
+			return manager.Read(func(snapshot *config.Snapshot) error {
+				return handleCorrect(re, snapshot.Config, s3)
+			})
 		})
 		return e.Next()
 	})
