@@ -167,17 +167,18 @@ func processOne(app core.App, cfg *config.Config, s3 *storage.Client, ctx contex
 	return nil
 }
 
-// fileDocument moves the object to files/ (valid) or pending/ (invalid),
-// updates file_key, and returns the final key. The record save is left to the
-// caller so the state stays consistent on recovery.
+// fileDocument moves the object to the files prefix (valid) or the pending
+// prefix (invalid), updates file_key, and returns the final key. The record
+// save is left to the caller so the state stays consistent on recovery.
 func fileDocument(s3 *storage.Client, ctx context.Context, record *core.Record, rendered string) (string, error) {
+	prefixes := s3.Prefixes()
 	valid := record.GetString("status") == "processed"
 	var target string
 	if valid {
-		// The rendered template is the full object path under files/.
-		target = "files/" + rendered
+		// The rendered template is the full object path under the files prefix.
+		target = prefixes.Files + rendered
 	} else {
-		target = "pending/" + baseName(record.GetString("file_key"))
+		target = prefixes.Pending + baseName(record.GetString("file_key"))
 	}
 	finalKey, err := s3.ResolveConflict(ctx, target)
 	if err != nil {
@@ -199,7 +200,7 @@ func fileDocument(s3 *storage.Client, ctx context.Context, record *core.Record, 
 // recoverStuck completes interrupted filings: records whose file_key is still
 // under inbox/ (US-11).
 func recoverStuck(app core.App, cfg *config.Config, s3 *storage.Client, ctx context.Context) {
-	stuck, err := app.FindRecordsByFilter("documents", "file_key ~ {:p}", "", 100, 0, dbx.Params{"p": "inbox/"})
+	stuck, err := app.FindRecordsByFilter("documents", "file_key ~ {:p}", "", 100, 0, dbx.Params{"p": s3.Prefixes().Inbox})
 	if err != nil {
 		app.Logger().Error("recovery: query failed", "error", err)
 		return

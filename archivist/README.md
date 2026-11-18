@@ -18,7 +18,7 @@ Files in `inbox/` that are not PDFs (no `%PDF-` header) are left as-is: they are
 
 ## Prerequisites
 
-- An S3 bucket, with three prefixes: `inbox/`, `pending/`, `files/`. The prefixes are created on first startup if they do not exist. Versioning is not required, but it is strongly recommended: without it, a file deleted by the application or by a bug is lost for good; with it, deleted objects stay recoverable via delete markers. The application logs a warning at startup when versioning is disabled (visible in the admin dashboard, Dashboard > Logs).
+- An S3 bucket, with three prefixes: `inbox/`, `pending/`, `files/` (configurable through `ARCHIVIST_S3_INBOX_PREFIX`, `ARCHIVIST_S3_PENDING_PREFIX` and `ARCHIVIST_S3_FILES_PREFIX`; set `ARCHIVIST_S3_FILES_PREFIX=/` to file documents at the bucket root). The prefixes are created on first startup if they do not exist. Versioning is not required, but it is strongly recommended: without it, a file deleted by the application or by a bug is lost for good; with it, deleted objects stay recoverable via delete markers. The application logs a warning at startup when versioning is disabled (visible in the admin dashboard, Dashboard > Logs).
 - An S3 user with read/write access to the bucket.
 - Docker.
 
@@ -69,6 +69,9 @@ The functional configuration is loaded at startup. Saving a valid draft from the
 | `ARCHIVIST_S3_BUCKET` | yes | Bucket name |
 | `ARCHIVIST_S3_USE_SSL` | no | `true` (default) for HTTPS, `false` for HTTP |
 | `ARCHIVIST_S3_REGION` | no | S3 region used for request signatures, default `garage` |
+| `ARCHIVIST_S3_INBOX_PREFIX` | no | Bucket prefix polled for new PDFs, default `inbox` |
+| `ARCHIVIST_S3_PENDING_PREFIX` | no | Bucket prefix for the review queue, default `pending` |
+| `ARCHIVIST_S3_FILES_PREFIX` | no | Bucket prefix documents are filed under, default `files`; set `/` to file them at the bucket root |
 | `ARCHIVIST_POLL_INTERVAL` | no | Cron expression for polling `inbox/`, default `* * * * *` (every minute) |
 | `ARCHIVIST_ADMIN_EMAIL` | yes | Admin account (dashboard and PocketBase) |
 | `ARCHIVIST_ADMIN_PASSWORD` | yes | Admin account password |

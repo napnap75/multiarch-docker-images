@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"path"
 	"strings"
 	"sync"
 	"time"
@@ -63,6 +62,7 @@ type S3Store interface {
 	Copy(ctx context.Context, srcKey, dstKey string) error
 	Remove(ctx context.Context, key string) error
 	ResolveConflict(ctx context.Context, desired string) (string, error)
+	Prefixes() storage.Prefixes
 }
 
 // Job is one tool run: identity, live progress, final summary.
@@ -245,6 +245,7 @@ func runTool(ctx context.Context, app core.App, s3 S3Store, toolID string, job *
 // of the database: moved to inbox/ for automatic processing. A record whose
 // file_key exists nowhere is only reported.
 func runFindLostFiles(ctx context.Context, app core.App, s3 S3Store, job *Job) error {
+	prefixes := s3.Prefixes()
 	objects, err := s3.ListReconciliationPDFs(ctx)
 	if err != nil {
 		return fmt.Errorf("list bucket: %w", err)
@@ -277,7 +278,7 @@ func runFindLostFiles(ctx context.Context, app core.App, s3 S3Store, job *Job) e
 	missing := []string{}
 	for _, r := range records {
 		key := r.GetString("file_key")
-		if key == "" || !isReconciliationPDFKey(key) || keySet[key] {
+		if key == "" || !prefixes.IsReconciliationKey(key) || keySet[key] {
 			continue
 		}
 		missing = append(missing, key)
@@ -295,11 +296,6 @@ func runFindLostFiles(ctx context.Context, app core.App, s3 S3Store, job *Job) e
 	return nil
 }
 
-func isReconciliationPDFKey(key string) bool {
-	return (strings.HasPrefix(key, "pending/") || strings.HasPrefix(key, "files/")) &&
-		strings.EqualFold(path.Ext(key), ".pdf")
-}
-
 // findRecord wraps FindFirstRecordByFilter: a missing record is a nil
 // result, not an error.
 func findRecord(app core.App, filter string, params dbx.Params) (*core.Record, error) {
@@ -311,6 +307,7 @@ func findRecord(app core.App, filter string, params dbx.Params) (*core.Record, e
 }
 
 func reconcileObject(ctx context.Context, app core.App, s3 S3Store, job *Job, key string, keySet map[string]bool) error {
+	prefixes := s3.Prefixes()
 	hash, err := s3.Hash(ctx, key)
 	if err != nil {
 		return fmt.Errorf("hash: %w", err)
@@ -324,7 +321,7 @@ func reconcileObject(ctx context.Context, app core.App, s3 S3Store, job *Job, ke
 
 	if record == nil {
 		// Unknown of the database: back to inbox/ for automatic processing.
-		finalKey, err := s3.ResolveConflict(ctx, "inbox/"+baseName(key))
+		finalKey, err := s3.ResolveConflict(ctx, prefixes.Inbox+baseName(key))
 		if err != nil {
 			return fmt.Errorf("conflict resolution: %w", err)
 		}

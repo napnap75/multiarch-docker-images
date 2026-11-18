@@ -19,13 +19,21 @@ import (
 
 // fakeS3 is an in-memory bucket for the tool tests.
 type fakeS3 struct {
-	objects map[string][]byte
+	objects  map[string][]byte
+	prefixes storage.Prefixes
+}
+
+func (f *fakeS3) Prefixes() storage.Prefixes {
+	if f.prefixes == (storage.Prefixes{}) {
+		return storage.DefaultPrefixes
+	}
+	return f.prefixes
 }
 
 func (f *fakeS3) ListReconciliationPDFs(ctx context.Context) ([]storage.InboxObject, error) {
 	var keys []string
 	for k := range f.objects {
-		if !isReconciliationPDFKey(k) {
+		if !f.Prefixes().IsReconciliationKey(k) {
 			continue
 		}
 		keys = append(keys, k)
@@ -300,4 +308,25 @@ func TestEventTypesIncludeRelocated(t *testing.T) {
 func mustHash(content string) string {
 	sum := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(sum[:])
+}
+
+func TestFindLostFilesCustomPrefixes(t *testing.T) {
+	app := newTestApp(t)
+	prefixes := storage.Prefixes{Inbox: "in/", Pending: "wait/", Files: ""}
+	s3 := &fakeS3{
+		objects:  map[string][]byte{"stray.pdf": []byte("content-x")},
+		prefixes: prefixes,
+	}
+
+	job := runScan(t, app, s3)
+
+	if _, ok := s3.objects["in/stray.pdf"]; !ok {
+		t.Fatalf("unknown object should move to in/stray.pdf: %v", s3.objects)
+	}
+	if _, ok := s3.objects["stray.pdf"]; ok {
+		t.Fatal("original object should be gone")
+	}
+	if job.Summary["moved"] != 1 {
+		t.Fatalf("moved = %d, want 1", job.Summary["moved"])
+	}
 }

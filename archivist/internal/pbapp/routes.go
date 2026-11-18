@@ -290,7 +290,7 @@ func handleCorrect(re *core.RequestEvent, cfg *config.Config, s3 *storage.Client
 
 	before := SnapshotFromRecord(cfg, record, true)
 	oldKey := record.GetString("file_key")
-	target := "files/" + rendered
+	target := s3.Prefixes().Files + rendered
 
 	ctx := re.Request.Context()
 	refiled := false
