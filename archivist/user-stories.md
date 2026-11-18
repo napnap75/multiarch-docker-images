@@ -13,7 +13,8 @@ so that the container starts with no configuration file for infrastructure and s
 Acceptance criteria:
 
 - Given the container starts with all mandatory variables set (`ARCHIVIST_S3_ENDPOINT`, `ARCHIVIST_S3_ACCESS_KEY`, `ARCHIVIST_S3_SECRET_KEY`, `ARCHIVIST_S3_BUCKET`, `ARCHIVIST_ADMIN_EMAIL`, `ARCHIVIST_ADMIN_PASSWORD`), when the application starts, then it connects to the S3 server, verifies the bucket is reachable, and starts serving HTTP on the configured port; when bucket versioning is disabled, a warning is emitted through the PocketBase logger (visible in the admin dashboard, Dashboard > Logs) recommending the user to enable it to reduce the risk of losing a file to a bug (the application starts anyway).
-- Given an optional variable is not set, when the application starts, then it uses its documented default (`ARCHIVIST_S3_USE_SSL=true`, `ARCHIVIST_S3_REGION=garage`, `ARCHIVIST_POLL_INTERVAL=* * * * *`, `ARCHIVIST_HTTP_ADDR=0.0.0.0:8090`).
+- Given an optional variable is not set, when the application starts, then it uses its documented default (`ARCHIVIST_S3_USE_SSL=true`, `ARCHIVIST_S3_REGION=garage`, `ARCHIVIST_S3_INBOX_PREFIX=inbox`, `ARCHIVIST_S3_PENDING_PREFIX=pending`, `ARCHIVIST_S3_FILES_PREFIX=files`, `ARCHIVIST_POLL_INTERVAL=* * * * *`, `ARCHIVIST_HTTP_ADDR=0.0.0.0:8090`).
+- Given the prefix variables, when the application starts, then the three bucket prefixes (inbox, pending, files, surroundings slashes normalized) follow them: `ARCHIVIST_S3_FILES_PREFIX=/` files documents at the bucket root, the inbox and pending prefixes refuse to be empty, and the three prefixes must be distinct (the application exits with an explicit error otherwise).
 - Given a mandatory variable is missing or the S3 server is unreachable, when the application starts, then it exits with a non-zero code and a single explicit error message on stderr (visible in `docker logs`) naming the faulty variable or resource.
 - Given the admin account variables are set, when the application starts for the first time, then the PocketBase admin account is created with these credentials; on subsequent starts it is left unchanged unless the password differs, in which case it is updated.
 
@@ -72,15 +73,15 @@ Acceptance criteria:
 
 ## Epic: Polling & Classification
 
-### US-10 — Poll `inbox/` for new objects
+### US-10 — Poll the inbox prefix for new objects
 
 As the application,
-I want to poll the `inbox/` prefix on the configured cron interval and only consider upload-complete objects,
+I want to poll the configured inbox prefix (default `inbox/`) on the configured cron interval and only consider upload-complete objects,
 so that no partially uploaded file is ever processed.
 
 Acceptance criteria:
 
-- Given the cron triggers, when the poller runs, then it lists all objects under `inbox/`.
+- Given the cron triggers, when the poller runs, then it lists all objects under the inbox prefix.
 - Given an object is listed, when no `documents` record references its key yet, then it is a candidate and its size and ETag are recorded; it becomes eligible for download only if its size and ETag are unchanged on the next poll.
 - Given an object is listed, when a `documents` record already references its key, then it is skipped (interrupted filings are handled by US-11).
 - Given a transient S3 error occurs, when the poller runs, then the error is logged (PocketBase logger, Error level), the pass ends, and the next pass retries; no object is lost.
@@ -88,12 +89,12 @@ Acceptance criteria:
 ### US-11 — Recover interrupted filings
 
 As the application,
-I want each poll pass to complete any `documents` record whose `file_key` is still under `inbox/`,
+I want each poll pass to complete any `documents` record whose `file_key` is still under the inbox prefix,
 so that a filing interrupted between record creation and the physical move resumes automatically.
 
 Acceptance criteria:
 
-- Given a poll pass runs, when a `documents` record exists with `file_key` under `inbox/` and a classification verdict already computed, then the filing procedure (US-17) runs again for that record.
+- Given a poll pass runs, when a `documents` record exists with `file_key` under the inbox prefix and a classification verdict already computed, then the filing procedure (US-17) runs again for that record.
 - Given the recovery succeeds, when the object is moved, then the record is updated exactly as a normal filing would (same events, same conflict resolution).
 - Given the inbox object of a stuck record no longer exists, when the recovery is attempted, then the record is flagged in the logs (PocketBase logger, Warn level) for manual inspection and never blocks the poll pass.
 
@@ -106,9 +107,9 @@ so that the same file never enters the pipeline twice.
 Acceptance criteria:
 
 - Given an eligible candidate, when it is downloaded, then it is streamed in memory with no disk write and its sha256 is computed on the fly.
-- Given the computed sha256 matches an existing `documents` record, when the download completes, then the `inbox/` key is deleted (a no-data-loss case — the original with the same content stays filed; with versioning enabled the deleted copy is additionally recoverable via delete markers), the duplicate is logged in the PocketBase logs only (Dashboard > Logs; no `document_events` entry, by design), and processing stops for that object.
+- Given the computed sha256 matches an existing `documents` record, when the download completes, then the inbox key is deleted (a no-data-loss case — the original with the same content stays filed; with versioning enabled the deleted copy is additionally recoverable via delete markers), the duplicate is logged in the PocketBase logs only (Dashboard > Logs; no `document_events` entry, by design), and processing stops for that object.
 - Given the sha256 is new, when the download completes, then processing continues to extraction.
-- Given an object under `inbox/` whose content does not start with the `%PDF-` header, when it is processed, then it is left as-is in `inbox/`: it is never imported, gets no record and no event, and the skip is logged (PocketBase logger, Warn level, once per unchanged content).
+- Given an object under the inbox prefix whose content does not start with the `%PDF-` header, when it is processed, then it is left as-is in the inbox prefix: it is never imported, gets no record and no event, and the skip is logged (PocketBase logger, Warn level, once per unchanged content).
 - Given an object already skipped as non-PDF, when a later pass lists it with an unchanged ETag, then it is not re-downloaded; when its content changes (new ETag), then it is checked again.
 
 ### US-13 — Extract the text page by page
@@ -120,7 +121,7 @@ so that rules can target individual pages and full-text search covers the entire
 Acceptance criteria:
 
 - Given a downloaded PDF, when extraction runs, then the result is a JSON array with one entry per page, 0-based (`pages[0]` = page 1).
-- Given the PDF cannot be parsed (encrypted, corrupted, image-only), when extraction runs, then the document is routed to `pending/` with the failure recorded in the `errors` key of the `imported` event.
+- Given the PDF cannot be parsed (encrypted, corrupted, image-only), when extraction runs, then the document is routed to the pending prefix with the failure recorded in the `errors` key of the `imported` event.
 - Given extraction succeeds, when pages are stored, then the extraction uses native text only — OCR is out of scope.
 
 ### US-14 — Evaluate the rule tree
@@ -134,7 +135,7 @@ Acceptance criteria:
 - Given a document's pages, when evaluation runs, then rules are evaluated in declaration order: a rule's `when` expression runs first; `set`, `delete`, and child rules run only if `when` returned true.
 - Given a rule's `set` entry with a constant `value`, when the rule fires, then the field is set to that constant.
 - Given a `set` entry with an `eval` expression, when the rule fires, then the expression is evaluated in the same context (pages, current fields, `firstMatch`, `frDate`, `frPeriod`, expr builtins) and the result is assigned.
-- Given a field assignment whose value does not match the declared field type (raw string to a `date`, non-numeric to a `number`), when it executes, then it is a rule error and the document is routed to `pending/`.
+- Given a field assignment whose value does not match the declared field type (raw string to a `date`, non-numeric to a `number`), when it executes, then it is a rule error and the document is routed to the pending prefix.
 - Given `firstMatch` finds no match, when its result is used, then it returns an empty string (parsing an empty string with `date()` is a rule error).
 - Given `delete` is executed, when the rule fires, then the named fields become undefined again for later rules and template rendering.
 - Given the whole evaluation, when it runs, then every rule evaluation and action is written in detail to the PocketBase logger at Debug level (visible in Dashboard > Logs; the same structured trace — modifying and failing rules — is returned by the classification dry-run, US-42).
@@ -149,7 +150,7 @@ Acceptance criteria:
 
 - Given the evaluation finished, when the verdict is computed, then it is valid if and only if: no rule error occurred, every mandatory field has a value, the selected template (or `default` when no rule set `template`) exists in the configuration, and the naming template renders without error and produces no `/` in field values that would break the key.
 - Given the verdict is invalid, when reasons are collected, then one `errors` entry is produced per cause (missing mandatory field, rule error, unknown template, rendering error).
-- Given the verdict is valid, when the name is computed, then the rendered template is the full object path under `files/` and a conflict suffix is reserved if a file with that name already exists.
+- Given the verdict is valid, when the name is computed, then the rendered template is the full object path under the files prefix and a conflict suffix is reserved if a file with that name already exists.
 
 ### US-16 — Record the document and its `imported` event
 
@@ -159,7 +160,7 @@ so that an interrupted filing leaves a recoverable state and the import is fully
 
 Acceptance criteria:
 
-- Given a classified document (valid or not), when the record is created, then it stores `sha256`, the current `inbox/` key in `file_key`, `pages`, the extracted fields, and the initial `status` (`processed` when valid, `pending` when not).
+- Given a classified document (valid or not), when the record is created, then it stores `sha256`, the current inbox key in `file_key`, `pages`, the extracted fields, and the initial `status` (`processed` when valid, `pending` when not).
 - Given the record is created, when the event is appended, then it is an `imported` event whose payload conforms to the section-4 format: `before.file_key` is the inbox key, `after.file_key` is the target key, `after.status` the verdict status, `errors` present on failure, and `after` lists only the recognized fields.
 - Given the verdict was pending, when the event is appended, then `after` still lists the fields recognized before the failure so the future correction form can pre-fill them.
 
@@ -171,8 +172,8 @@ so that the S3 state and the database state never contradict each other for long
 
 Acceptance criteria:
 
-- Given a valid verdict, when filing runs, then the object is copied to `files/` + rendered template (conflict suffix applied if needed), the target existence is verified, and only then is the `inbox/` key deleted; the record's `file_key` is updated to the final, conflict-resolved key.
-- Given an invalid verdict, when filing runs, then the object is moved to `pending/` with an incremental suffix on name conflict, and the record's `file_key` is updated.
+- Given a valid verdict, when filing runs, then the object is copied to the files prefix + rendered template (conflict suffix applied if needed), the target existence is verified, and only then is the inbox key deleted; the record's `file_key` is updated to the final, conflict-resolved key.
+- Given an invalid verdict, when filing runs, then the object is moved to the pending prefix with an incremental suffix on name conflict, and the record's `file_key` is updated.
 - Given a copy or delete fails mid-filing, when the pass ends, then the recovery of US-11 picks the document up on the next poll.
 - Given any deletion, when it executes, then it is final unless bucket versioning is enabled, in which case the data remains recoverable via delete markers.
 
@@ -216,7 +217,7 @@ Acceptance criteria:
 - Given a field edit is saved, when the record is persisted, then a `corrected` event is appended whose `before`/`after` diff (section-4 format) carries the changed fields only; `file_key` and `status` do not appear since they did not change.
 - Given a save where no declared field actually changed, when the hook runs, then no event is appended.
 - Given the save also changes the status, when the hook runs, then the status rules of US-23 apply on their own: `processed` → `validated` is appended as a separate `validated` event, anything else is refused.
-- Given a `pending` document, when fields are edited this way, then it stays `pending` and its object stays in `pending/`; leaving the review queue requires the full correction of the review dashboard (US-36), whose form shows all fields and the resulting name before saving.
+- Given a `pending` document, when fields are edited this way, then it stays `pending` and its object stays in the pending prefix; leaving the review queue requires the full correction of the review dashboard (US-36), whose form shows all fields and the resulting name before saving.
 
 ### US-23 — Validate a document from the standard PocketBase UI
 
@@ -246,7 +247,7 @@ Acceptance criteria:
 
 ## Epic: Review Dashboard (US-30 to US-42)
 
-The static frontend served from `pb_public/` (arch.md section 7): document list, document detail and tools pages, driven by the configuration metadata route. No build toolchain, vendored dependencies only (100% offline). Document persistence goes through the standard PocketBase API and its hooks; application routes handle operations the standard API cannot express (config metadata, PDF proxy, dry-run, full correction, enum value registration). The configuration editor is specified separately in US-50 to US-52.
+The static frontend served from `pb_public/` (arch.md section 7): document list, document detail, tools and configuration-editor pages, driven by the configuration metadata route. No build toolchain, vendored dependencies only (100% offline). Document persistence goes through the standard PocketBase API and its hooks; application routes handle operations the standard API cannot express (config metadata, PDF proxy, dry-run, full correction, enum value registration). The configuration editor is specified separately in US-50 to US-52.
 
 ### US-30 — Serve the dashboard as static files
 
@@ -321,7 +322,7 @@ so that I see the effect of a correction before committing it.
 Acceptance criteria:
 
 - Given the detail page, when it opens, then it calls `POST /api/archivist/documents/{id}/dry-run` with no body; the route re-runs the rule tree against the stored pages and returns the proposed fields, the selected template, the rendered name and the errors, persisting nothing.
-- Given the classification dry-run, when it runs, then the response also carries a `trace` field: the flat, ordered list of the rules that modified a value (`set`/`delete`) or errored — rule name, field, final value after the operation (marked as unset for a `delete`), the literal `eval` expression that produced it (a constant `set` returns its own value) and the error message for a failing rule; rules that match without modifying anything and non-matching rules are omitted (US-42).
+- Given the classification dry-run, when it runs, then the response also carries a `trace` field: the flat, ordered list of the rules that modified a value (`set`/`delete`) or errored — the rule's `when` expression as rule identifier (rules carry no name), field, final value after the operation (marked as unset for a `delete`), the literal `eval` expression that produced it (a constant `set` returns its own value) and the error message for a failing rule; rules that match without modifying anything and non-matching rules are omitted (US-42).
 - Given a field whose proposed value differs from the current value, when the response arrives, then a discreet banner under the control offers the proposed value with one-click adoption.
 - Given the form is modified, when the typing settles, then the page calls the dry-run route with the proposed field values; the route converts them to their native types (per-field error on mismatch), merges them with the record values, renders the template against the stored pages and returns the target name and its errors in the same response shape.
 - Given the two modes, when either runs, then they are exclusive: user values never enter the rule-evaluation context, and no record, event or S3 object is touched.
@@ -338,7 +339,7 @@ Acceptance criteria:
 - Given the form, when I trigger the full correction, then `POST /api/archivist/documents/{id}/correct` runs the transactional orchestration: conflict-suffix resolution, S3 copy, target verification, deletion of the old key, record update (`file_key`, status `validated`), and a `corrected` event carrying the full diff.
 - Given any step fails midway, when the route handles it, then the save is refused, the S3 state is restored, and the record and history are left unchanged.
 - Given the rendered name equals the current `file_key`, when the correction runs, then the copy and delete are skipped, the status alone changes, and `file_key` is absent from the diff.
-- Given a `pending` document, when the correction succeeds, then the `pending/` object is removed and the document leaves the review queue.
+- Given a `pending` document, when the correction succeeds, then the object in the pending prefix is removed and the document leaves the review queue.
 - Given an unauthenticated client, when it calls the route, then it is refused.
 - Given the implementation, when it is reviewed, then it reuses the engine internals (`FieldsFromRecord`, `ValidateValue`, `Render`, `ResolveConflict`, `DiffSnapshots`, `AppendEvent`) with no parallel business logic.
 
@@ -366,7 +367,7 @@ Acceptance criteria:
 
 - Given the detail page, when it opens, then a panel below the event history, collapsed by default, holds the rule evaluation trace fetched with the classification dry-run in the same request (no extra call when unfolding).
 - Given the panel header, when the dry-run returned errors (classification or name rendering), then they are displayed at the top of the panel in the existing error style, and the collapsed header shows a badge with their count.
-- Given the trace, when the panel is unfolded, then each entry shows the rule name, the field, the producing `eval` expression and the final value; deletions are marked as unset, failing rules show their error message.
+- Given the trace, when the panel is unfolded, then each entry shows the rule's `when` expression (rules carry no name), the field, the producing `eval` expression and the final value; deletions are marked as unset, failing rules show their error message.
 - Given the evaluation, when it runs, then nothing is persisted: the trace reflects what the rules would do today against the stored pages, not what happened at import.
 
 ## Epic: Tools (dashboard)
@@ -395,12 +396,12 @@ so that files moved by hand are re-attached to their record and unknown files re
 
 Acceptance criteria:
 
-- Given the tool runs, when it scans, then it lists only objects under `pending/` or `files/` whose filename ends in `.pdf` (case-insensitive), stream-computes each object's sha256 and looks up a `documents` record by hash; objects under `inbox/`, elsewhere in the bucket, or with another extension are ignored.
+- Given the tool runs, when it scans, then it lists only objects whose filename ends in `.pdf` (case-insensitive) under the pending and files prefixes — the whole bucket when `ARCHIVIST_S3_FILES_PREFIX=/` —, stream-computes each object's sha256 and looks up a `documents` record by hash; objects under the inbox prefix, or with another extension, are ignored.
 - Given an object whose record's `file_key` equals its key, when it is scanned, then nothing happens (`ok`).
 - Given an object whose record's `file_key` no longer exists in the bucket, when it is scanned, then the record's `file_key` is corrected to the found key (the object itself never moves), a `relocated` event is appended with the `file_key` diff, and the correction is refused when another record already references the key (`corrected`).
 - Given an object whose record's `file_key` still exists elsewhere, when it is scanned, then the stray copy is left in place and reported (`duplicates`).
-- Given an object no record knows, when it is scanned, then it is moved to `inbox/` (conflict suffix on name collision) so the poller processes it automatically (`moved`).
-- Given a record whose `file_key` exists nowhere in the bucket and is not an interrupted filing under `inbox/`, when the scan ends, then it is reported in the summary (`missing`) with its key, never acted upon.
+- Given an object no record knows, when it is scanned, then it is moved to the inbox prefix (conflict suffix on name collision) so the poller processes it automatically (`moved`).
+- Given a record whose `file_key` exists nowhere in the bucket and is not an interrupted filing under the inbox prefix, when the scan ends, then it is reported in the summary (`missing`) with its key, never acted upon.
 - Given a per-object failure (S3 error, lookup error), when it occurs, then it is logged, counted in the summary and listed, and the scan continues with the next object.
 
 ## Epic: Configuration Editor
@@ -430,7 +431,7 @@ so that I can inspect the extracted values, target name, errors and rule trace b
 Acceptance criteria:
 
 - Given the draft or page array changes, when typing settles, then the page calls `POST /api/archivist/config/dry-run` with the full draft source and a JSON array of page texts.
-- Given the submitted configuration is valid, when the dry-run completes, then the response shows the proposed fields, selected template, rendered target under `files/`, classification/rendering errors and the ordered rule trace using the same presentation as the document detail page.
+- Given the submitted configuration is valid, when the dry-run completes, then the response shows the proposed fields, selected template, rendered target (under the files prefix), classification/rendering errors and the ordered rule trace using the same presentation as the document detail page.
 - Given the JSONC or configuration is invalid, when the dry-run runs, then it reports the configuration errors and does not display stale results as if they came from the current draft.
 - Given any draft dry-run, when it runs, then it compiles and evaluates the draft independently of the active configuration and persists nothing: no record, event, file or enum schema is changed.
 - Given the dry-run route is called without superuser authentication, then the request is refused.

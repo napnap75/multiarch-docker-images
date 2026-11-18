@@ -39,6 +39,8 @@ pending/     # files awaiting human review
 files/       # renamed and filed files (configured prefix structure)
 ```
 
+The three prefixes are configurable through environment variables: `ARCHIVIST_S3_INBOX_PREFIX`, `ARCHIVIST_S3_PENDING_PREFIX` and `ARCHIVIST_S3_FILES_PREFIX`, all optional with the defaults shown above. Surrounding slashes are normalized; `ARCHIVIST_S3_FILES_PREFIX=/` files documents at the bucket root (the reconciliation scan of section 7.5 then covers the whole bucket, with the inbox and pending keys still excluded); the inbox and pending prefixes cannot be empty, and the three prefixes must be distinct — the application refuses to start otherwise.
+
 Nextcloud mounts the bucket as external storage: it is the user-facing interface for uploading, downloading, and sharing. The application only manipulates S3 keys, never a local filesystem for documents.
 
 ## 4. Data Model (PocketBase Collections)
@@ -58,7 +60,7 @@ The append-only `document_events` collection is the single source of truth for a
 ### `document_events`
 Append-only history: `document`, `event_type` (`imported`, `corrected`, `validated`, `relocated`), `payload` as JSON, `timestamp`, plus the standard `created`/`updated` autodate columns; the event's business timestamp is `timestamp`, mirrored in the payload.
 
-The payload is self-contained: each event carries its own type, its own timestamp and the document state before and after, so a document's full history is reconstructed from this collection alone; the snapshots are stored as diffs — each `before`/`after` carries only the fields the event changes. All dates are RFC 3339; all S3 keys are complete, prefix included.
+The payload is self-contained: each event carries its own type, its own timestamp and the document state before and after, so a document's full history is reconstructed from this collection alone; the snapshots are stored as diffs — each `before`/`after` carries only the fields the event changes. All dates are RFC 3339; all S3 keys are complete, prefix included. The examples in this section use the default prefixes (section 3).
 
 Common payload keys:
 
@@ -68,13 +70,13 @@ Common payload keys:
 
 Per event type:
 
-| Key | imported | corrected | validated |
-|---|---|---|---|
-| `event_type` | always | always | always |
-| `timestamp` | always | always | always |
-| `errors` | on failure | — | — |
-| `before` | always | always | always |
-| `after` | always | always | always |
+| Key | imported | corrected | validated | relocated |
+|---|---|---|---|---|
+| `event_type` | always | always | always | always |
+| `timestamp` | always | always | always | always |
+| `errors` | on failure | — | — | — |
+| `before` | always | always | always | always |
+| `after` | always | always | always | always |
 
 `imported` — created after filing (valid or not), one event for the whole import + classification:
 
@@ -86,7 +88,7 @@ Per event type:
     "file_key": "inbox/scan_2026-01-15.pdf"
   },
   "after": {
-    "file_key": "files/BRED/Decembre 2025_Relevé de compte.pdf",
+    "file_key": "files/BRED/Décembre 2025_Relevé de compte.pdf",
     "status": "processed",
     "emittingCompany": "BRED",
     "documentType": "Relevé de compte",
@@ -116,7 +118,7 @@ On classification failure, the document is routed to `pending/` and the payload 
 }
 ```
 
-`corrected` — created whenever declared fields are modified, whatever the interface. A field edited from the standard PocketBase UI is a draft correction (US-22): the values persist as they are, no template evaluation, no re-filing, no status change, and the snapshots carry the field diff alone. A dashboard correction (US-3x) adds the side effects: the file is re-filed and the status moves to `validated`, so `file_key` and `status` join the diff:
+`corrected` — created whenever declared fields are modified, whatever the interface. A field edited from the standard PocketBase UI is a draft correction (US-22): the values persist as they are, no template evaluation, no re-filing, no status change, and the snapshots carry the field diff alone. A dashboard correction (US-36) adds the side effects: the file is re-filed and the status moves to `validated`, so `file_key` and `status` join the diff:
 
 ```json
 {
@@ -138,7 +140,7 @@ On classification failure, the document is routed to `pending/` and the payload 
 }
 ```
 
-The diff is derived by comparing the two snapshots: a field present in `before` and absent from `after` was deleted (case of `bankAccount` above); the reverse means it was added (`template` above).
+The diff is derived by comparing the two snapshots: a field present in `before` and absent from `after` was deleted; the reverse means it was added (`template` above).
 
 `validated` — transition from `processed` to `validated` from the dashboard, no re-filing, no field change; only the status changes, so the snapshots carry it alone:
 
@@ -162,10 +164,10 @@ The diff is derived by comparing the two snapshots: a field present in `before` 
   "event_type": "relocated",
   "timestamp": "2026-02-01T10:12:44Z",
   "before": {
-    "file_key": "files/BRED/Decembre 2025_Relevé de compte.pdf"
+    "file_key": "files/BRED/Décembre 2025_Relevé de compte.pdf"
   },
   "after": {
-    "file_key": "files/BRED/Archives/Decembre 2025_Relevé de compte.pdf"
+    "file_key": "files/BRED/Archives/Décembre 2025_Relevé de compte.pdf"
   }
 }
 ```
@@ -214,7 +216,7 @@ A `config.jsonc` file kept alongside the binary, reloaded on restart. Three sect
      - Returns a French string: `Janvier 2026`, `T2 2026`, `S1 2026` ou `2026`.
      - The optional `layout` argument is a standard Go reference-date layout applied to the period's first day, with month names rendered in French by the application (default layouts: `January 2006` for `month`, `2006` for `year`); it is ignored for `quarter` and `half`, whose formats (`T<quarter> <year>`, `S<half> <year>`) are fixed.
 
-3. `templates`: named naming templates (e.g. `bank_statement: {emittingCompany}/{emissionDate.Format(`2006-01-02`)}_{documentType}_{bankAccount}.pdf`). A template is a literal string containing `{...}` placeholders:
+3. `templates`: named naming templates (e.g. `bank_statement: {emittingCompany}/{frPeriod(emissionDate, `month`, -1)}_{documentType}_{bankAccount}.pdf`). A template is a literal string containing `{...}` placeholders:
    - the inside of each placeholder is an `expr-lang/expr` expression evaluated in the document context (fields, helpers, builtins — e.g. `{emissionDate.Format(`2006-01-02`)}` or `{upper(emittingCompany)}`) and replaced by its result
    - the static text between placeholders stays literal
    - unset optional fields evaluate to an empty string
@@ -229,15 +231,15 @@ Validation on load: JSONC decoding and field declaration checks (including a non
 
 Executed by the PocketBase cron job (configurable interval, e.g. every minute):
 
-1. **Poll**: list objects in `inbox/`; an object is a candidate only if no `documents` record references its key yet, and its size and ETag are stable across two consecutive polls (write-completion wait). The same pass also picks up interrupted filings: any `documents` record whose `file_key` is still under `inbox/` (a filing that was interrupted between record creation and the physical move) is completed as described below.
-2. **Download**: fetch the object into memory (streamed), no disk writes. The sha256 is computed during download; if a `documents` record with the same hash already exists, the object is a duplicate: the `inbox/` key is deleted (a no-data-loss case — the original with the same content stays filed), a message is logged via the PocketBase logger (section 9), and processing stops there. By design, no `document_events` entry is recorded: the duplicate is not a document of its own, and the trace lives in the PocketBase logs only. An object that is not a PDF (its content does not start with the `%PDF-` header) is left as-is in `inbox/`: it is never imported, gets no record and no event; the skip is logged at Warn level once per unchanged content (the object is not re-downloaded on later passes until its ETag changes) and processing stops there.
+1. **Poll**: list objects in the configured inbox prefix (default `inbox/`, section 3); an object is a candidate only if no `documents` record references its key yet, and its size and ETag are stable across two consecutive polls (write-completion wait). The same pass also picks up interrupted filings: any `documents` record whose `file_key` is still under the inbox prefix (a filing that was interrupted between record creation and the physical move) is completed as described below.
+2. **Download**: fetch the object into memory (streamed), no disk writes. The sha256 is computed during download; if a `documents` record with the same hash already exists, the object is a duplicate: the inbox key is deleted (a no-data-loss case — the original with the same content stays filed), a message is logged via the PocketBase logger (section 9), and processing stops there. By design, no `document_events` entry is recorded: the duplicate is not a document of its own, and the trace lives in the PocketBase logs only. An object that is not a PDF (its content does not start with the `%PDF-` header) is left as-is in the inbox prefix: it is never imported, gets no record and no event; the skip is logged at Warn level once per unchanged content (the object is not re-downloaded on later passes until its ETag changes) and processing stops there.
 3. **Extraction**: page-by-page text (one entry per page, for rule evaluation and the FTS index) via `ledongthuc/pdf`, including headers and footers
 4. **Rule evaluation**: rules evaluated in order against the document pages and the fields set so far; a structured evaluation trace — every rule that modified a value (`set`/`delete`) or errored, with the field, the final value and the producing `eval` expression — is written to the PocketBase logger at Debug level (section 9) and returned as the `trace` field of the classification dry-run (section 7.3).
-5. **Validation**: a result is valid if and only if: all rules have been processed with no error, all mandatory fields are identified, the selected template exists in the configuration, and the naming template evaluated with no error. Otherwise: route directly to `pending/`.
+5. **Validation**: a result is valid if and only if: all rules have been processed with no error, all mandatory fields are identified, the selected template exists in the configuration, the naming template evaluated with no error, and no rendered placeholder value contains a `/` (the S3 key delimiter). Otherwise: route directly to `pending/`.
 6. **Record**: create the `documents` record (sha256, current inbox key, pages, fields, status) and add an `imported` event including the original key (`before.file_key`); for enum fields, any value missing from the field's possible-values list is registered in the list before the record is saved (section 5). The record exists before any physical move, so an interrupted filing leaves a state the poller recovers automatically on its next pass.
 7. **Filing**:
-   - valid → resolve the target name first: if a file with the same name already exists in the target prefix, append a number to the filename; then copy to the new key (`files/` + rendered template — the template renders the full object path, there is no separate prefix), verify the target object exists, and delete the `inbox/` key only after the copy is confirmed; finally update the `documents` record with the final, conflict-resolved filename (`file_key`, status `processed`); the whole import is recorded as the single `imported` event of section 4.
-   - invalid → move to `pending/` (incremental suffix on name conflict); update `file_key`; status `pending`.
+   - valid → resolve the target name first: if a file with the same name already exists in the target prefix, append a number to the filename; then copy to the new key (the configured files prefix + rendered template — the template renders the full object path, there is no separate prefix), verify the target object exists, and delete the inbox key only after the copy is confirmed; finally update the `documents` record with the final, conflict-resolved filename (`file_key`, status `processed`); the whole import is recorded as the single `imported` event of section 4.
+   - invalid → move to the pending prefix (incremental suffix on name conflict); update `file_key`; status `pending`.
 
 When the bucket is versioned, any deletion creates a delete marker and the data remains recoverable; when it is not, deletions are final. The application logs a warning at startup when versioning is disabled, recommending the user to enable it to reduce the risk of losing a file to a bug.
 
@@ -260,7 +262,7 @@ The review dashboard is a static frontend — plain HTML/CSS/JS files, no build 
 - Form: one typed control per declared field, pre-filled with the current values; mandatory fields marked; the classification errors of the `imported` event, if any, displayed at the top.
 - Pipeline proposals (US-35): under each field whose value the pipeline would extract differently today, a discreet banner offers the proposed value with one-click adoption. The proposals come from the classification dry-run (section 7.3), re-run against the stored pages.
 - Live name (US-35): as the form changes, the rendered target name under `files/` is recomputed by the render dry-run and displayed with its errors; the draft save remains available, but the full correction refuses to run while errors remain.
-- Rule trace (US-42): below the event history, a panel collapsed by default shows how the rules evaluate the document today. Its header shows a badge with the error count when the dry-run returned errors; unfolded, it first lists the dry-run errors (classification and name rendering) in the error style, then one line per traced rule: rule name, field, producing `eval` expression, final value (deletions marked as unset, failing rules with their error message). The trace comes from the classification dry-run re-run against the stored pages, fetched in the same request as the proposals; it reflects what the rules would do today, not what happened at import, and nothing is persisted.
+- Rule trace (US-42): below the event history, a panel collapsed by default shows how the rules evaluate the document today. Its header shows a badge with the error count when the dry-run returned errors; unfolded, it first lists the dry-run errors (classification and name rendering) in the error style, then one line per traced rule: the rule's `when` expression (rules carry no name), the field, the producing `eval` expression, final value (deletions marked as unset, failing rules with their error message). The trace comes from the classification dry-run re-run against the stored pages, fetched in the same request as the proposals; it reflects what the rules would do today, not what happened at import, and nothing is persisted.
 - Exits, three and distinct: draft save (standard PATCH, US-22: values persist, no re-filing, no status change); full correction (US-36: the `/correct` route, re-filing and validation in one confirmed step); simple validation of a `processed` document (standard PATCH, US-23). A `pending` document only leaves the review queue through the full correction.
 
 ### 7.3 Application routes
@@ -273,7 +275,7 @@ Beyond the standard PocketBase API, authenticated only:
 - `PUT /api/archivist/config` — accepts `{"source":"..."}`, fully validates and compiles it, writes it to the active configuration path using a temporary sibling file and atomic rename, then activates the compiled configuration for the poller and API routes. The containing directory must be writable. On validation or write failure, the active configuration and file remain unchanged and the response identifies the errors. Superuser-only.
 - `POST /api/archivist/fields/{field}/values` — registers a value in the possible-values list of an enum field (JSON body `{"value": "..."}`); refused on an unknown or non-enum field, an empty value, the reserved dummy `-----` and the `template` field (its list follows the configuration alone); returns the field's updated list. The add-a-value modal of the dashboard dropdowns calls it; the pipeline registers new values on its own before saving.
 - `GET /api/archivist/documents/{id}/pdf` — proxy route streaming the document from S3; the browser never reaches the S3 cluster.
-- `POST /api/archivist/documents/{id}/dry-run` — two exclusive modes, one response shape (`fields`, `template`, `rendered`, `errors`), persisting nothing. Without a body: a classification re-run — the rule tree evaluated against the stored pages, returning the proposed fields (the source of the pipeline proposals) plus a `trace` field: the flat, ordered list of the rules that modified a value (`set`/`delete`) or errored during the evaluation — each entry carrying the rule name, the field, the final value after the operation (marked as unset for a `delete`), the literal `eval` expression that produced it (a constant `set` returns its own value) and the error message for a failing rule; rules that match without modifying anything and non-matching rules are omitted. The trace reflects what the rules would do today, not what happened at import (US-42). With field values: a template render — the values converted to their native types (per-field error on type mismatch), merged with the record values, rendered against the stored pages (placeholders may call `firstMatch`/`frDate` on the document text), returning the target name and its errors. The modes are never hybrid: user values never enter the rule-evaluation context, so the proposal always stays what the pipeline would do alone.
+- `POST /api/archivist/documents/{id}/dry-run` — two exclusive modes, one response shape (`fields`, `template`, `rendered`, `errors`), persisting nothing. Without a body: a classification re-run — the rule tree evaluated against the stored pages, returning the proposed fields (the source of the pipeline proposals) plus a `trace` field: the flat, ordered list of the rules that modified a value (`set`/`delete`) or errored during the evaluation — each entry carrying the rule's `when` expression as its rule identifier (rules carry no name), the field, the final value after the operation (marked as unset for a `delete`), the literal `eval` expression that produced it (a constant `set` returns its own value) and the error message for a failing rule; rules that match without modifying anything and non-matching rules are omitted. The trace reflects what the rules would do today, not what happened at import (US-42). With field values: a template render — the values converted to their native types (per-field error on type mismatch), merged with the record values, rendered against the stored pages (placeholders may call `firstMatch`/`frDate` on the document text), returning the target name and its errors. The modes are never hybrid: user values never enter the rule-evaluation context, so the proposal always stays what the pipeline would do alone.
 - `POST /api/archivist/documents/{id}/correct` — the full correction of US-36: transactional orchestration (conflict-suffix resolution, S3 copy, verification, old key deletion, record update with `file_key` and status `validated`, `corrected` event carrying the full diff, S3 rollback on mid-failure with the save refused). It reuses the engine internals (`FieldsFromRecord`, `ValidateValue`, `Render`, `ResolveConflict`, `DiffSnapshots`, `AppendEvent`), no parallel business logic. A route rather than a standard PATCH because the intent (re-file + validate) is not expressible in record data, the standard PATCH must stay side-effect-free for every client and the bulk edit (US-22 / US-33), and the operation is a multi-step transaction rather than a record save — the same line drawn by `POST /api/archivist/poll`.
 
 ### 7.4 Standard collections UI and hooks
@@ -292,13 +294,13 @@ The tools are long-running maintenance tasks started by hand, the exact opposite
 
 First tool, `find-lost-files` (US-41) — reconciling the bucket with the database when files have been moved by hand (e.g. through Nextcloud):
 
-1. List only `.pdf` objects (extension matched case-insensitively) recursively under `pending/` and `files/`. Objects under `inbox/`, other prefixes, or with another extension are ignored.
+1. List only `.pdf` objects (extension matched case-insensitively) recursively under the pending and files prefixes — the whole bucket when files is the root; inbox keys excluded in every case. Objects under the inbox prefix and objects with another extension are ignored.
 2. For each listed object, stream-compute its sha256 and look up a `documents` record by hash:
    - the record's `file_key` equals the object key: nothing to do (`ok`);
    - the record's `file_key` no longer exists in the bucket: the file was moved outside the application — the record's `file_key` is corrected to the found key and a `relocated` event is appended (the object itself never moves); refused if another record already references the key (`corrected`);
    - the record's `file_key` still exists: the scanned object is a stray copy — left in place and reported (`duplicates`);
-   - no record at all: the object is unknown of the database — moved to `inbox/` (conflict suffix on name collision) so the poller processes it automatically (`moved`).
-3. After the scan, every record whose `file_key` is a `.pdf` under `pending/` or `files/` but has no corresponding listed object is reported as missing, never acted upon (`missing`). Other keys, including interrupted filings under `inbox/`, are not reported.
+   - no record at all: the object is unknown of the database — moved to the inbox prefix (conflict suffix on name collision) so the poller processes it automatically (`moved`).
+3. After the scan, every record whose `file_key` is a `.pdf` under the pending or files prefix (the whole bucket when files is the root) but has no corresponding listed object is reported as missing, never acted upon (`missing`). Other keys, including interrupted filings under the inbox prefix, are not reported.
 
 Every outcome is logged through the PocketBase logger; per-object failures do not stop the scan and join the job's error list.
 

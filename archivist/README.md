@@ -18,7 +18,7 @@ Files in `inbox/` that are not PDFs (no `%PDF-` header) are left as-is: they are
 
 ## Prerequisites
 
-- An S3 bucket, with three prefixes: `inbox/`, `pending/`, `files/` (configurable through `ARCHIVIST_S3_INBOX_PREFIX`, `ARCHIVIST_S3_PENDING_PREFIX` and `ARCHIVIST_S3_FILES_PREFIX`; set `ARCHIVIST_S3_FILES_PREFIX=/` to file documents at the bucket root). The prefixes are created on first startup if they do not exist. Versioning is not required, but it is strongly recommended: without it, a file deleted by the application or by a bug is lost for good; with it, deleted objects stay recoverable via delete markers. The application logs a warning at startup when versioning is disabled (visible in the admin dashboard, Dashboard > Logs).
+- An S3 bucket, with three prefixes: `inbox/`, `pending/`, `files/` (configurable through `ARCHIVIST_S3_INBOX_PREFIX`, `ARCHIVIST_S3_PENDING_PREFIX` and `ARCHIVIST_S3_FILES_PREFIX`; set `ARCHIVIST_S3_FILES_PREFIX=/` to file documents at the bucket root). Versioning is not required, but it is strongly recommended: without it, a file deleted by the application or by a bug is lost for good; with it, deleted objects stay recoverable via delete markers. The application logs a warning at startup when versioning is disabled (visible in the admin dashboard, Dashboard > Logs).
 - An S3 user with read/write access to the bucket.
 - Docker.
 
@@ -99,7 +99,7 @@ A commented `config.jsonc` example file is provided in the repository. The confi
     { "name": "emittingCompany", "french": "Société émettrice", "type": "text", "mandatory": true },
     { "name": "documentType",    "french": "Type de document",   "type": "enum", "mandatory": true },
     { "name": "emissionDate",    "french": "Date d'émission",    "type": "date", "mandatory": true },
-    { "name": "template",        "french": "Modèle de nommage",  "type": "text", "mandatory": false }
+    { "name": "template",        "french": "Modèle de nommage",  "type": "enum", "mandatory": false }
   ],
   "rules": [
     {
@@ -131,18 +131,17 @@ A commented `config.jsonc` example file is provided in the repository. The confi
 - Validation: direct transition from `processed` to `validated`.
 - History: every document has a complete, timestamped trace (import, correction, validation) readable from its detail view.
 - Tools: maintenance tasks run by hand (see Tools below).
-- Tools: maintenance tasks run by hand (see Tools below).
 - Configuration editor: edit fields, rules and templates, test against pasted or stored page text, and save a validated configuration without restarting the container.
 
 ## Tools
 
 The `Outils` page of the dashboard runs maintenance tasks by hand: one card per tool with its description, a run button, a live progress bar while the task runs (cancellable), and a summary with per-outcome counts when it ends. One task at a time.
 
-The first tool, `Recherche des fichiers perdus`, reconciles the bucket with the database when files have been moved by hand (e.g. through Nextcloud). It scans only `.pdf` objects (case-insensitive extension) under `pending/` and `files/`, computes each object's sha256 and compares it against the database; objects in `inbox/`, other prefixes, and other file types are ignored:
+The first tool, `Recherche des fichiers perdus`, reconciles the bucket with the database when files have been moved by hand (e.g. through Nextcloud). It scans only `.pdf` objects (case-insensitive extension) under the pending and files prefixes — the whole bucket when `ARCHIVIST_S3_FILES_PREFIX=/` — computes each object's sha256 and compares it against the database; objects in the inbox prefix and other file types are ignored:
 
 - the object is at the key its record knows: nothing happens;
 - the object was moved outside the application: the record's `file_key` is corrected to the new key and a `relocated` event is appended to the document's history (the object itself never moves);
-- the object is unknown of the database: it is moved to `inbox/` to be processed automatically by the poller;
+- the object is unknown of the database: it is moved to the inbox prefix to be processed automatically by the poller;
 - a record whose file has disappeared from the bucket is only reported in the summary, never acted upon.
 
 ## Nextcloud integration
@@ -172,5 +171,4 @@ Without `E2E_IMAGE` the suite skips. The suite drives the poller through the sup
 - A file stays in `inbox/`: check the logs — admin dashboard, Dashboard > Logs (`docker logs archivist` shows startup errors). Frequent causes: the file is not a PDF (left in place by design), unreadable PDF (goes to `pending/`), transient S3 error (retried on the next pass).
 - A file goes to `pending/`: open its detail view in the dashboard; the classification error(s) are displayed there.
 - The container does not start: invalid `config.jsonc`. The full error message is in the container logs; the application refuses to start with a partially valid configuration.
-- After editing `config.jsonc`: `docker restart archivist`.
 - After editing the mounted `config.jsonc` outside the dashboard: `docker restart archivist`. Dashboard edits take effect after a successful save and activate; invalid drafts do not replace the active configuration.

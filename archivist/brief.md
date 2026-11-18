@@ -2,7 +2,7 @@
 
 ## 1. Vision
 
-A personal, 100% offline tool that watches the `inbox/` prefix of a self-hosted S3 bucket, identifies each incoming PDF (invoice, purchase order, contract, etc.) from the text content of its pages, applies the corresponding naming template by extracting fields, and files the object into an organized prefix structure. Nextcloud, which mounts the bucket as external storage, is the user-facing interface for uploading, downloading, and sharing. Files that cannot be classified with certainty go to `pending/` for review in a local web dashboard.
+A personal, 100% offline tool that watches the inbox prefix (configurable, default `inbox/`) of a self-hosted S3 bucket, identifies each incoming PDF (invoice, purchase order, contract, etc.) from the text content of its pages, applies the corresponding naming template by extracting fields, and files the object into an organized prefix structure. Nextcloud, which mounts the bucket as external storage, is the user-facing interface for uploading, downloading, and sharing. Files that cannot be classified with certainty go to the pending prefix (default `pending/`) for review in a local web dashboard.
 
 ## 2. Problem and Context
 
@@ -16,7 +16,7 @@ PDFs arrive continuously in the inbox prefix via Nextcloud or upload automations
 
 ## 4. Scope
 
-- Ingestion: polling the `inbox/` prefix for new objects. OCR for scanned/image-only documents is out of scope.
+- Ingestion: polling the inbox prefix for new objects; the three prefixes (inbox, pending, files) are configurable by environment variables, with `files` optionally set to the bucket root. OCR for scanned/image-only documents is out of scope.
 - Fields, rule-based extraction, and naming templates declared in configuration (JSONC), not in code; constant reference lists live inline in rule expressions.
 - Storage: single self-hosted S3 bucket; objects addressed by S3 keys, no local filesystem for documents. Versioning is optional but recommended: the application must start without it (simple warning) and the user can enable it to reduce the risk of losing a file to a bug.
 - Dashboard: file list with status, PDF preview streamed from S3, field and template correction, validation, history, full-text search across the entire document in addition to metadata/field search, and a configuration editor with a draft test bench and save-and-activate flow.
@@ -26,6 +26,6 @@ PDFs arrive continuously in the inbox prefix via Nextcloud or upload automations
 
 Single user (personal use), technically proficient. Nominal flow:
 
-1. A PDF is dropped into `inbox/` via Nextcloud (or any S3 client).
-2. The tool classifies it: a valid result is filed automatically (`processed`); otherwise the file lands in `pending/` in the review queue.
+1. A PDF is dropped into the inbox prefix via Nextcloud (or any S3 client).
+2. The tool classifies it: a valid result is filed automatically (`processed`); otherwise the file lands in the pending prefix, in the review queue.
 3. From the dashboard, the user corrects fields (a correctable file is re-filed and becomes `validated`) and validates `processed` files.
