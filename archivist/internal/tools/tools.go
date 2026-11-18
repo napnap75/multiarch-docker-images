@@ -32,9 +32,9 @@ var registry = []Descriptor{
 	{
 		ID:   "find-lost-files",
 		Name: "Recherche des fichiers perdus",
-		Description: "Parcourt les fichiers PDF de pending/ et files/, recalcule leur empreinte sha256 et la compare à la base. " +
+		Description: "Parcourt les fichiers PDF sous les préfixes pending et files (recouvre tout le bucket lorsque files est configuré comme racine), recalcule leur empreinte sha256 et la compare à la base. " +
 			"Un objet à sa place connue ne bouge pas ; un objet déplacé hors de l'application voit son file_key corrigé avec un événement relocated dans l'historique ; " +
-			"un objet inconnu de la base est déplacé vers inbox/ pour être traité automatiquement ; " +
+			"un objet inconnu de la base est déplacé vers la zone inbox pour être traité automatiquement ; " +
 			"les enregistrements dont le fichier a disparu du bucket sont signalés dans le résumé, sans action automatique.",
 	},
 }
@@ -239,7 +239,7 @@ func runTool(ctx context.Context, app core.App, s3 S3Store, toolID string, job *
 	return fmt.Errorf("unknown tool: %s", toolID)
 }
 
-// runFindLostFiles reconciles pending/ and files/ PDFs with the database (US-41).
+// runFindLostFiles reconciles the pending and files prefix PDFs with the database (US-41).
 // In place: nothing. Moved in the bucket outside the application: the
 // record's file_key is corrected and a relocated event is appended. Unknown
 // of the database: moved to inbox/ for automatic processing. A record whose
@@ -320,7 +320,7 @@ func reconcileObject(ctx context.Context, app core.App, s3 S3Store, job *Job, ke
 	}
 
 	if record == nil {
-		// Unknown of the database: back to inbox/ for automatic processing.
+		// Unknown of the database: back to the inbox for automatic processing.
 		finalKey, err := s3.ResolveConflict(ctx, prefixes.Inbox+baseName(key))
 		if err != nil {
 			return fmt.Errorf("conflict resolution: %w", err)

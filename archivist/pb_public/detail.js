@@ -237,7 +237,8 @@ async function loadCurrentTarget() {
 }
 
 function renderTargetName(rendered) {
-  var targetKey = rendered ? "files/" + rendered : "";
+  // The dry-run route returns the full target key, files prefix included.
+  var targetKey = rendered || "";
   $("targetname").textContent = targetKey && targetKey !== record.file_key
     ? "Clé cible : " + targetKey : "";
 }

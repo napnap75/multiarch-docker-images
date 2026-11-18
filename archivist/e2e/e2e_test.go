@@ -1027,7 +1027,7 @@ func TestE2E(t *testing.T) {
 		if out["template"] != "bank_statement" {
 			t.Fatalf("template: %v", out["template"])
 		}
-		if out["rendered"] != "BRED/2026-01_Releve de compte_Thomas.pdf" {
+		if out["rendered"] != "files/BRED/2026-01_Releve de compte_Thomas.pdf" {
 			t.Fatalf("rendered: %v", out["rendered"])
 		}
 		if errs, _ := out["errors"].([]any); len(errs) != 0 {
@@ -1069,7 +1069,7 @@ func TestE2E(t *testing.T) {
 		if fields["bankAccount"] != "Nappez" {
 			t.Fatalf("merged fields: %v", fields)
 		}
-		if out["rendered"] != "BRED/2026-01_Releve de compte_Nappez.pdf" {
+		if out["rendered"] != "files/BRED/2026-01_Releve de compte_Nappez.pdf" {
 			t.Fatalf("rendered: %v", out["rendered"])
 		}
 

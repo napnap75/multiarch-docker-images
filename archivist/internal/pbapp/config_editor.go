@@ -216,7 +216,7 @@ func handleConfigSource(re *core.RequestEvent, manager *config.Manager) error {
 	})
 }
 
-func handleConfigDraft(re *core.RequestEvent) error {
+func handleConfigDraft(re *core.RequestEvent, filesPrefix string) error {
 	if !re.HasSuperuserAuth() {
 		return re.ForbiddenError("superusers only", nil)
 	}
@@ -248,7 +248,7 @@ func handleConfigDraft(re *core.RequestEvent) error {
 	return re.JSON(200, dryRunResponse{
 		Fields:   fields,
 		Template: templateName(fields),
-		Rendered: rendered,
+		Rendered: withFilesPrefix(filesPrefix, rendered),
 		Errors:   nonNil(errs),
 		Trace:    nonNilTrace(trace),
 	})

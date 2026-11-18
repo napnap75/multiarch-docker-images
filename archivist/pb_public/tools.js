@@ -13,7 +13,7 @@ var SUMMARY_LABELS = {
   scanned: "Fichiers analysés",
   ok: "OK (à leur place)",
   corrected: "Corrigés (déplacés)",
-  moved: "Déplacés vers inbox/",
+  moved: "Déplacés vers l'inbox",
   duplicates: "Copies parasites",
   missing: "Introuvables",
   errors: "Erreurs"

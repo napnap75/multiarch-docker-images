@@ -321,10 +321,10 @@ so that I see the effect of a correction before committing it.
 
 Acceptance criteria:
 
-- Given the detail page, when it opens, then it calls `POST /api/archivist/documents/{id}/dry-run` with no body; the route re-runs the rule tree against the stored pages and returns the proposed fields, the selected template, the rendered name and the errors, persisting nothing.
+- Given the detail page, when it opens, then it calls `POST /api/archivist/documents/{id}/dry-run` with no body; the route re-runs the rule tree against the stored pages and returns the proposed fields, the selected template, the rendered target key (full S3 key, files prefix included) and the errors, persisting nothing.
 - Given the classification dry-run, when it runs, then the response also carries a `trace` field: the flat, ordered list of the rules that modified a value (`set`/`delete`) or errored — the rule's `when` expression as rule identifier (rules carry no name), field, final value after the operation (marked as unset for a `delete`), the literal `eval` expression that produced it (a constant `set` returns its own value) and the error message for a failing rule; rules that match without modifying anything and non-matching rules are omitted (US-42).
 - Given a field whose proposed value differs from the current value, when the response arrives, then a discreet banner under the control offers the proposed value with one-click adoption.
-- Given the form is modified, when the typing settles, then the page calls the dry-run route with the proposed field values; the route converts them to their native types (per-field error on mismatch), merges them with the record values, renders the template against the stored pages and returns the target name and its errors in the same response shape.
+- Given the form is modified, when the typing settles, then the page calls the dry-run route with the proposed field values; the route converts them to their native types (per-field error on mismatch), merges them with the record values, renders the template against the stored pages and returns the target key (full S3 key, files prefix included) and its errors in the same response shape.
 - Given the two modes, when either runs, then they are exclusive: user values never enter the rule-evaluation context, and no record, event or S3 object is touched.
 - Given the dry-run returns errors, when the form still allows a draft save, then the full correction refuses to run while errors remain.
 
@@ -431,7 +431,7 @@ so that I can inspect the extracted values, target name, errors and rule trace b
 Acceptance criteria:
 
 - Given the draft or page array changes, when typing settles, then the page calls `POST /api/archivist/config/dry-run` with the full draft source and a JSON array of page texts.
-- Given the submitted configuration is valid, when the dry-run completes, then the response shows the proposed fields, selected template, rendered target (under the files prefix), classification/rendering errors and the ordered rule trace using the same presentation as the document detail page.
+- Given the submitted configuration is valid, when the dry-run completes, then the response shows the proposed fields, selected template, rendered target key (full S3 key, files prefix included), classification/rendering errors and the ordered rule trace using the same presentation as the document detail page.
 - Given the JSONC or configuration is invalid, when the dry-run runs, then it reports the configuration errors and does not display stale results as if they came from the current draft.
 - Given any draft dry-run, when it runs, then it compiles and evaluates the draft independently of the active configuration and persists nothing: no record, event, file or enum schema is changed.
 - Given the dry-run route is called without superuser authentication, then the request is refused.
