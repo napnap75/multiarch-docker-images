@@ -61,15 +61,21 @@ function renderTools(tools) {
     card.className = "card toolcard";
     card.innerHTML =
       '<div class="toolhead"><h3>' + esc(tool.name) + "</h3>" +
-      '<button type="button" class="btn primary" data-tool="' + esc(tool.id) + '">Lancer</button></div>' +
+      '<div class="toolactions">' +
+      '<button type="button" class="btn secondary" data-dryrun="1" data-tool="' + esc(tool.id) + '">Simulation</button>' +
+      '<button type="button" class="btn primary" data-tool="' + esc(tool.id) + '">Lancer</button>' +
+      "</div></div>" +
       '<p class="tooldesc">' + esc(tool.description) + "</p>";
-    card.querySelector("button").addEventListener("click", function () { run(tool.id); });
+    card.querySelectorAll("button").forEach(function (btn) {
+      btn.addEventListener("click", function () { run(tool.id, btn.dataset.dryrun === "1"); });
+    });
     host.appendChild(card);
   });
 }
 
-async function run(toolId) {
-  var res = await api("POST", "/api/archivist/tools/" + encodeURIComponent(toolId) + "/run");
+async function run(toolId, dryRun) {
+  var res = await api("POST", "/api/archivist/tools/" + encodeURIComponent(toolId) + "/run",
+    dryRun ? { dry_run: true } : undefined);
   if (res.status !== 200) {
     $("jobpanel").hidden = false;
     $("jobpanel").innerHTML = '<div class="card"><p class="errbox" style="display:block">' +
@@ -113,15 +119,16 @@ function renderJob(job) {
   var pct = total > 0 ? Math.round((processed / total) * 100) : 0;
 
   var html = '<div class="card jobcard">';
+  var tag = job.dry_run ? ' <span class="jobdrytag">Simulation — aucune modification</span>' : "";
   if (running) {
-    html += '<div class="jobhead"><h3>Tâche en cours…</h3>' +
+    html += '<div class="jobhead"><h3>Tâche en cours…' + tag + '</h3>' +
       '<button type="button" id="cancelBtn" class="btn secondary">Annuler</button></div>';
   } else {
     var label = job.status === "done" ? "Tâche terminée"
       : job.status === "cancelled" ? "Tâche annulée"
       : job.status === "failed" ? "Tâche échouée"
       : job.status ? "Tâche " + job.status : "Tâche";
-    html += '<div class="jobhead"><h3>' + esc(label) + "</h3></div>";
+    html += '<div class="jobhead"><h3>' + esc(label) + tag + "</h3></div>";
   }
 
   html += '<div class="progress" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100">' +
@@ -138,6 +145,11 @@ function renderJob(job) {
   });
   html += "</div>";
 
+  if ((job.planned || []).length) {
+    html += '<details class="jobdetails"><summary>Déplacements prévus (' + job.planned.length + ')</summary><ul class="mono-list">';
+    job.planned.forEach(function (k) { html += '<li class="mono">' + esc(k) + "</li>"; });
+    html += "</ul></details>";
+  }
   if ((job.skipped || []).length) {
     html += '<details class="jobdetails"><summary>Documents laissés en place (' + job.skipped.length + ')</summary><ul class="mono-list">';
     job.skipped.forEach(function (k) { html += '<li class="mono">' + esc(k) + "</li>"; });

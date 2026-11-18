@@ -382,7 +382,8 @@ so that one-off maintenance tasks are visible and controllable instead of hidden
 
 Acceptance criteria:
 
-- Given the dashboard, when I open the tools page, then each tool appears as a card with its name, its description and a run button.
+- Given the dashboard, when I open the tools page, then each tool appears as a card with its name, its description, a run button and a simulation button.
+- Given the simulation button is used, when the job runs, then every check of the tool is performed and the summary reports what would happen, but nothing is written: no S3 move, no record update, no event.
 - Given a tool is started, when the job runs, then the page shows a progress bar (processed / total objects, the key currently being examined), refreshed by polling, and a cancel button that stops the job at the next object boundary.
 - Given the job ends, when the page refreshes, then it shows a summary with the per-outcome counts plus the detail lists (missing keys, per-object errors), and the panel is restored after a page reload.
 - Given a job is already running, when a tool is started, then the request is refused with an explicit message.
@@ -403,6 +404,7 @@ Acceptance criteria:
 - Given an object no record knows, when it is scanned, then it is moved to the inbox prefix (conflict suffix on name collision) so the poller processes it automatically (`moved`).
 - Given a record whose `file_key` exists nowhere in the bucket and is not an interrupted filing under the inbox prefix, when the scan ends, then it is reported in the summary (`missing`) with its key, never acted upon.
 - Given a per-object failure (S3 error, lookup error), when it occurs, then it is logged, counted in the summary and listed, and the scan continues with the next object.
+- Given the tool runs in simulation mode, when it scans, then every outcome is computed and counted exactly as in a real run (ok, corrected, moved, duplicates, missing), but no object moves, no `file_key` is corrected and no `relocated` event is appended.
 
 ### US-43 — Re-file every document after a naming change
 
@@ -419,6 +421,7 @@ Acceptance criteria:
 - Given a document whose computed target differs, when it is re-filed, then the object is moved with a conflict suffix on name collision (copy first, existence verified, then the source removed), the record's `file_key` is updated and a `relocated` event is appended with the `file_key` diff — both in one transaction, with a best-effort S3 rollback of the move if the save fails (`moved`).
 - Given the job is cancelled, when it runs, then it stops at the next document boundary without partial work on the current document.
 - Given a per-document failure (S3 error, lookup error), when it occurs, then it is logged, counted in the summary and listed, and the re-filing continues with the next document.
+- Given the tool runs in simulation mode, when it re-files, then every target is computed and checked (rendering, files prefix, collision resolution against the current bucket contents) but nothing is written: the object stays in place, `file_key` keeps its value and no `relocated` event is appended; the planned moves are listed old key → new key, with a collision mention when the target key is already occupied.
 
 ## Epic: Configuration Editor
 

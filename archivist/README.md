@@ -137,6 +137,8 @@ A commented `config.jsonc` example file is provided in the repository. The confi
 
 The `Outils` page of the dashboard runs maintenance tasks by hand: one card per tool with its description, a run button, a live progress bar while the task runs (cancellable), and a summary with per-outcome counts when it ends. One task at a time.
 
+Each tool also has a `Simulation` button. A simulation performs every check of the tool but writes nothing: no move, no record update, no event. It reports what would happen through the same counts — and, for the re-filing, the list of the planned moves with a mention when a target key is already occupied and a conflict suffix would be applied.
+
 The first tool, `Recherche des fichiers perdus`, reconciles the bucket with the database when files have been moved by hand (e.g. through Nextcloud). It scans only `.pdf` objects (case-insensitive extension) under the pending and files prefixes — the whole bucket when `ARCHIVIST_S3_FILES_PREFIX=/` — computes each object's sha256 and compares it against the database; objects in the inbox prefix and other file types are ignored:
 
 - the object is at the key its record knows: nothing happens;
@@ -144,11 +146,15 @@ The first tool, `Recherche des fichiers perdus`, reconciles the bucket with the 
 - the object is unknown of the database: it is moved to the inbox prefix to be processed automatically by the poller;
 - a record whose file has disappeared from the bucket is only reported in the summary, never acted upon.
 
+In simulation mode the same outcomes are computed and counted, but nothing moves and nothing is updated.
+
 The second tool, `Re-filer tous les documents`, applies a change of `ARCHIVIST_S3_FILES_PREFIX` or of a naming template to the documents already filed. It re-computes the target key of every `processed` or `validated` document from its stored fields and the active templates (documents `pending` are never touched), then moves the objects that are no longer where their name says (conflict suffix on collision, `relocated` event and `file_key` update in the document's history):
 
 - the computed target equals the current key: nothing happens;
 - the document's stored template no longer exists or renders no key: the document is left in place and reported in the summary, never counted as an error;
 - a per-document failure is logged and reported, and the task continues with the next document.
+
+In simulation mode the tool does all of the above without writing anything, and lists the planned moves (old key → new key, with a collision mention when the target key exists already).
 
 ## Nextcloud integration
 

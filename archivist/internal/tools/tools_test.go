@@ -131,14 +131,19 @@ func addDocument(t *testing.T, app core.App, sha, fileKey string) *core.Record {
 }
 
 func runScan(t *testing.T, app core.App, s3 S3Store) *Job {
+	return runScanMode(t, app, s3, false)
+}
+
+func runScanMode(t *testing.T, app core.App, s3 S3Store, dryRun bool) *Job {
 	t.Helper()
 	job := &Job{
 		Tool:      "find-lost-files",
 		Status:    StatusRunning,
 		StartedAt: time.Now().UTC(),
 		Summary:   map[string]int{"scanned": 0, "ok": 0, "corrected": 0, "moved": 0, "duplicates": 0, "errors": 0},
+		DryRun:    dryRun,
 	}
-	if err := runFindLostFiles(context.Background(), app, s3, job); err != nil {
+	if err := runFindLostFiles(context.Background(), app, s3, job, dryRun); err != nil {
 		t.Fatalf("runFindLostFiles: %v", err)
 	}
 	return job
@@ -371,14 +376,19 @@ func addFiledDocument(t *testing.T, app core.App, objectKey string, documentType
 }
 
 func runRefile(t *testing.T, app core.App, s3 S3Store, manager ConfigStore) *Job {
+	return runRefileMode(t, app, s3, manager, false)
+}
+
+func runRefileMode(t *testing.T, app core.App, s3 S3Store, manager ConfigStore, dryRun bool) *Job {
 	t.Helper()
 	job := &Job{
 		Tool:      "refile-all",
 		Status:    StatusRunning,
 		StartedAt: time.Now().UTC(),
 		Summary:   map[string]int{"scanned": 0, "unchanged": 0, "moved": 0, "skipped": 0, "errors": 0},
+		DryRun:    dryRun,
 	}
-	if err := runRefileAll(context.Background(), app, s3, manager, job); err != nil {
+	if err := runRefileAll(context.Background(), app, s3, manager, job, dryRun); err != nil {
 		t.Fatalf("runRefileAll: %v", err)
 	}
 	return job
@@ -489,5 +499,93 @@ func TestRefileAllCountsUnchanged(t *testing.T) {
 	events, _ := app.FindAllRecords("document_events")
 	if len(events) != 0 {
 		t.Fatalf("no event expected, got %d", len(events))
+	}
+}
+
+func TestRefileAllDryRunPlansWithoutTouchingAnything(t *testing.T) {
+	app := newTestApp(t)
+	manager := refileManager(t)
+	s3 := &fakeS3{objects: map[string][]byte{"files/old/a.pdf": []byte("a")}}
+	rec := addFiledDocument(t, app, "files/old/a.pdf", "Facture", "processed", "")
+
+	job := runRefileMode(t, app, s3, manager, true)
+
+	if _, ok := s3.objects["files/old/a.pdf"]; !ok {
+		t.Fatalf("dry-run must leave the object in place: %v", s3.objects)
+	}
+	if _, ok := s3.objects["files/Divers/Facture.pdf"]; ok {
+		t.Fatalf("dry-run must not move anything: %v", s3.objects)
+	}
+	if got := freshRecord(t, app, rec.Id).GetString("file_key"); got != "files/old/a.pdf" {
+		t.Fatalf("file_key changed by dry-run: %q", got)
+	}
+	if events, _ := app.FindAllRecords("document_events"); len(events) != 0 {
+		t.Fatalf("no event expected from a dry-run, got %d", len(events))
+	}
+	if job.Summary["moved"] != 1 || job.Summary["unchanged"] != 0 || job.Summary["scanned"] != 1 {
+		t.Fatalf("summary = %v, want scanned=1 moved=1 unchanged=0", job.Summary)
+	}
+	want := "files/old/a.pdf → files/Divers/Facture.pdf"
+	if len(job.Planned) != 1 || job.Planned[0] != want {
+		t.Fatalf("planned = %v, want [%q]", job.Planned, want)
+	}
+}
+
+func TestRefileAllDryRunReportsCollision(t *testing.T) {
+	app := newTestApp(t)
+	manager := refileManager(t)
+	s3 := &fakeS3{objects: map[string][]byte{
+		"files/old/a.pdf":          []byte("a"),
+		"files/Divers/Facture.pdf": []byte("already there"),
+	}}
+	rec := addFiledDocument(t, app, "files/old/a.pdf", "Facture", "validated", "")
+
+	job := runRefileMode(t, app, s3, manager, true)
+
+	if _, ok := s3.objects["files/Divers/Facture (1).pdf"]; ok {
+		t.Fatal("dry-run must not resolve the collision by writing")
+	}
+	if _, ok := s3.objects["files/old/a.pdf"]; !ok {
+		t.Fatal("dry-run must leave the object in place")
+	}
+	if got := freshRecord(t, app, rec.Id).GetString("file_key"); got != "files/old/a.pdf" {
+		t.Fatalf("file_key changed by dry-run: %q", got)
+	}
+	if job.Summary["moved"] != 1 {
+		t.Fatalf("summary = %v, want moved=1", job.Summary)
+	}
+	want := "files/old/a.pdf → files/Divers/Facture (1).pdf (collision : suffixe de conflit appliqué)"
+	if len(job.Planned) != 1 || job.Planned[0] != want {
+		t.Fatalf("planned = %v, want [%q]", job.Planned, want)
+	}
+}
+
+func TestFindLostFilesDryRunPlansWithoutTouchingAnything(t *testing.T) {
+	app := newTestApp(t)
+	s3 := &fakeS3{objects: map[string][]byte{
+		"files/new/a.pdf":   []byte("content-a"),
+		"files/unknown.pdf": []byte("content-x"),
+	}}
+	rec := addDocument(t, app, mustHash("content-a"), "files/old/a.pdf")
+
+	job := runScanMode(t, app, s3, true)
+
+	if len(s3.objects) != 2 {
+		t.Fatalf("dry-run must not move any object: %v", s3.objects)
+	}
+	if _, ok := s3.objects["inbox/unknown.pdf"]; ok {
+		t.Fatal("unknown object must stay in place in dry-run")
+	}
+	if got := freshRecord(t, app, rec.Id).GetString("file_key"); got != "files/old/a.pdf" {
+		t.Fatalf("file_key changed by dry-run: %q", got)
+	}
+	if events, _ := app.FindAllRecords("document_events"); len(events) != 0 {
+		t.Fatalf("no event expected from a dry-run, got %d", len(events))
+	}
+	if job.Summary["corrected"] != 1 || job.Summary["moved"] != 1 {
+		t.Fatalf("summary = %v, want corrected=1 moved=1", job.Summary)
+	}
+	if len(job.Missing) != 1 || job.Missing[0] != "files/old/a.pdf" {
+		t.Fatalf("missing = %v, want [files/old/a.pdf]", job.Missing)
 	}
 }

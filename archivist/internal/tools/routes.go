@@ -4,6 +4,10 @@
 package tools
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
+
 	"ganigeorgiev.com/pocketbase/pocketbase/core"
 )
 
@@ -25,7 +29,21 @@ func BindRoutes(app core.App, s3 S3Store, manager ConfigStore) {
 			if !re.HasSuperuserAuth() {
 				return re.ForbiddenError("superusers only", nil)
 			}
-			job, err := Start(re.App, s3, manager, re.Request.PathValue("id"))
+			// Optional body {"dry_run": true}: every check runs, nothing
+			// is written (no move, no save, no event).
+			body, err := io.ReadAll(re.Request.Body)
+			if err != nil {
+				return re.JSON(400, map[string]any{"message": "unreadable body", "error": err.Error()})
+			}
+			opts := struct {
+				DryRun bool `json:"dry_run"`
+			}{}
+			if len(bytes.TrimSpace(body)) > 0 {
+				if err := json.Unmarshal(body, &opts); err != nil {
+					return re.JSON(400, map[string]any{"message": "invalid JSON body", "error": err.Error()})
+				}
+			}
+			job, err := Start(re.App, s3, manager, re.Request.PathValue("id"), opts.DryRun)
 			if err != nil {
 				return re.JSON(409, map[string]any{"message": err.Error()})
 			}

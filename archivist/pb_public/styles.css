@@ -239,10 +239,12 @@ h3 { margin: 0 0 .5rem; font-size: .9rem; }
 .toolcard { margin-bottom: 1rem; }
 .toolhead { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .toolhead h3 { margin: 0; font-size: 1rem; }
+.toolactions { display: flex; gap: .5rem; align-items: center; }
 .tooldesc { margin: .5rem 0 0; color: var(--muted-foreground); }
 .jobcard { margin-bottom: 1rem; }
 .jobhead { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .jobhead h3 { margin: 0; font-size: 1rem; }
+.jobdrytag { color: var(--muted-foreground); font-size: 12px; font-weight: 400; white-space: nowrap; }
 .progress { height: .5rem; border-radius: 999px; background: var(--muted); overflow: hidden; margin: .75rem 0 .35rem; }
 .progressbar { height: 100%; background: var(--status-validated); transition: width .4s ease; }
 .progressinfo { color: var(--muted-foreground); font-size: 12px; margin-bottom: .75rem; word-break: break-all; }

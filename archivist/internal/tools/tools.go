@@ -79,7 +79,9 @@ type ConfigStore interface {
 	Read(fn func(*config.Snapshot) error) error
 }
 
-// Job is one tool run: identity, live progress, final summary.
+// Job is one tool run: identity, live progress, final summary. A job in
+// dry-run mode runs every check but mutates nothing in S3 or in the
+// database: the planned moves land in Planned, not in the bucket.
 type Job struct {
 	ID         string
 	Tool       string
@@ -92,7 +94,10 @@ type Job struct {
 	Summary    map[string]int
 	Missing    []string
 	Skipped    []string
+	Planned    []string
 	Errors     []string
+
+	DryRun bool
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -120,7 +125,9 @@ func (j *Job) State() map[string]any {
 		"summary":    j.Summary,
 		"missing":    j.Missing,
 		"skipped":    j.Skipped,
+		"planned":    j.Planned,
 		"errors":     j.Errors,
+		"dry_run":    j.DryRun,
 	}
 	if !j.FinishedAt.IsZero() {
 		state["finished_at"] = j.FinishedAt.Format(time.RFC3339)
@@ -151,9 +158,10 @@ var (
 	running *Job
 )
 
-// Start launches a tool as a background job. One job at a time: a second
-// start while one is running is refused.
-func Start(app core.App, s3 S3Store, manager ConfigStore, toolID string) (*Job, error) {
+// Start launches a tool as a background job, for real or in dry-run mode
+// (every check, no mutation: S3 objects, records and events untouched). One
+// job at a time: a second start while one is running is refused.
+func Start(app core.App, s3 S3Store, manager ConfigStore, toolID string, dryRun bool) (*Job, error) {
 	d, ok := descriptor(toolID)
 	if !ok {
 		return nil, fmt.Errorf("unknown tool: %s", toolID)
@@ -174,6 +182,7 @@ func Start(app core.App, s3 S3Store, manager ConfigStore, toolID string) (*Job, 
 		Status:    StatusRunning,
 		StartedAt: time.Now().UTC(),
 		Summary:   map[string]int{},
+		DryRun:    dryRun,
 		cancel:    cancel,
 	}
 	if d.ID == "find-lost-files" {
@@ -185,7 +194,7 @@ func Start(app core.App, s3 S3Store, manager ConfigStore, toolID string) (*Job, 
 	jobs[job.ID] = job
 	running = job
 	go func() {
-		err := runTool(ctx, app, s3, manager, d.ID, job)
+		err := runTool(ctx, app, s3, manager, d.ID, dryRun, job)
 		regMu.Lock()
 		if running == job {
 			running = nil
@@ -250,12 +259,12 @@ func LatestJob() *Job {
 	return latest
 }
 
-func runTool(ctx context.Context, app core.App, s3 S3Store, manager ConfigStore, toolID string, job *Job) error {
+func runTool(ctx context.Context, app core.App, s3 S3Store, manager ConfigStore, toolID string, dryRun bool, job *Job) error {
 	switch toolID {
 	case "find-lost-files":
-		return runFindLostFiles(ctx, app, s3, job)
+		return runFindLostFiles(ctx, app, s3, job, dryRun)
 	case "refile-all":
-		return runRefileAll(ctx, app, s3, manager, job)
+		return runRefileAll(ctx, app, s3, manager, job, dryRun)
 	}
 	return fmt.Errorf("unknown tool: %s", toolID)
 }
@@ -264,8 +273,10 @@ func runTool(ctx context.Context, app core.App, s3 S3Store, manager ConfigStore,
 // In place: nothing. Moved in the bucket outside the application: the
 // record's file_key is corrected and a relocated event is appended. Unknown
 // of the database: moved to the inbox for automatic processing. A record
-// whose file_key exists nowhere is only reported.
-func runFindLostFiles(ctx context.Context, app core.App, s3 S3Store, job *Job) error {
+// whose file_key exists nowhere is only reported. In dry-run mode every
+// outcome is computed and counted but nothing is written: no move, no save,
+// no event.
+func runFindLostFiles(ctx context.Context, app core.App, s3 S3Store, job *Job, dryRun bool) error {
 	prefixes := s3.Prefixes()
 	objects, err := s3.ListReconciliationPDFs(ctx)
 	if err != nil {
@@ -282,7 +293,7 @@ func runFindLostFiles(ctx context.Context, app core.App, s3 S3Store, job *Job) e
 			return nil
 		}
 		job.set(func() { job.Current = o.Key })
-		if err := reconcileObject(ctx, app, s3, job, o.Key, keySet); err != nil {
+		if err := reconcileObject(ctx, app, s3, job, o.Key, keySet, dryRun); err != nil {
 			app.Logger().Error("find-lost-files: object failed", "key", o.Key, "error", err)
 			job.addError(err, o.Key)
 		}
@@ -312,7 +323,7 @@ func runFindLostFiles(ctx context.Context, app core.App, s3 S3Store, job *Job) e
 	job.set(func() {
 		app.Logger().Info("find-lost-files: done", "scanned", job.Summary["scanned"], "ok", job.Summary["ok"],
 			"corrected", job.Summary["corrected"], "moved", job.Summary["moved"],
-			"duplicates", job.Summary["duplicates"], "errors", job.Summary["errors"], "missing", len(missing))
+			"duplicates", job.Summary["duplicates"], "errors", job.Summary["errors"], "missing", len(missing), "dry_run", dryRun)
 	})
 	return nil
 }
@@ -327,7 +338,7 @@ func findRecord(app core.App, filter string, params dbx.Params) (*core.Record, e
 	return record, nil
 }
 
-func reconcileObject(ctx context.Context, app core.App, s3 S3Store, job *Job, key string, keySet map[string]bool) error {
+func reconcileObject(ctx context.Context, app core.App, s3 S3Store, job *Job, key string, keySet map[string]bool, dryRun bool) error {
 	prefixes := s3.Prefixes()
 	hash, err := s3.Hash(ctx, key)
 	if err != nil {
@@ -342,6 +353,11 @@ func reconcileObject(ctx context.Context, app core.App, s3 S3Store, job *Job, ke
 
 	if record == nil {
 		// Unknown of the database: back to the inbox for automatic processing.
+		if dryRun {
+			job.set(func() { job.Summary["moved"]++ })
+			app.Logger().Info("find-lost-files dry-run: unknown object would move to inbox", "from", key, "to", prefixes.Inbox+baseName(key))
+			return nil
+		}
 		finalKey, err := s3.ResolveConflict(ctx, prefixes.Inbox+baseName(key))
 		if err != nil {
 			return fmt.Errorf("conflict resolution: %w", err)
@@ -376,6 +392,11 @@ func reconcileObject(ctx context.Context, app core.App, s3 S3Store, job *Job, ke
 	}
 	if other != nil {
 		return fmt.Errorf("another record (%s) already references %s", other.Id, key)
+	}
+	if dryRun {
+		job.set(func() { job.Summary["corrected"]++ })
+		app.Logger().Info("find-lost-files dry-run: file_key would be corrected", "record", record.Id, "from", oldKey, "to", key)
+		return nil
 	}
 	before := pbapp.Snapshot{"file_key": oldKey}
 	after := pbapp.Snapshot{"file_key": key}
@@ -419,14 +440,16 @@ func baseName(key string) string {
 // document from the active compiled configuration (US-43) — after a change
 // of the files prefix or of a naming template — and moves the objects that
 // are no longer where their name says. Pending documents belong to the
-// review queue and are never touched.
-func runRefileAll(ctx context.Context, app core.App, s3 S3Store, manager ConfigStore, job *Job) error {
+// review queue and are never touched. In dry-run mode every target is
+// computed and checked but nothing is written; the planned moves are listed
+// in the job.
+func runRefileAll(ctx context.Context, app core.App, s3 S3Store, manager ConfigStore, job *Job, dryRun bool) error {
 	return manager.Read(func(snapshot *config.Snapshot) error {
-		return refileAll(ctx, app, s3, snapshot.Config, job)
+		return refileAll(ctx, app, s3, snapshot.Config, job, dryRun)
 	})
 }
 
-func refileAll(ctx context.Context, app core.App, s3 S3Store, cfg *config.Config, job *Job) error {
+func refileAll(ctx context.Context, app core.App, s3 S3Store, cfg *config.Config, job *Job, dryRun bool) error {
 	records, err := app.FindAllRecords("documents")
 	if err != nil {
 		return fmt.Errorf("list documents: %w", err)
@@ -441,13 +464,16 @@ func refileAll(ctx context.Context, app core.App, s3 S3Store, cfg *config.Config
 	job.set(func() {
 		job.Total = len(eligible)
 		job.Skipped = []string{}
+		if dryRun {
+			job.Planned = []string{}
+		}
 	})
 	for _, record := range eligible {
 		if ctx.Err() != nil {
 			return nil
 		}
 		job.set(func() { job.Current = record.GetString("file_key") })
-		if err := refileRecord(ctx, app, s3, cfg, job, record); err != nil {
+		if err := refileRecord(ctx, app, s3, cfg, job, record, dryRun); err != nil {
 			app.Logger().Error("refile-all: document failed", "record", record.Id, "file_key", record.GetString("file_key"), "error", err)
 			job.addError(err, record.GetString("file_key"))
 		}
@@ -455,7 +481,7 @@ func refileAll(ctx context.Context, app core.App, s3 S3Store, cfg *config.Config
 	}
 	job.set(func() {
 		app.Logger().Info("refile-all: done", "scanned", job.Summary["scanned"], "unchanged", job.Summary["unchanged"],
-			"moved", job.Summary["moved"], "skipped", job.Summary["skipped"], "errors", job.Summary["errors"])
+			"moved", job.Summary["moved"], "skipped", job.Summary["skipped"], "errors", job.Summary["errors"], "dry_run", dryRun)
 	})
 	return nil
 }
@@ -464,8 +490,10 @@ func refileAll(ctx context.Context, app core.App, s3 S3Store, cfg *config.Config
 // fields, moves the object when the target differs from the current key,
 // and traces the move as a relocated event. A stored template that no
 // longer exists, or a failing or empty render, leaves the object in place
-// and is reported (skipped); a skip is not an error.
-func refileRecord(ctx context.Context, app core.App, s3 S3Store, cfg *config.Config, job *Job, record *core.Record) error {
+// and is reported (skipped); a skip is not an error. In dry-run mode the
+// move is only planned: the target is computed and the collision resolved
+// (read-only), the object, the record and the history stay untouched.
+func refileRecord(ctx context.Context, app core.App, s3 S3Store, cfg *config.Config, job *Job, record *core.Record, dryRun bool) error {
 	oldKey := record.GetString("file_key")
 	job.set(func() { job.Summary["scanned"]++ })
 
@@ -492,6 +520,21 @@ func refileRecord(ctx context.Context, app core.App, s3 S3Store, cfg *config.Con
 	finalKey, err := s3.ResolveConflict(ctx, target)
 	if err != nil {
 		return fmt.Errorf("conflict resolution: %w", err)
+	}
+	if dryRun {
+		planned := oldKey + " → " + finalKey
+		if finalKey != target {
+			planned += " (collision : suffixe de conflit appliqué)"
+		}
+		job.set(func() {
+			if job.Planned == nil {
+				job.Planned = []string{}
+			}
+			job.Planned = append(job.Planned, planned)
+			job.Summary["moved"]++
+		})
+		app.Logger().Info("refile-all dry-run: document would be re-filed", "record", record.Id, "from", oldKey, "to", finalKey)
+		return nil
 	}
 	if err := moveObject(ctx, s3, oldKey, finalKey); err != nil {
 		return err

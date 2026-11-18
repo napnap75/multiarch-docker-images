@@ -314,11 +314,13 @@ Second tool, `refile-all` (US-43) — applying a change of the files prefix or o
 
 Every outcome is logged through the PocketBase logger; per-document failures do not stop the re-filing and join the job's error list. The job is cancellable at the next document boundary.
 
+Each tool runs for real or in dry-run mode (the simulation button of the tools page). A dry-run performs every check of the tool but writes nothing — no S3 move, no record update, no event — and reports what would happen through the same counts, plus the list of the planned moves over refile-all, each "old → new" and marked when a collision suffix would be applied (the target resolution itself is read-only). A dry-run job keeps `dry_run: true` in its state.
+
 Routes (superuser-only, same rules as section 7.3):
 
 - `GET /api/archivist/tools` — the tool descriptors (id, name, description) and the latest job state (running or last finished).
-- `POST /api/archivist/tools/{id}/run` — starts the job; refused with 409 while one is running.
-- `GET /api/archivist/tools/jobs/{id}` — the job's live state (progress, summary, lists).
+- `POST /api/archivist/tools/{id}/run` — starts the job, with an optional body `{"dry_run": true}` for a simulation; refused with 409 while one is running; a non-JSON non-empty body is refused with 400.
+- `GET /api/archivist/tools/jobs/{id}` — the job's live state (progress, summary, lists, `dry_run`, planned moves).
 - `POST /api/archivist/tools/jobs/{id}/cancel` — asks the job to stop at the next object boundary.
 
 ### 7.6 Configuration editor (US-50 to US-52)
@@ -388,7 +390,7 @@ The scenarios form one narrative; each subtest names the US it proves:
 14. Full correction — a pending document is re-filed and validated; value errors leave everything unchanged; an unchanged name skips the S3 move and the diff drops file_key (US-36).
 15. Static dashboard — the review pages are served from pb_public/ with no external resource (US-30).
 16. Enum lifecycle — the value-registration route extends the possible-values list and its refusals hold; a restart drops an unused added value, keeps a used one, and the `template` list follows the configuration (US-37).
-17. Tools — the tools route serves the descriptors and refuses unauthenticated calls; a scan considers only PDFs under `pending/` and `files/`, ignores other prefixes and extensions, and produces the matching summary for an in-place file, a relocated file, an unknown file and a deleted file (ok, corrected with `relocated` event, moved to `inbox/`, missing reported) (US-40, US-41).
+17. Tools — the tools route serves the descriptors and refuses unauthenticated calls; a scan considers only PDFs under `pending/` and `files/`, ignores other prefixes and extensions, and produces the matching summary for an in-place file, a relocated file, an unknown file and a deleted file (ok, corrected with `relocated` event, moved to `inbox/`, missing reported); the re-filing follows the active templates and files prefix (skipped on an unknown template, never touching a `pending` document, `relocated` event on a move) and a dry-run reports the same counts without moving any object, correcting any `file_key` or appending any event (US-40, US-41, US-43).
 18. Configuration editor — the source route is superuser-only; the draft dry-run returns fields and trace without persistence; valid save updates the active file and configuration; invalid JSONC or an unwritable directory leaves the old active configuration unchanged (US-50 to US-52).
 
 `POST /api/archivist/poll` (superuser only) runs one poll pass immediately. It exists so the gate and the operator trigger passes on demand instead of waiting for the cron; a fresh upload needs two calls because the poller waits for size/ETag stability across two passes (US-10).
