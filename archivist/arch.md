@@ -286,7 +286,7 @@ Beyond the standard PocketBase API, authenticated only:
 
 The static pages themselves carry no data and are public by nature; every fetch is authenticated against the PocketBase API. An unauthenticated visitor is prompted to sign in with the superuser account; the dashboard exchanges those credentials through PocketBase's standard auth endpoint, stores the returned token locally, and retries the blocked request. The API continues to enforce superuser access. The configuration is loaded at startup and can also be replaced at runtime through the validated configuration editor save flow in section 7.6.
 
-### 7.5 Tools page (US-40, US-41)
+### 7.5 Tools page (US-40, US-41, US-43)
 
 A third static page, `tools.html` + `tools.js`, linked from the dashboard's top bar: one card per tool, with its description and a run button; while a job runs, a progress bar (processed / total objects, current key) refreshed by polling; when it ends, a summary (per-outcome counts) plus the detail lists (missing keys, per-object errors). One job at a time; a running job can be cancelled at the next object boundary. The panel is restored on page reload from the latest job state.
 
@@ -303,6 +303,16 @@ First tool, `find-lost-files` (US-41) — reconciling the bucket with the databa
 3. After the scan, every record whose `file_key` is a `.pdf` under the pending or files prefix (the whole bucket when files is the root) but has no corresponding listed object is reported as missing, never acted upon (`missing`). Other keys, including interrupted filings under the inbox prefix, are not reported.
 
 Every outcome is logged through the PocketBase logger; per-object failures do not stop the scan and join the job's error list.
+
+Second tool, `refile-all` (US-43) — applying a change of the files prefix or of a naming template to the documents already filed:
+
+1. Select the `documents` records with status `processed` or `validated`; documents pending remain in the review queue and are never touched.
+2. For each record, render its stored `template` (the `default` one when the record carries no template) from the fields stored in the record, under the active compiled configuration, and compute the full target key under the active files prefix:
+   - the target equals the current `file_key`: nothing to do (`unchanged`);
+   - the stored template does not exist in the active configuration, or the render fails or renders an empty key: the object is left in place and the reason is listed in the summary (`skipped`) — a skip is not an error;
+   - the target differs: the object is moved to the target (conflict suffix on name collision; copy first, existence verified, then the source removed), the record's `file_key` is updated and a `relocated` event is appended with the `file_key` diff — both in one transaction, with a best-effort S3 rollback of the move if the save fails (`moved`).
+
+Every outcome is logged through the PocketBase logger; per-document failures do not stop the re-filing and join the job's error list. The job is cancellable at the next document boundary.
 
 Routes (superuser-only, same rules as section 7.3):
 

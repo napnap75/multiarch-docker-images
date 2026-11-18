@@ -372,7 +372,7 @@ Acceptance criteria:
 
 ## Epic: Tools (dashboard)
 
-The tools page (arch.md section 7.5): maintenance tasks started by hand from a dedicated page — one card per tool with its description, a run button, live progress while the job runs, and a final summary. One job at a time, cancellable. The first tool reconciles the bucket with the database when files have been moved by hand (e.g. through Nextcloud).
+The tools page (arch.md section 7.5): maintenance tasks started by hand from a dedicated page — one card per tool with its description, a run button, live progress while the job runs, and a final summary. One job at a time, cancellable. The first tool reconciles the bucket with the database when files have been moved by hand (e.g. through Nextcloud); the second re-files every document after a change of the files prefix or of a naming template.
 
 ### US-40 — A tools page with run, progress and summary
 
@@ -403,6 +403,22 @@ Acceptance criteria:
 - Given an object no record knows, when it is scanned, then it is moved to the inbox prefix (conflict suffix on name collision) so the poller processes it automatically (`moved`).
 - Given a record whose `file_key` exists nowhere in the bucket and is not an interrupted filing under the inbox prefix, when the scan ends, then it is reported in the summary (`missing`) with its key, never acted upon.
 - Given a per-object failure (S3 error, lookup error), when it occurs, then it is logged, counted in the summary and listed, and the scan continues with the next object.
+
+### US-43 — Re-file every document after a naming change
+
+As the user,
+I want a tool that re-computes every filed document's target name from the active configuration and moves the objects that are no longer where their name says,
+so that a change of `ARCHIVIST_S3_FILES_PREFIX` or of a naming template is applied to the documents already in the bucket.
+
+Acceptance criteria:
+
+- Given the tool runs, when it starts, then it selects only the documents with status `processed` or `validated`; documents still in the review queue (status `pending`) are never touched, neither in the bucket nor in the database.
+- Given a selected document, when its target is computed, then the stored `template` of the record is rendered (the `default` template when the record carries no template) from the fields stored in the record under the active compiled configuration, and the full target key is the rendered name under the active files prefix.
+- Given a record whose stored template does not exist in the active configuration, or whose template render fails or renders an empty key, when it is re-filed, then the object is left in place, the reason is listed in the summary (`skipped`) and it is not counted as an error.
+- Given a document whose computed target equals its current `file_key`, when it is re-filed, then nothing happens (`unchanged`).
+- Given a document whose computed target differs, when it is re-filed, then the object is moved with a conflict suffix on name collision (copy first, existence verified, then the source removed), the record's `file_key` is updated and a `relocated` event is appended with the `file_key` diff — both in one transaction, with a best-effort S3 rollback of the move if the save fails (`moved`).
+- Given the job is cancelled, when it runs, then it stops at the next document boundary without partial work on the current document.
+- Given a per-document failure (S3 error, lookup error), when it occurs, then it is logged, counted in the summary and listed, and the re-filing continues with the next document.
 
 ## Epic: Configuration Editor
 

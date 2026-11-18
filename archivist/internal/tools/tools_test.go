@@ -101,8 +101,12 @@ func newTestApp(t *testing.T) core.App {
 	cfg := &config.Config{
 		Fields: map[string]config.Field{
 			"documentType": {Name: "documentType", Type: "text"},
+			"template":     {Name: "template", Type: "text"},
 		},
-		FieldList: []config.Field{{Name: "documentType", Type: "text"}},
+		FieldList: []config.Field{
+			{Name: "documentType", Type: "text"},
+			{Name: "template", Type: "text"},
+		},
 	}
 	if err := pbapp.Setup(app, "admin@example.net", "password-123456", cfg); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -328,5 +332,162 @@ func TestFindLostFilesCustomPrefixes(t *testing.T) {
 	}
 	if job.Summary["moved"] != 1 {
 		t.Fatalf("moved = %d, want 1", job.Summary["moved"])
+	}
+}
+
+// refileConfig compiles the configuration the refile tests run against:
+// a text documentType field and a default template placing files under
+// Divers/.
+const refileConfigSource = `{
+  "fields": [
+    { "name": "documentType", "french": "Type", "type": "text", "mandatory": false },
+    { "name": "template", "french": "Modèle", "type": "text", "mandatory": false }
+  ],
+  "rules": [],
+  "templates": { "default": "Divers/{documentType}.pdf" }
+}`
+
+func refileManager(t *testing.T) *config.Manager {
+	t.Helper()
+	cfg, err := config.LoadSource([]byte(refileConfigSource))
+	if err != nil {
+		t.Fatalf("load refile config: %v", err)
+	}
+	return config.NewManager(cfg, []byte(refileConfigSource))
+}
+
+func addFiledDocument(t *testing.T, app core.App, objectKey string, documentType string, status string, template string) *core.Record {
+	t.Helper()
+	rec := addDocument(t, app, mustHash(documentType+"@"+objectKey), objectKey)
+	rec.Set("documentType", documentType)
+	if template != "" {
+		rec.Set("template", template)
+	}
+	rec.Set("status", status)
+	if err := app.Save(rec); err != nil {
+		t.Fatalf("save document %s: %v", objectKey, err)
+	}
+	return rec
+}
+
+func runRefile(t *testing.T, app core.App, s3 S3Store, manager ConfigStore) *Job {
+	t.Helper()
+	job := &Job{
+		Tool:      "refile-all",
+		Status:    StatusRunning,
+		StartedAt: time.Now().UTC(),
+		Summary:   map[string]int{"scanned": 0, "unchanged": 0, "moved": 0, "skipped": 0, "errors": 0},
+	}
+	if err := runRefileAll(context.Background(), app, s3, manager, job); err != nil {
+		t.Fatalf("runRefileAll: %v", err)
+	}
+	return job
+}
+
+func freshRecord(t *testing.T, app core.App, id string) *core.Record {
+	t.Helper()
+	rec, err := app.FindRecordById("documents", id)
+	if err != nil {
+		t.Fatalf("find record %s: %v", id, err)
+	}
+	return rec
+}
+
+func TestRefileAllRenamesDocuments(t *testing.T) {
+	app := newTestApp(t)
+	manager := refileManager(t)
+	s3 := &fakeS3{objects: map[string][]byte{"files/old/a.pdf": []byte("content-a")}}
+	rec := addFiledDocument(t, app, "files/old/a.pdf", "Facture", "processed", "")
+
+	job := runRefile(t, app, s3, manager)
+
+	want := "files/Divers/Facture.pdf"
+	if _, ok := s3.objects[want]; !ok {
+		t.Fatalf("object should move to %s: %v", want, s3.objects)
+	}
+	if _, ok := s3.objects["files/old/a.pdf"]; ok {
+		t.Fatal("old object should be gone")
+	}
+	got := freshRecord(t, app, rec.Id)
+	if got.GetString("file_key") != want {
+		t.Fatalf("file_key = %q, want %q", got.GetString("file_key"), want)
+	}
+	if job.Summary["moved"] != 1 || job.Summary["unchanged"] != 0 {
+		t.Fatalf("summary = %v, want moved=1 unchanged=0", job.Summary)
+	}
+	events, _ := app.FindAllRecords("document_events")
+	if len(events) != 1 || events[0].GetString("event_type") != "relocated" {
+		t.Fatalf("want one relocated event, got %d", len(events))
+	}
+}
+
+func TestRefileAllFollowsTheConfiguredFilesPrefix(t *testing.T) {
+	app := newTestApp(t)
+	manager := refileManager(t)
+	s3 := &fakeS3{
+		objects:  map[string][]byte{"files/old/a.pdf": []byte("content-a")},
+		prefixes: storage.Prefixes{Inbox: "in/", Pending: "wait/", Files: "archive/"},
+	}
+	addFiledDocument(t, app, "files/old/a.pdf", "Facture", "validated", "")
+
+	job := runRefile(t, app, s3, manager)
+
+	if _, ok := s3.objects["archive/Divers/Facture.pdf"]; !ok {
+		t.Fatalf("object should move to archive/Divers/Facture.pdf: %v", s3.objects)
+	}
+	if job.Summary["moved"] != 1 {
+		t.Fatalf("summary = %v, want moved=1", job.Summary)
+	}
+}
+
+func TestRefileAllSkipsUnknownTemplate(t *testing.T) {
+	app := newTestApp(t)
+	manager := refileManager(t)
+	s3 := &fakeS3{objects: map[string][]byte{"files/old/a.pdf": []byte("content-a")}}
+	addFiledDocument(t, app, "files/old/a.pdf", "Facture", "processed", "gone")
+
+	job := runRefile(t, app, s3, manager)
+
+	if _, ok := s3.objects["files/old/a.pdf"]; !ok {
+		t.Fatal("object with an unknown template must stay in place")
+	}
+	if job.Summary["skipped"] != 1 || job.Summary["moved"] != 0 {
+		t.Fatalf("summary = %v, want skipped=1 moved=0", job.Summary)
+	}
+	if len(job.Skipped) != 1 || !strings.Contains(job.Skipped[0], "gone") {
+		t.Fatalf("skipped = %v, want one entry naming the template", job.Skipped)
+	}
+}
+
+func TestRefileAllLeavesPendingAlone(t *testing.T) {
+	app := newTestApp(t)
+	manager := refileManager(t)
+	s3 := &fakeS3{objects: map[string][]byte{"files/old/a.pdf": []byte("content-a")}}
+	addFiledDocument(t, app, "files/old/a.pdf", "Facture", "pending", "")
+
+	job := runRefile(t, app, s3, manager)
+
+	if _, ok := s3.objects["files/Divers/Facture.pdf"]; ok {
+		t.Fatal("a pending document must never be re-filed")
+	}
+	if job.Total != 0 || job.Summary["scanned"] != 0 {
+		t.Fatalf("total = %d scanned = %d, want 0/0", job.Total, job.Summary["scanned"])
+	}
+}
+
+func TestRefileAllCountsUnchanged(t *testing.T) {
+	app := newTestApp(t)
+	manager := refileManager(t)
+	s3 := &fakeS3{objects: map[string][]byte{"files/Divers/Facture.pdf": []byte("content-a")}}
+	addFiledDocument(t, app, "files/Divers/Facture.pdf", "Facture", "processed", "")
+
+	job := runRefile(t, app, s3, manager)
+
+	if job.Summary["unchanged"] != 1 || job.Summary["moved"] != 0 {
+		t.Fatalf("summary = %v, want unchanged=1 moved=0", job.Summary)
+	}
+	events, _ := app.FindAllRecords("document_events")
+	if len(events) != 0 {
+		t.Fatalf("no event expected, got %d", len(events))
 	}
 }

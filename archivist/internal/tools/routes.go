@@ -8,7 +8,7 @@ import (
 )
 
 // BindRoutes registers the tools routes on the PocketBase router.
-func BindRoutes(app core.App, s3 S3Store) {
+func BindRoutes(app core.App, s3 S3Store, manager ConfigStore) {
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.GET("/api/archivist/tools", func(re *core.RequestEvent) error {
 			if !re.HasSuperuserAuth() {
@@ -25,7 +25,7 @@ func BindRoutes(app core.App, s3 S3Store) {
 			if !re.HasSuperuserAuth() {
 				return re.ForbiddenError("superusers only", nil)
 			}
-			job, err := Start(re.App, s3, re.Request.PathValue("id"))
+			job, err := Start(re.App, s3, manager, re.Request.PathValue("id"))
 			if err != nil {
 				return re.JSON(409, map[string]any{"message": err.Error()})
 			}

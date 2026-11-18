@@ -12,14 +12,16 @@ function $(id) { return document.getElementById(id); }
 var SUMMARY_LABELS = {
   scanned: "Fichiers analysés",
   ok: "OK (à leur place)",
+  unchanged: "Déjà bien classés",
   corrected: "Corrigés (déplacés)",
-  moved: "Déplacés vers l'inbox",
+  moved: "Déplacés",
   duplicates: "Copies parasites",
+  skipped: "Laissés en place",
   missing: "Introuvables",
   errors: "Erreurs"
 };
 
-var SUMMARY_ORDER = ["scanned", "ok", "corrected", "moved", "duplicates", "missing", "errors"];
+var SUMMARY_ORDER = ["scanned", "ok", "unchanged", "corrected", "moved", "duplicates", "skipped", "missing", "errors"];
 
 function esc(v) {
   return String(v == null ? "" : v)
@@ -136,6 +138,11 @@ function renderJob(job) {
   });
   html += "</div>";
 
+  if ((job.skipped || []).length) {
+    html += '<details class="jobdetails"><summary>Documents laissés en place (' + job.skipped.length + ')</summary><ul class="mono-list">';
+    job.skipped.forEach(function (k) { html += '<li class="mono">' + esc(k) + "</li>"; });
+    html += "</ul></details>";
+  }
   if ((job.missing || []).length) {
     html += '<details class="jobdetails"><summary>Fichiers introuvables dans le bucket (' + job.missing.length + ')</summary><ul class="mono-list">';
     job.missing.forEach(function (k) { html += '<li class="mono">' + esc(k) + "</li>"; });

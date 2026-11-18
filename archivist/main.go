@@ -149,7 +149,7 @@ func main() {
 	// US-31 / US-35 / US-36: the review-dashboard routes (config, pdf, dry-run, correct).
 	pbapp.BindRoutes(app, configManager, envCfg.ConfigPath, s3)
 	// US-40 / US-41: the tools-page routes (list, run, progress, cancel).
-	tools.BindRoutes(app, s3)
+	tools.BindRoutes(app, s3, configManager)
 
 	// Manual poll pass: a superuser-only route used by the E2E gate and the
 	// operator to trigger a pass without waiting for the cron (arch.md 10).

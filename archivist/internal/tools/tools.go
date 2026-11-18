@@ -16,6 +16,7 @@ import (
 
 	"ganigeorgiev.com/pocketbase/dbx"
 	"ganigeorgiev.com/pocketbase/pocketbase/core"
+	"github.com/napnap75/archivist/internal/config"
 	"github.com/napnap75/archivist/internal/pbapp"
 	"github.com/napnap75/archivist/internal/storage"
 )
@@ -36,6 +37,13 @@ var registry = []Descriptor{
 			"Un objet à sa place connue ne bouge pas ; un objet déplacé hors de l'application voit son file_key corrigé avec un événement relocated dans l'historique ; " +
 			"un objet inconnu de la base est déplacé vers la zone inbox pour être traité automatiquement ; " +
 			"les enregistrements dont le fichier a disparu du bucket sont signalés dans le résumé, sans action automatique.",
+	},
+	{
+		ID:   "refile-all",
+		Name: "Re-filer tous les documents",
+		Description: "Recalcule la clé cible de chaque document processed ou validated (champs enregistrés + préfixe files et templates de la configuration active) et déplace les objets qui ne sont plus à leur place — après un changement de ARCHIVIST_S3_FILES_PREFIX ou d'un template de nommage. " +
+			"Un document déjà bien classé ne bouge pas ; un document dont le template enregistré n'existe plus ou ne rend plus de clé valide est laissé en place et signalé (skipped) ; " +
+			"les documents pending restent à la review queue. Chaque déplacement met à jour file_key et ajoute un événement relocated dans l'historique.",
 	},
 }
 
@@ -65,6 +73,12 @@ type S3Store interface {
 	Prefixes() storage.Prefixes
 }
 
+// ConfigStore is the surface of the configuration manager the tools use;
+// a seam kept for unit tests.
+type ConfigStore interface {
+	Read(fn func(*config.Snapshot) error) error
+}
+
 // Job is one tool run: identity, live progress, final summary.
 type Job struct {
 	ID         string
@@ -77,6 +91,7 @@ type Job struct {
 	Current    string
 	Summary    map[string]int
 	Missing    []string
+	Skipped    []string
 	Errors     []string
 
 	mu     sync.Mutex
@@ -104,6 +119,7 @@ func (j *Job) State() map[string]any {
 		"current":    j.Current,
 		"summary":    j.Summary,
 		"missing":    j.Missing,
+		"skipped":    j.Skipped,
 		"errors":     j.Errors,
 	}
 	if !j.FinishedAt.IsZero() {
@@ -137,7 +153,7 @@ var (
 
 // Start launches a tool as a background job. One job at a time: a second
 // start while one is running is refused.
-func Start(app core.App, s3 S3Store, toolID string) (*Job, error) {
+func Start(app core.App, s3 S3Store, manager ConfigStore, toolID string) (*Job, error) {
 	d, ok := descriptor(toolID)
 	if !ok {
 		return nil, fmt.Errorf("unknown tool: %s", toolID)
@@ -163,10 +179,13 @@ func Start(app core.App, s3 S3Store, toolID string) (*Job, error) {
 	if d.ID == "find-lost-files" {
 		job.Summary = map[string]int{"scanned": 0, "ok": 0, "corrected": 0, "moved": 0, "duplicates": 0, "errors": 0}
 	}
+	if d.ID == "refile-all" {
+		job.Summary = map[string]int{"scanned": 0, "unchanged": 0, "moved": 0, "skipped": 0, "errors": 0}
+	}
 	jobs[job.ID] = job
 	running = job
 	go func() {
-		err := runTool(ctx, app, s3, d.ID, job)
+		err := runTool(ctx, app, s3, manager, d.ID, job)
 		regMu.Lock()
 		if running == job {
 			running = nil
@@ -231,10 +250,12 @@ func LatestJob() *Job {
 	return latest
 }
 
-func runTool(ctx context.Context, app core.App, s3 S3Store, toolID string, job *Job) error {
+func runTool(ctx context.Context, app core.App, s3 S3Store, manager ConfigStore, toolID string, job *Job) error {
 	switch toolID {
 	case "find-lost-files":
 		return runFindLostFiles(ctx, app, s3, job)
+	case "refile-all":
+		return runRefileAll(ctx, app, s3, manager, job)
 	}
 	return fmt.Errorf("unknown tool: %s", toolID)
 }
@@ -242,8 +263,8 @@ func runTool(ctx context.Context, app core.App, s3 S3Store, toolID string, job *
 // runFindLostFiles reconciles the pending and files prefix PDFs with the database (US-41).
 // In place: nothing. Moved in the bucket outside the application: the
 // record's file_key is corrected and a relocated event is appended. Unknown
-// of the database: moved to inbox/ for automatic processing. A record whose
-// file_key exists nowhere is only reported.
+// of the database: moved to the inbox for automatic processing. A record
+// whose file_key exists nowhere is only reported.
 func runFindLostFiles(ctx context.Context, app core.App, s3 S3Store, job *Job) error {
 	prefixes := s3.Prefixes()
 	objects, err := s3.ListReconciliationPDFs(ctx)
@@ -392,4 +413,115 @@ func baseName(key string) string {
 		return key[i+1:]
 	}
 	return key
+}
+
+// runRefileAll re-computes the target key of every processed or validated
+// document from the active compiled configuration (US-43) — after a change
+// of the files prefix or of a naming template — and moves the objects that
+// are no longer where their name says. Pending documents belong to the
+// review queue and are never touched.
+func runRefileAll(ctx context.Context, app core.App, s3 S3Store, manager ConfigStore, job *Job) error {
+	return manager.Read(func(snapshot *config.Snapshot) error {
+		return refileAll(ctx, app, s3, snapshot.Config, job)
+	})
+}
+
+func refileAll(ctx context.Context, app core.App, s3 S3Store, cfg *config.Config, job *Job) error {
+	records, err := app.FindAllRecords("documents")
+	if err != nil {
+		return fmt.Errorf("list documents: %w", err)
+	}
+	var eligible []*core.Record
+	for _, r := range records {
+		status := r.GetString("status")
+		if status == "processed" || status == "validated" {
+			eligible = append(eligible, r)
+		}
+	}
+	job.set(func() {
+		job.Total = len(eligible)
+		job.Skipped = []string{}
+	})
+	for _, record := range eligible {
+		if ctx.Err() != nil {
+			return nil
+		}
+		job.set(func() { job.Current = record.GetString("file_key") })
+		if err := refileRecord(ctx, app, s3, cfg, job, record); err != nil {
+			app.Logger().Error("refile-all: document failed", "record", record.Id, "file_key", record.GetString("file_key"), "error", err)
+			job.addError(err, record.GetString("file_key"))
+		}
+		job.set(func() { job.Processed++ })
+	}
+	job.set(func() {
+		app.Logger().Info("refile-all: done", "scanned", job.Summary["scanned"], "unchanged", job.Summary["unchanged"],
+			"moved", job.Summary["moved"], "skipped", job.Summary["skipped"], "errors", job.Summary["errors"])
+	})
+	return nil
+}
+
+// refileRecord re-renders one document's naming template from its stored
+// fields, moves the object when the target differs from the current key,
+// and traces the move as a relocated event. A stored template that no
+// longer exists, or a failing or empty render, leaves the object in place
+// and is reported (skipped); a skip is not an error.
+func refileRecord(ctx context.Context, app core.App, s3 S3Store, cfg *config.Config, job *Job, record *core.Record) error {
+	oldKey := record.GetString("file_key")
+	job.set(func() { job.Summary["scanned"]++ })
+
+	tplName := record.GetString("template")
+	if tplName == "" {
+		tplName = "default"
+	}
+	tpl, ok := cfg.Templates[tplName]
+	if !ok {
+		return jobSkip(job, oldKey, "template "+tplName+" introuvable dans la configuration active")
+	}
+	rendered, err := tpl.Render(pbapp.FieldsFromRecord(cfg, record), nil)
+	if err != nil {
+		return jobSkip(job, oldKey, "rendu échoué: "+err.Error())
+	}
+	if rendered == "" {
+		return jobSkip(job, oldKey, "rendu vide")
+	}
+	target := s3.Prefixes().Files + rendered
+	if target == oldKey {
+		job.set(func() { job.Summary["unchanged"]++ })
+		return nil
+	}
+	finalKey, err := s3.ResolveConflict(ctx, target)
+	if err != nil {
+		return fmt.Errorf("conflict resolution: %w", err)
+	}
+	if err := moveObject(ctx, s3, oldKey, finalKey); err != nil {
+		return err
+	}
+	txErr := app.RunInTransaction(func(tx core.App) error {
+		record.Set("file_key", finalKey)
+		if err := tx.Save(record); err != nil {
+			return err
+		}
+		return pbapp.AppendEvent(tx, record.Id, "relocated", pbapp.Snapshot{"file_key": oldKey}, pbapp.Snapshot{"file_key": finalKey}, nil)
+	})
+	if txErr != nil {
+		_ = s3.Copy(ctx, finalKey, oldKey) // best-effort rollback of the move
+		_ = s3.Remove(ctx, finalKey)
+		return fmt.Errorf("relocation save: %w", txErr)
+	}
+	app.Logger().Info("refile-all: document re-filed", "record", record.Id, "from", oldKey, "to", finalKey)
+	job.set(func() { job.Summary["moved"]++ })
+	return nil
+}
+
+// jobSkip leaves a document in place and reports the reason in the job's
+// skipped list and summary.
+func jobSkip(job *Job, key, reason string) error {
+	job.set(func() {
+		if job.Skipped == nil {
+			job.Skipped = []string{}
+		}
+		job.Skipped = append(job.Skipped, key+" — "+reason)
+		job.Summary["skipped"]++
+	})
+	return nil
 }

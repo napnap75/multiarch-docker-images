@@ -144,6 +144,12 @@ The first tool, `Recherche des fichiers perdus`, reconciles the bucket with the 
 - the object is unknown of the database: it is moved to the inbox prefix to be processed automatically by the poller;
 - a record whose file has disappeared from the bucket is only reported in the summary, never acted upon.
 
+The second tool, `Re-filer tous les documents`, applies a change of `ARCHIVIST_S3_FILES_PREFIX` or of a naming template to the documents already filed. It re-computes the target key of every `processed` or `validated` document from its stored fields and the active templates (documents `pending` are never touched), then moves the objects that are no longer where their name says (conflict suffix on collision, `relocated` event and `file_key` update in the document's history):
+
+- the computed target equals the current key: nothing happens;
+- the document's stored template no longer exists or renders no key: the document is left in place and reported in the summary, never counted as an error;
+- a per-document failure is logged and reported, and the task continues with the next document.
+
 ## Nextcloud integration
 
 Mount the S3 bucket as Nextcloud external storage. Users drop files into `inbox/`, browse and share from `files/`. Archivist and Nextcloud work on the same objects; neither is the exclusive interface of the other.
