@@ -1472,7 +1472,7 @@ func TestE2E(t *testing.T) {
 				"documentType": "Releve relocation", "emissionDate": "2026-06-02", "bankAccount": "Nadine"})
 		putPDF(t, "files/stranger.pdf", "objet sans record")
 		missingSHA := sha256.Sum256([]byte("archivist-e2e-missing-object"))
-		recMiss := addDirectRecord(t, "files/lost/moved.pdf", hex.EncodeToString(missingSHA[:]), "processed",
+		addDirectRecord(t, "files/lost/moved.pdf", hex.EncodeToString(missingSHA[:]), "pending",
 			map[string]any{"template": "bank_statement", "emittingCompany": "BRED",
 				"documentType": "Releve lost", "emissionDate": "2026-06-03", "bankAccount": "Nadine"})
 
@@ -1529,13 +1529,6 @@ func TestE2E(t *testing.T) {
 			t.Fatalf("missing list = %v", missing)
 		}
 
-		// The missing record becomes pending so the re-filing below never
-		// touches the object that does not exist.
-		status, out = call(t, http.MethodPatch, "/api/collections/documents/records/"+recMiss["id"].(string),
-			map[string]any{"status": "pending"})
-		if status != 200 {
-			t.Fatalf("pending patch: status %d: %v", status, out)
-		}
 	})
 
 	t.Run("tools: refile-all, collision mention and its dry-run", func(t *testing.T) {
@@ -1549,7 +1542,7 @@ func TestE2E(t *testing.T) {
 				"documentType": "Refile deux", "emissionDate": "2026-07-02", "bankAccount": "Nadine"})
 		// The target of the second document is already occupied: the real
 		// run must apply a conflict suffix, the dry-run must say so.
-		putPDF(t, "files/BRED/2026-07_Refile deux_Nadine.pdf", "occupant")
+		occupantHash := putPDF(t, "files/BRED/2026-07_Refile deux_Nadine.pdf", "occupant")
 
 		// Dry-run first.
 		status, out := call(t, http.MethodPost, "/api/archivist/tools/refile-all/run",
@@ -1600,8 +1593,18 @@ func TestE2E(t *testing.T) {
 		if s3Exists(t, "files/old/Refile.pdf") || s3Exists(t, "files/old/Refile2.pdf") {
 			t.Fatal("the old objects were not removed")
 		}
-		if s3Exists(t, "files/BRED/2026-07_Refile deux_Nadine.pdf") {
-			t.Fatal("the occupying object must not be overwritten by the move")
+		occupant, err := s3.GetObject(context.Background(), bucket,
+			"files/BRED/2026-07_Refile deux_Nadine.pdf", minio.GetObjectOptions{})
+		if err != nil {
+			t.Fatalf("the occupying object was removed: %v", err)
+		}
+		occupantData, err := io.ReadAll(occupant)
+		occupant.Close()
+		if err != nil {
+			t.Fatalf("read occupying object: %v", err)
+		}
+		if got := sha256.Sum256(occupantData); hex.EncodeToString(got[:]) != occupantHash {
+			t.Fatal("the occupying object was overwritten by the move")
 		}
 		if got := oneRecord(t, "documents", "(id='"+recOne["id"].(string)+"')")["file_key"]; got != "files/BRED/2026-07_Refile un_Nadine.pdf" {
 			t.Fatalf("file_key not updated: %v", got)
@@ -1710,6 +1713,9 @@ func TestE2E(t *testing.T) {
 			t.Fatalf("side app: %v", err)
 		}
 		defer cleanup()
+		if err := retry(60*time.Second, func() error { return waitForApp(side) }); err != nil {
+			t.Fatalf("side app never became healthy: %v", err)
+		}
 
 		savedURL, savedToken := baseURL, token
 		baseURL, token = side, ""
