@@ -402,9 +402,10 @@ Acceptance criteria:
 - Given an object whose record's `file_key` no longer exists in the bucket, when it is scanned, then the record's `file_key` is corrected to the found key (the object itself never moves), a `relocated` event is appended with the `file_key` diff, and the correction is refused when another record already references the key (`corrected`).
 - Given an object whose record's `file_key` still exists elsewhere, when it is scanned, then the stray copy is left in place and reported (`duplicates`).
 - Given an object no record knows, when it is scanned, then it is moved to the inbox prefix (conflict suffix on name collision) so the poller processes it automatically (`moved`).
-- Given a record whose `file_key` exists nowhere in the bucket and is not an interrupted filing under the inbox prefix, when the scan ends, then it is reported in the summary (`missing`) with its key, never acted upon.
+- Given a record whose `file_key` exists nowhere in the bucket and is not an interrupted filing under the inbox prefix, when the scan ends, then it is reported in the summary (`missing`) with its key, never acted upon; a record whose object was found under another key is a `corrected`, not a `missing` — the two categories never overlap.
+- Given the scan ends, when the summary is displayed, then every impacted object is listed in detail category by category, not only the missing files: the corrections (`old key → found key`), the unknown objects with their inbox destination, and the stray copies with their original, in real runs as in simulation mode.
 - Given a per-object failure (S3 error, lookup error), when it occurs, then it is logged, counted in the summary and listed, and the scan continues with the next object.
-- Given the tool runs in simulation mode, when it scans, then every outcome is computed and counted exactly as in a real run (ok, corrected, moved, duplicates, missing), but no object moves, no `file_key` is corrected and no `relocated` event is appended.
+- Given the tool runs in simulation mode, when it scans, then every outcome is computed, counted and listed exactly as in a real run (ok, corrected, moved, duplicates, missing), but no object moves, no `file_key` is corrected and no `relocated` event is appended; the planned moves resolve their name collisions against the current bucket contents and against the moves already planned by the same run.
 
 ### US-43 — Re-file every document after a naming change
 

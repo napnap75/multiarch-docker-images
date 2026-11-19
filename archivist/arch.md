@@ -288,7 +288,7 @@ The static pages themselves carry no data and are public by nature; every fetch 
 
 ### 7.5 Tools page (US-40, US-41, US-43)
 
-A third static page, `tools.html` + `tools.js`, linked from the dashboard's top bar: one card per tool, with its description and a run button; while a job runs, a progress bar (processed / total objects, current key) refreshed by polling; when it ends, a summary (per-outcome counts) plus the detail lists (missing keys, per-object errors). One job at a time; a running job can be cancelled at the next object boundary. The panel is restored on page reload from the latest job state.
+A third static page, `tools.html` + `tools.js`, linked from the dashboard's top bar: one card per tool, with its description and a run button; while a job runs, a progress bar (processed / total objects, current key) refreshed by polling; when it ends, a summary (per-outcome counts) plus the detail lists — for `find-lost-files`, every impacted object category by category (corrections old key → found key, unknown objects with their inbox destination, stray copies, missing keys), for `refile-all`, the planned moves and the skipped documents — and the per-object errors. One job at a time; a running job can be cancelled at the next object boundary. The panel is restored on page reload from the latest job state.
 
 The tools are long-running maintenance tasks started by hand, the exact opposite of the cron poller: each run executes as a background job in a `internal/tools` registry (id, status `running`/`done`/`failed`/`cancelled`, progress, summary), served by dedicated routes and never blocking the pipeline.
 
@@ -300,7 +300,7 @@ First tool, `find-lost-files` (US-41) — reconciling the bucket with the databa
    - the record's `file_key` no longer exists in the bucket: the file was moved outside the application — the record's `file_key` is corrected to the found key and a `relocated` event is appended (the object itself never moves); refused if another record already references the key (`corrected`);
    - the record's `file_key` still exists: the scanned object is a stray copy — left in place and reported (`duplicates`);
    - no record at all: the object is unknown of the database — moved to the inbox prefix (conflict suffix on name collision) so the poller processes it automatically (`moved`).
-3. After the scan, every record whose `file_key` is a `.pdf` under the pending or files prefix (the whole bucket when files is the root) but has no corresponding listed object is reported as missing, never acted upon (`missing`). Other keys, including interrupted filings under the inbox prefix, are not reported.
+3. After the scan, every record whose `file_key` is a `.pdf` under the pending or files prefix (the whole bucket when files is the root) but has no corresponding listed object is reported as missing, never acted upon (`missing`). Other keys, including interrupted filings under the inbox prefix, are not reported. A record whose object was found under another key is a `corrected`, not a `missing` — in simulation the record is not updated, so the planned correction is remembered and excluded from the missing list: the two categories never overlap. The outcomes add up exactly: scanned = ok + corrected + moved + duplicates + errors.
 
 Every outcome is logged through the PocketBase logger; per-object failures do not stop the scan and join the job's error list.
 
@@ -314,7 +314,7 @@ Second tool, `refile-all` (US-43) — applying a change of the files prefix or o
 
 Every outcome is logged through the PocketBase logger; per-document failures do not stop the re-filing and join the job's error list. The job is cancellable at the next document boundary.
 
-Each tool runs for real or in dry-run mode (the simulation button of the tools page). A dry-run performs every check of the tool but writes nothing — no S3 move, no record update, no event — and reports what would happen through the same counts, plus the list of the planned moves over refile-all, each "old → new" and marked when a collision suffix would be applied (the target resolution itself is read-only). A dry-run job keeps `dry_run: true` in its state.
+Each tool runs for real or in dry-run mode (the simulation button of the tools page). A dry-run performs every check of the tool but writes nothing — no S3 move, no record update, no event — and reports what would happen through the same counts and detail lists as a real run (per tool, see above), with, over refile-all, the list of the planned moves, each "old → new" and marked when a collision suffix would be applied; the planned name collisions are resolved against the current bucket contents and against the moves already planned by the same run (the resolution is read-only). A dry-run job keeps `dry_run: true` in its state.
 
 Routes (superuser-only, same rules as section 7.3):
 

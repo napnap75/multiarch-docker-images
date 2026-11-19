@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,10 +34,13 @@ var registry = []Descriptor{
 	{
 		ID:   "find-lost-files",
 		Name: "Recherche des fichiers perdus",
-		Description: "Parcourt les fichiers PDF sous les préfixes pending et files (recouvre tout le bucket lorsque files est configuré comme racine), recalcule leur empreinte sha256 et la compare à la base. " +
-			"Un objet à sa place connue ne bouge pas ; un objet déplacé hors de l'application voit son file_key corrigé avec un événement relocated dans l'historique ; " +
-			"un objet inconnu de la base est déplacé vers la zone inbox pour être traité automatiquement ; " +
-			"les enregistrements dont le fichier a disparu du bucket sont signalés dans le résumé, sans action automatique.",
+		Description: "Parcourt les objets PDF sous les préfixes pending et files (recouvre tout le bucket lorsque files est configuré comme racine), recalcule leur empreinte sha256 et la compare à la base. " +
+			"Les effectifs portent sur les objets du bucket : ils peuvent différer du nombre de documents en base (objets inconnus de la base, copies parasites, fichiers disparus). " +
+			"\u00c0 leur place : l'objet est exactement à la clé enregistrée (file_key), rien à faire. " +
+			"Retrouvé ailleurs : l'objet a été déplacé dans le bucket en dehors de l'application — le file_key du document est corrigé avec un événement relocated, l'objet lui-même ne bouge pas. " +
+			"Inconnu de la base : aucune empreinte ne correspond — l'objet est renvoyé vers inbox pour être retraité automatiquement. " +
+			"Copie parasite : l'objet copie un document dont l'original occupe encore sa clé — laissé en place et signalé. " +
+			"Disparu du bucket : la clé enregistrée du document n'existe plus nulle part — signalé seulement, sans action automatique.",
 	},
 	{
 		ID:   "refile-all",
@@ -97,6 +101,13 @@ type Job struct {
 	Planned    []string
 	Errors     []string
 
+	// find-lost-files: every impacted object, category by category —
+	// corrections (old key → found key), unknowns sent back to the inbox
+	// and stray copies left in place.
+	CorrectedFiles []string
+	MovedFiles     []string
+	DuplicateFiles []string
+
 	DryRun bool
 
 	mu     sync.Mutex
@@ -115,19 +126,22 @@ func (j *Job) State() map[string]any {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	state := map[string]any{
-		"id":         j.ID,
-		"tool":       j.Tool,
-		"status":     j.Status,
-		"started_at": j.StartedAt.Format(time.RFC3339),
-		"total":      j.Total,
-		"processed":  j.Processed,
-		"current":    j.Current,
-		"summary":    j.Summary,
-		"missing":    j.Missing,
-		"skipped":    j.Skipped,
-		"planned":    j.Planned,
-		"errors":     j.Errors,
-		"dry_run":    j.DryRun,
+		"id":              j.ID,
+		"tool":            j.Tool,
+		"status":          j.Status,
+		"started_at":      j.StartedAt.Format(time.RFC3339),
+		"total":           j.Total,
+		"processed":       j.Processed,
+		"current":         j.Current,
+		"summary":         j.Summary,
+		"missing":         j.Missing,
+		"skipped":         j.Skipped,
+		"planned":         j.Planned,
+		"errors":          j.Errors,
+		"corrected_files": j.CorrectedFiles,
+		"moved_files":     j.MovedFiles,
+		"duplicate_files": j.DuplicateFiles,
+		"dry_run":         j.DryRun,
 	}
 	if !j.FinishedAt.IsZero() {
 		state["finished_at"] = j.FinishedAt.Format(time.RFC3339)
@@ -274,8 +288,8 @@ func runTool(ctx context.Context, app core.App, s3 S3Store, manager ConfigStore,
 // record's file_key is corrected and a relocated event is appended. Unknown
 // of the database: moved to the inbox for automatic processing. A record
 // whose file_key exists nowhere is only reported. In dry-run mode every
-// outcome is computed and counted but nothing is written: no move, no save,
-// no event.
+// outcome is computed, counted and listed but nothing is written: no move,
+// no save, no event.
 func runFindLostFiles(ctx context.Context, app core.App, s3 S3Store, job *Job, dryRun bool) error {
 	prefixes := s3.Prefixes()
 	objects, err := s3.ListReconciliationPDFs(ctx)
@@ -286,6 +300,11 @@ func runFindLostFiles(ctx context.Context, app core.App, s3 S3Store, job *Job, d
 	for _, o := range objects {
 		keySet[o.Key] = true
 	}
+	planned := make(map[string]bool, len(keySet))
+	for k := range keySet {
+		planned[k] = true
+	}
+	corrections := map[string]string{}
 	job.set(func() { job.Total = len(objects) })
 
 	for _, o := range objects {
@@ -293,16 +312,26 @@ func runFindLostFiles(ctx context.Context, app core.App, s3 S3Store, job *Job, d
 			return nil
 		}
 		job.set(func() { job.Current = o.Key })
-		if err := reconcileObject(ctx, app, s3, job, o.Key, keySet, dryRun); err != nil {
+		if err := reconcileObject(ctx, app, s3, job, o.Key, keySet, planned, corrections, dryRun); err != nil {
 			app.Logger().Error("find-lost-files: object failed", "key", o.Key, "error", err)
 			job.addError(err, o.Key)
 		}
 		job.set(func() { job.Processed++ })
 	}
 
+	job.set(func() {
+		accounted := job.Summary["ok"] + job.Summary["corrected"] + job.Summary["moved"] + job.Summary["duplicates"] + job.Summary["errors"]
+		if accounted != job.Summary["scanned"] {
+			app.Logger().Warn("find-lost-files: summary does not account for every object", "scanned", job.Summary["scanned"], "accounted", accounted)
+		}
+	})
+
 	// Records whose file_key exists nowhere: reported, never acted upon.
 	// Records still under inbox/ are interrupted filings (US-11), the
-	// poller's business, not orphans.
+	// poller's business, not orphans. Records whose object was found under
+	// another key are corrections, not lost files — in dry-run the record
+	// itself is not updated, so the planned correction is remembered here
+	// and removed from the missing list.
 	records, err := app.FindAllRecords("documents")
 	if err != nil {
 		return fmt.Errorf("list documents: %w", err)
@@ -311,6 +340,9 @@ func runFindLostFiles(ctx context.Context, app core.App, s3 S3Store, job *Job, d
 	for _, r := range records {
 		key := r.GetString("file_key")
 		if key == "" || !prefixes.IsReconciliationKey(key) || keySet[key] {
+			continue
+		}
+		if _, corrected := corrections[r.Id]; corrected {
 			continue
 		}
 		missing = append(missing, key)
@@ -338,13 +370,13 @@ func findRecord(app core.App, filter string, params dbx.Params) (*core.Record, e
 	return record, nil
 }
 
-func reconcileObject(ctx context.Context, app core.App, s3 S3Store, job *Job, key string, keySet map[string]bool, dryRun bool) error {
+func reconcileObject(ctx context.Context, app core.App, s3 S3Store, job *Job, key string, keySet map[string]bool, planned map[string]bool, corrections map[string]string, dryRun bool) error {
 	prefixes := s3.Prefixes()
+	job.set(func() { job.Summary["scanned"]++ })
 	hash, err := s3.Hash(ctx, key)
 	if err != nil {
 		return fmt.Errorf("hash: %w", err)
 	}
-	job.set(func() { job.Summary["scanned"]++ })
 
 	record, err := findRecord(app, "sha256 = {:h}", dbx.Params{"h": hash})
 	if err != nil {
@@ -354,8 +386,16 @@ func reconcileObject(ctx context.Context, app core.App, s3 S3Store, job *Job, ke
 	if record == nil {
 		// Unknown of the database: back to the inbox for automatic processing.
 		if dryRun {
-			job.set(func() { job.Summary["moved"]++ })
-			app.Logger().Info("find-lost-files dry-run: unknown object would move to inbox", "from", key, "to", prefixes.Inbox+baseName(key))
+			finalKey, err := planDestination(ctx, s3, prefixes.Inbox+baseName(key), planned)
+			if err != nil {
+				return fmt.Errorf("conflict resolution: %w", err)
+			}
+			planned[finalKey] = true
+			job.set(func() {
+				job.Summary["moved"]++
+				job.MovedFiles = append(job.MovedFiles, key+" → "+finalKey)
+			})
+			app.Logger().Info("find-lost-files dry-run: unknown object would move to inbox", "from", key, "to", finalKey)
 			return nil
 		}
 		finalKey, err := s3.ResolveConflict(ctx, prefixes.Inbox+baseName(key))
@@ -365,7 +405,10 @@ func reconcileObject(ctx context.Context, app core.App, s3 S3Store, job *Job, ke
 		if err := moveObject(ctx, s3, key, finalKey); err != nil {
 			return err
 		}
-		job.set(func() { job.Summary["moved"]++ })
+		job.set(func() {
+			job.Summary["moved"]++
+			job.MovedFiles = append(job.MovedFiles, key+" → "+finalKey)
+		})
 		app.Logger().Info("find-lost-files: unknown object moved to inbox", "from", key, "to", finalKey)
 		return nil
 	}
@@ -378,7 +421,10 @@ func reconcileObject(ctx context.Context, app core.App, s3 S3Store, job *Job, ke
 	if keySet[oldKey] {
 		// The record points at an object that still exists: this scanned
 		// object is a stray copy, left in place and reported.
-		job.set(func() { job.Summary["duplicates"]++ })
+		job.set(func() {
+			job.Summary["duplicates"]++
+			job.DuplicateFiles = append(job.DuplicateFiles, key+" (copie de "+oldKey+", laissée en place)")
+		})
 		app.Logger().Warn("find-lost-files: stray copy left in place", "key", key, "record", record.Id, "file_key", oldKey)
 		return nil
 	}
@@ -394,7 +440,11 @@ func reconcileObject(ctx context.Context, app core.App, s3 S3Store, job *Job, ke
 		return fmt.Errorf("another record (%s) already references %s", other.Id, key)
 	}
 	if dryRun {
-		job.set(func() { job.Summary["corrected"]++ })
+		job.set(func() {
+			job.Summary["corrected"]++
+			job.CorrectedFiles = append(job.CorrectedFiles, oldKey+" → "+key)
+		})
+		corrections[record.Id] = key
 		app.Logger().Info("find-lost-files dry-run: file_key would be corrected", "record", record.Id, "from", oldKey, "to", key)
 		return nil
 	}
@@ -410,9 +460,35 @@ func reconcileObject(ctx context.Context, app core.App, s3 S3Store, job *Job, ke
 	if txErr != nil {
 		return fmt.Errorf("relocation save: %w", txErr)
 	}
-	job.set(func() { job.Summary["corrected"]++ })
+	corrections[record.Id] = key
+	job.set(func() {
+		job.Summary["corrected"]++
+		job.CorrectedFiles = append(job.CorrectedFiles, oldKey+" → "+key)
+	})
 	app.Logger().Info("find-lost-files: file_key corrected", "record", record.Id, "from", oldKey, "to", key)
 	return nil
+}
+
+// planDestination resolves a destination key read-only, for a dry-run: it
+// mimics ResolveConflict's suffixes against the current bucket plus the
+// destinations already planned by the same run — in simulation nothing is
+// written, so the bucket alone cannot arbitrate between two planned moves.
+func planDestination(ctx context.Context, s3 S3Store, desired string, taken map[string]bool) (string, error) {
+	if !taken[desired] {
+		return desired, nil
+	}
+	ext := ""
+	if i := strings.LastIndex(desired, "."); i >= 0 {
+		ext = desired[i:]
+	}
+	base := strings.TrimSuffix(desired, ext)
+	for n := 1; n < 1000; n++ {
+		candidate := base + " (" + strconv.Itoa(n) + ")" + ext
+		if !taken[candidate] {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("cannot resolve conflict on %q", desired)
 }
 
 // moveObject copies src to dst, verifies the copy, then deletes the source.

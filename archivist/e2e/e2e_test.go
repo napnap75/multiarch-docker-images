@@ -1504,6 +1504,14 @@ func TestE2E(t *testing.T) {
 		if !containsAny(missing, "files/lost/moved.pdf") {
 			t.Fatalf("dry-run missing list = %v", missing)
 		}
+		correctedFiles, _ := job["corrected_files"].([]any)
+		if !containsAny(correctedFiles, "files/gone/moved.pdf → files/new/moved.pdf") {
+			t.Fatalf("dry-run corrected list = %v", correctedFiles)
+		}
+		movedFiles, _ := job["moved_files"].([]any)
+		if !containsAny(movedFiles, "files/stranger.pdf → inbox/stranger.pdf") {
+			t.Fatalf("dry-run moved list = %v", movedFiles)
+		}
 
 		// Real run.
 		status, out = call(t, http.MethodPost, "/api/archivist/tools/find-lost-files/run", nil)
@@ -1527,6 +1535,10 @@ func TestE2E(t *testing.T) {
 		missing, _ = job["missing"].([]any)
 		if !containsAny(missing, "files/lost/moved.pdf") {
 			t.Fatalf("missing list = %v", missing)
+		}
+		correctedFiles, _ = job["corrected_files"].([]any)
+		if !containsAny(correctedFiles, "files/gone/moved.pdf → files/new/moved.pdf") {
+			t.Fatalf("corrected list = %v", correctedFiles)
 		}
 
 	})

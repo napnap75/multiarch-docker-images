@@ -182,6 +182,9 @@ func TestFindLostFilesRelocated(t *testing.T) {
 	if got := fresh.GetString("file_key"); got != "files/new/a.pdf" {
 		t.Fatalf("file_key = %q, want files/new/a.pdf", got)
 	}
+	if len(job.CorrectedFiles) != 1 || job.CorrectedFiles[0] != "files/old/a.pdf → files/new/a.pdf" {
+		t.Fatalf("corrected_files = %v, want [files/old/a.pdf → files/new/a.pdf]", job.CorrectedFiles)
+	}
 	events, err := app.FindAllRecords("document_events")
 	if err != nil {
 		t.Fatal(err)
@@ -208,6 +211,9 @@ func TestFindLostFilesUnknownGoesToInbox(t *testing.T) {
 	if _, ok := s3.objects["inbox/unknown.pdf"]; !ok {
 		t.Fatalf("object not in inbox: %v", s3.objects)
 	}
+	if len(job.MovedFiles) != 1 || job.MovedFiles[0] != "files/unknown.pdf → inbox/unknown.pdf" {
+		t.Fatalf("moved_files = %v, want [files/unknown.pdf → inbox/unknown.pdf]", job.MovedFiles)
+	}
 }
 
 func TestFindLostFilesStrayDuplicateLeftInPlace(t *testing.T) {
@@ -224,6 +230,9 @@ func TestFindLostFilesStrayDuplicateLeftInPlace(t *testing.T) {
 	}
 	if _, ok := s3.objects["files/stray.pdf"]; !ok {
 		t.Fatalf("stray copy should stay: %v", s3.objects)
+	}
+	if len(job.DuplicateFiles) != 1 || job.DuplicateFiles[0] != "files/stray.pdf (copie de files/orig.pdf, laissée en place)" {
+		t.Fatalf("duplicate_files = %v", job.DuplicateFiles)
 	}
 }
 
@@ -585,7 +594,17 @@ func TestFindLostFilesDryRunPlansWithoutTouchingAnything(t *testing.T) {
 	if job.Summary["corrected"] != 1 || job.Summary["moved"] != 1 {
 		t.Fatalf("summary = %v, want corrected=1 moved=1", job.Summary)
 	}
-	if len(job.Missing) != 1 || job.Missing[0] != "files/old/a.pdf" {
-		t.Fatalf("missing = %v, want [files/old/a.pdf]", job.Missing)
+	// The record whose object was found elsewhere is a correction, not a
+	// missing file: it must not be double-counted in the missing list.
+	if len(job.Missing) != 0 {
+		t.Fatalf("missing = %v, want empty (the correction covers it)", job.Missing)
+	}
+	wantCorrected := "files/old/a.pdf → files/new/a.pdf"
+	if len(job.CorrectedFiles) != 1 || job.CorrectedFiles[0] != wantCorrected {
+		t.Fatalf("corrected_files = %v, want [%q]", job.CorrectedFiles, wantCorrected)
+	}
+	wantMoved := "files/unknown.pdf → inbox/unknown.pdf"
+	if len(job.MovedFiles) != 1 || job.MovedFiles[0] != wantMoved {
+		t.Fatalf("moved_files = %v, want [%q]", job.MovedFiles, wantMoved)
 	}
 }
