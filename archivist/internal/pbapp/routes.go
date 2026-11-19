@@ -46,7 +46,7 @@ func BindRoutes(app core.App, manager *config.Manager, configPath string, s3 *st
 			return handleConfigSource(re, manager)
 		})
 		e.Router.POST("/api/archivist/config/dry-run", func(re *core.RequestEvent) error {
-			return handleConfigDraft(re)
+			return handleConfigDraft(re, s3.Prefixes().Files)
 		})
 		e.Router.PUT("/api/archivist/config", func(re *core.RequestEvent) error {
 			return handleSaveConfig(re, manager, configPath)
@@ -63,7 +63,7 @@ func BindRoutes(app core.App, manager *config.Manager, configPath string, s3 *st
 		})
 		e.Router.POST("/api/archivist/documents/{id}/dry-run", func(re *core.RequestEvent) error {
 			return manager.Read(func(snapshot *config.Snapshot) error {
-				return handleDryRun(re, snapshot.Config)
+				return handleDryRun(re, snapshot.Config, s3.Prefixes().Files)
 			})
 		})
 		e.Router.POST("/api/archivist/documents/{id}/correct", func(re *core.RequestEvent) error {
@@ -186,7 +186,9 @@ func fileName(key string) string {
 
 // dryRunResponse is the single response shape of the two exclusive
 // dry-run modes (US-35). The trace is filled only by the classification
-// mode (US-42); the render mode leaves it nil.
+// mode (US-42); the render mode leaves it nil. Rendered is the full target
+// S3 key, files prefix included (an empty render stays empty): the UI uses
+// it as-is and never assembles the key itself.
 type dryRunResponse struct {
 	Fields   map[string]any      `json:"fields"`
 	Template string              `json:"template"`
@@ -195,7 +197,16 @@ type dryRunResponse struct {
 	Trace    []config.TraceEntry `json:"trace,omitempty"`
 }
 
-func handleDryRun(re *core.RequestEvent, cfg *config.Config) error {
+// withFilesPrefix prepends the configured files prefix to a rendered
+// template, an empty render staying empty.
+func withFilesPrefix(filesPrefix, rendered string) string {
+	if rendered == "" {
+		return ""
+	}
+	return filesPrefix + rendered
+}
+
+func handleDryRun(re *core.RequestEvent, cfg *config.Config, filesPrefix string) error {
 	if !re.HasSuperuserAuth() {
 		return re.ForbiddenError("superusers only", nil)
 	}
@@ -219,7 +230,7 @@ func handleDryRun(re *core.RequestEvent, cfg *config.Config) error {
 		return re.JSON(200, dryRunResponse{
 			Fields:   fields,
 			Template: templateName(fields),
-			Rendered: rendered,
+			Rendered: withFilesPrefix(filesPrefix, rendered),
 			Errors:   nonNil(errs),
 			Trace:    nonNilTrace(trace),
 		})
@@ -242,7 +253,7 @@ func handleDryRun(re *core.RequestEvent, cfg *config.Config) error {
 	return re.JSON(200, dryRunResponse{
 		Fields:   merged,
 		Template: tplName,
-		Rendered: rendered,
+		Rendered: withFilesPrefix(filesPrefix, rendered),
 		Errors:   nonNil(append(convErrs, evalErrs...)),
 	})
 }
@@ -290,7 +301,7 @@ func handleCorrect(re *core.RequestEvent, cfg *config.Config, s3 *storage.Client
 
 	before := SnapshotFromRecord(cfg, record, true)
 	oldKey := record.GetString("file_key")
-	target := "files/" + rendered
+	target := s3.Prefixes().Files + rendered
 
 	ctx := re.Request.Context()
 	refiled := false
@@ -342,7 +353,7 @@ func handleCorrect(re *core.RequestEvent, cfg *config.Config, s3 *storage.Client
 		"file_key": record.GetString("file_key"),
 		"status":   "validated",
 		"template": tplName,
-		"rendered": rendered,
+		"rendered": target,
 		"fields":   merged,
 	})
 }

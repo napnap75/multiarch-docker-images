@@ -35,7 +35,6 @@ async function init() {
   renderDocumentNavigation();
   loadPdf();
   var evs = await loadEvents();
-  renderImportErrors(evs);
   renderHistory(evs);
   renderForm();
   bindActions();
@@ -129,29 +128,6 @@ function payloadOf(ev) {
   return p || {};
 }
 
-function renderImportErrors(evs) {
-  var box = $("importerrors");
-  for (var i = 0; i < evs.length; i++) {
-    var p = payloadOf(evs[i]);
-    if (evs[i].event_type === "imported" && p.errors && p.errors.length) {
-      box.hidden = false;
-      box.innerHTML = "";
-      var head = document.createElement("div");
-      head.textContent = "Échec de la classification à l'import :";
-      box.appendChild(head);
-      var ul = document.createElement("ul");
-      p.errors.forEach(function (e) {
-        var li = document.createElement("li");
-        li.textContent = e;
-        ul.appendChild(li);
-      });
-      box.appendChild(ul);
-      return;
-    }
-  }
-  box.hidden = true;
-}
-
 function renderForm() {
   var form = $("docform");
   form.innerHTML = "";
@@ -237,7 +213,8 @@ async function loadCurrentTarget() {
 }
 
 function renderTargetName(rendered) {
-  var targetKey = rendered ? "files/" + rendered : "";
+  // The dry-run route returns the full target key, files prefix included.
+  var targetKey = rendered || "";
   $("targetname").textContent = targetKey && targetKey !== record.file_key
     ? "Clé cible : " + targetKey : "";
 }

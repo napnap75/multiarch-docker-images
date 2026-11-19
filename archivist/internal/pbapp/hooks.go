@@ -48,7 +48,7 @@ func BindHooks(app core.App, manager *config.Manager, s3 *storage.Client) {
 // template evaluation, no re-filing, no status change — the UI edits one
 // field at a time and shows no preview of the resulting file name. The full
 // correction (all fields, dry-run, re-filing, validation) is the custom
-// dashboard's job (US-3x). The only direct status change is processed ->
+// dashboard's job (US-36). The only direct status change is processed ->
 // validated (US-23).
 func handleDocumentUpdate(app core.App, cfg *config.Config, e *core.RecordRequestEvent) error {
 	newRec := e.Record

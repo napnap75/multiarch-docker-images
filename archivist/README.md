@@ -18,7 +18,7 @@ Files in `inbox/` that are not PDFs (no `%PDF-` header) are left as-is: they are
 
 ## Prerequisites
 
-- An S3 bucket, with three prefixes: `inbox/`, `pending/`, `files/`. The prefixes are created on first startup if they do not exist. Versioning is not required, but it is strongly recommended: without it, a file deleted by the application or by a bug is lost for good; with it, deleted objects stay recoverable via delete markers. The application logs a warning at startup when versioning is disabled (visible in the admin dashboard, Dashboard > Logs).
+- An S3 bucket, with three prefixes: `inbox/`, `pending/`, `files/` (configurable through `ARCHIVIST_S3_INBOX_PREFIX`, `ARCHIVIST_S3_PENDING_PREFIX` and `ARCHIVIST_S3_FILES_PREFIX`; set `ARCHIVIST_S3_FILES_PREFIX=/` to file documents at the bucket root). Versioning is not required, but it is strongly recommended: without it, a file deleted by the application or by a bug is lost for good; with it, deleted objects stay recoverable via delete markers. The application logs a warning at startup when versioning is disabled (visible in the admin dashboard, Dashboard > Logs).
 - An S3 user with read/write access to the bucket.
 - Docker.
 
@@ -69,6 +69,9 @@ The functional configuration is loaded at startup. Saving a valid draft from the
 | `ARCHIVIST_S3_BUCKET` | yes | Bucket name |
 | `ARCHIVIST_S3_USE_SSL` | no | `true` (default) for HTTPS, `false` for HTTP |
 | `ARCHIVIST_S3_REGION` | no | S3 region used for request signatures, default `garage` |
+| `ARCHIVIST_S3_INBOX_PREFIX` | no | Bucket prefix polled for new PDFs, default `inbox` |
+| `ARCHIVIST_S3_PENDING_PREFIX` | no | Bucket prefix for the review queue, default `pending` |
+| `ARCHIVIST_S3_FILES_PREFIX` | no | Bucket prefix documents are filed under, default `files`; set `/` to file them at the bucket root |
 | `ARCHIVIST_POLL_INTERVAL` | no | Cron expression for polling `inbox/`, default `* * * * *` (every minute) |
 | `ARCHIVIST_ADMIN_EMAIL` | yes | Admin account (dashboard and PocketBase) |
 | `ARCHIVIST_ADMIN_PASSWORD` | yes | Admin account password |
@@ -96,7 +99,7 @@ A commented `config.jsonc` example file is provided in the repository. The confi
     { "name": "emittingCompany", "french": "Société émettrice", "type": "text", "mandatory": true },
     { "name": "documentType",    "french": "Type de document",   "type": "enum", "mandatory": true },
     { "name": "emissionDate",    "french": "Date d'émission",    "type": "date", "mandatory": true },
-    { "name": "template",        "french": "Modèle de nommage",  "type": "text", "mandatory": false }
+    { "name": "template",        "french": "Modèle de nommage",  "type": "enum", "mandatory": false }
   ],
   "rules": [
     {
@@ -128,19 +131,30 @@ A commented `config.jsonc` example file is provided in the repository. The confi
 - Validation: direct transition from `processed` to `validated`.
 - History: every document has a complete, timestamped trace (import, correction, validation) readable from its detail view.
 - Tools: maintenance tasks run by hand (see Tools below).
-- Tools: maintenance tasks run by hand (see Tools below).
 - Configuration editor: edit fields, rules and templates, test against pasted or stored page text, and save a validated configuration without restarting the container.
 
 ## Tools
 
 The `Outils` page of the dashboard runs maintenance tasks by hand: one card per tool with its description, a run button, a live progress bar while the task runs (cancellable), and a summary with per-outcome counts when it ends. One task at a time.
 
-The first tool, `Recherche des fichiers perdus`, reconciles the bucket with the database when files have been moved by hand (e.g. through Nextcloud). It scans only `.pdf` objects (case-insensitive extension) under `pending/` and `files/`, computes each object's sha256 and compares it against the database; objects in `inbox/`, other prefixes, and other file types are ignored:
+Each tool also has a `Simulation` button. A simulation performs every check of the tool but writes nothing: no move, no record update, no event. It reports what would happen through the same counts — and, for the re-filing, the list of the planned moves with a mention when a target key is already occupied and a conflict suffix would be applied.
+
+The first tool, `Recherche des fichiers perdus`, reconciles the bucket with the database when files have been moved by hand (e.g. through Nextcloud). It scans only `.pdf` objects (case-insensitive extension) under the pending and files prefixes — the whole bucket when `ARCHIVIST_S3_FILES_PREFIX=/` — computes each object's sha256 and compares it against the database; objects in the inbox prefix and other file types are ignored:
 
 - the object is at the key its record knows: nothing happens;
 - the object was moved outside the application: the record's `file_key` is corrected to the new key and a `relocated` event is appended to the document's history (the object itself never moves);
-- the object is unknown of the database: it is moved to `inbox/` to be processed automatically by the poller;
+- the object is unknown of the database: it is moved to the inbox prefix to be processed automatically by the poller;
 - a record whose file has disappeared from the bucket is only reported in the summary, never acted upon.
+
+In simulation mode the same outcomes are computed and counted, but nothing moves and nothing is updated.
+
+The second tool, `Re-filer tous les documents`, applies a change of `ARCHIVIST_S3_FILES_PREFIX` or of a naming template to the documents already filed. It re-computes the target key of every `processed` or `validated` document from its stored fields and the active templates (documents `pending` are never touched), then moves the objects that are no longer where their name says (conflict suffix on collision, `relocated` event and `file_key` update in the document's history):
+
+- the computed target equals the current key: nothing happens;
+- the document's stored template no longer exists or renders no key: the document is left in place and reported in the summary, never counted as an error;
+- a per-document failure is logged and reported, and the task continues with the next document.
+
+In simulation mode the tool does all of the above without writing anything, and lists the planned moves (old key → new key, with a collision mention when the target key exists already).
 
 ## Nextcloud integration
 
@@ -153,7 +167,7 @@ Mount the S3 bucket as Nextcloud external storage. Users drop files into `inbox/
 
 ## E2E tests
 
-A single-file end-to-end suite runs a built image against a disposable Garage container and follows documents through the whole pipeline (import, duplicate, pending, correction, validation, append-only, recovery, restart):
+A single-file end-to-end suite runs a built image against a disposable Garage container and follows documents through the whole pipeline (import, duplicate, pending, correction, validation, append-only, recovery, restart, maintenance tools with their simulation mode, custom S3 prefixes with files at the bucket root):
 
 ```
 cd archivist
@@ -169,5 +183,4 @@ Without `E2E_IMAGE` the suite skips. The suite drives the poller through the sup
 - A file stays in `inbox/`: check the logs — admin dashboard, Dashboard > Logs (`docker logs archivist` shows startup errors). Frequent causes: the file is not a PDF (left in place by design), unreadable PDF (goes to `pending/`), transient S3 error (retried on the next pass).
 - A file goes to `pending/`: open its detail view in the dashboard; the classification error(s) are displayed there.
 - The container does not start: invalid `config.jsonc`. The full error message is in the container logs; the application refuses to start with a partially valid configuration.
-- After editing `config.jsonc`: `docker restart archivist`.
 - After editing the mounted `config.jsonc` outside the dashboard: `docker restart archivist`. Dashboard edits take effect after a successful save and activate; invalid drafts do not replace the active configuration.

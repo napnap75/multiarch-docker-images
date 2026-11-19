@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 
@@ -22,6 +23,9 @@ type EnvConfig struct {
 	S3Bucket      string
 	S3Region      string
 	S3UseSSL      bool
+	InboxPrefix   string
+	PendingPrefix string
+	FilesPrefix   string
 	AdminEmail    string
 	AdminPassword string
 	PollCron      string
@@ -60,6 +64,18 @@ func LoadEnvConfig() (*EnvConfig, error) {
 	}
 	c.S3Region = env("ARCHIVIST_S3_REGION", "garage")
 	c.S3UseSSL = env("ARCHIVIST_S3_USE_SSL", "true") != "false"
+	c.InboxPrefix = storage.NormalizePrefix(env("ARCHIVIST_S3_INBOX_PREFIX", "inbox"))
+	c.PendingPrefix = storage.NormalizePrefix(env("ARCHIVIST_S3_PENDING_PREFIX", "pending"))
+	c.FilesPrefix = storage.NormalizePrefix(env("ARCHIVIST_S3_FILES_PREFIX", "files"))
+	if c.InboxPrefix == "" {
+		return nil, fmt.Errorf("ARCHIVIST_S3_INBOX_PREFIX must not be empty or \"/\"")
+	}
+	if c.PendingPrefix == "" {
+		return nil, fmt.Errorf("ARCHIVIST_S3_PENDING_PREFIX must not be empty or \"/\"")
+	}
+	if c.InboxPrefix == c.PendingPrefix || c.FilesPrefix == c.InboxPrefix || c.FilesPrefix == c.PendingPrefix {
+		return nil, fmt.Errorf("ARCHIVIST_S3_INBOX_PREFIX, ARCHIVIST_S3_PENDING_PREFIX and ARCHIVIST_S3_FILES_PREFIX must be distinct")
+	}
 	c.PollCron = env("ARCHIVIST_POLL_INTERVAL", "* * * * *")
 	c.HTTPAddr = env("ARCHIVIST_HTTP_ADDR", "0.0.0.0:8090")
 	c.ConfigPath = env("ARCHIVIST_CONFIG", "config.jsonc")
@@ -103,7 +119,8 @@ func main() {
 		len(cfg.Fields), len(cfg.Rules), len(cfg.Templates))
 
 	// US-01: verify S3 reachability and versioning before anything else.
-	s3, err := storage.New(envCfg.S3Endpoint, envCfg.S3AccessKey, envCfg.S3SecretKey, envCfg.S3Bucket, envCfg.S3Region, envCfg.S3UseSSL)
+	s3, err := storage.New(envCfg.S3Endpoint, envCfg.S3AccessKey, envCfg.S3SecretKey, envCfg.S3Bucket, envCfg.S3Region, envCfg.S3UseSSL,
+		storage.Prefixes{Inbox: envCfg.InboxPrefix, Pending: envCfg.PendingPrefix, Files: envCfg.FilesPrefix})
 	if err != nil {
 		log.Fatalf("S3 client: %v", err)
 	}
@@ -132,7 +149,7 @@ func main() {
 	// US-31 / US-35 / US-36: the review-dashboard routes (config, pdf, dry-run, correct).
 	pbapp.BindRoutes(app, configManager, envCfg.ConfigPath, s3)
 	// US-40 / US-41: the tools-page routes (list, run, progress, cancel).
-	tools.BindRoutes(app, s3)
+	tools.BindRoutes(app, s3, configManager)
 
 	// Manual poll pass: a superuser-only route used by the E2E gate and the
 	// operator to trigger a pass without waiting for the cron (arch.md 10).

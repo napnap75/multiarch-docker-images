@@ -320,7 +320,8 @@ function showErrors(errors) {
 function renderOutput(result) {
   var body = $("outputFields");
   body.innerHTML = "";
-  $("targetName").textContent = result && result.rendered ? "Clé cible : files/" + result.rendered : "";
+  // The draft dry-run route returns the full target key, files prefix included.
+  $("targetName").textContent = result && result.rendered ? "Clé cible : " + result.rendered : "";
   var proposed = result && result.fields || {};
   var fields = readDraft().fields;
   fields.forEach(function (field) {
