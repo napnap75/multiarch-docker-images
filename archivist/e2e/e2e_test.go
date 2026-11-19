@@ -4,9 +4,11 @@
 // under test, then follows documents through the whole pipeline - import,
 // duplicate, pending, correction, validation, append-only, deletion, recovery,
 // restart, dashboard routes (config metadata, enum value registration, PDF
-// proxy, dry-run, full correction). It is a regression gate for dependency
-// upgrades (PocketBase, minio-go, ledongthuc/pdf, expr, Garage), not an
-// acceptance proof.
+// proxy, dry-run, full correction), the maintenance tools (find-lost-files,
+// refile-all, and their dry-run mode), and the configurable S3 prefixes
+// (custom prefixes with files at the bucket root, invalid-prefix startup
+// refusal). It is a regression gate for dependency upgrades (PocketBase,
+// minio-go, ledongthuc/pdf, expr, Garage), not an acceptance proof.
 //
 // Run it from the archivist/ directory against an already built image:
 //
@@ -32,6 +34,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +60,7 @@ var (
 	s3KeyID  string
 	s3Secret string
 	dir      string
+	appImage string
 )
 
 func TestMain(m *testing.M) {
@@ -66,6 +70,7 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	code := 1
+	appImage = image
 	defer func() { os.Exit(code) }()
 	cleanupDockerResources()
 	if err := setup(image); err != nil {
@@ -265,7 +270,12 @@ func authenticate() error {
 }
 
 func checkHealth() error {
-	resp, err := http.Get(baseURL + "/api/health")
+	return waitForApp(baseURL)
+}
+
+// waitForApp polls /api/health of an app base URL until it answers.
+func waitForApp(u string) error {
+	resp, err := http.Get(u + "/api/health")
 	if err != nil {
 		return err
 	}
@@ -275,6 +285,73 @@ func checkHealth() error {
 		return fmt.Errorf("health: %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// startSideApp runs an extra app container against the same Garage with
+// extra environment (typically custom prefixes), on its own config and
+// pb_data volumes, and returns its base URL plus a cleanup function. The
+// main app container is left alone.
+func startSideApp(name string, extraEnv ...string) (string, func(), error) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", nil, fmt.Errorf("reserve side app host port: %w", err)
+	}
+	hostPort := fmt.Sprintf("%d", listener.Addr().(*net.TCPAddr).Port)
+	if err := listener.Close(); err != nil {
+		return "", nil, fmt.Errorf("release side app host port: %w", err)
+	}
+	base := "http://127.0.0.1:" + hostPort
+
+	configDir := filepath.Join(dir, name+"-config")
+	if err := os.MkdirAll(configDir, 0o777); err != nil {
+		return "", nil, err
+	}
+	if err := os.Chmod(configDir, 0o777); err != nil {
+		return "", nil, err
+	}
+	cfgPath := filepath.Join(configDir, "config.jsonc")
+	if err := os.WriteFile(cfgPath, []byte(testConfig), 0o644); err != nil {
+		return "", nil, err
+	}
+	dataPath := filepath.Join(dir, name+"-pb_data")
+	if err := os.MkdirAll(dataPath, 0o777); err != nil {
+		return "", nil, err
+	}
+	if err := os.Chmod(dataPath, 0o777); err != nil {
+		return "", nil, err
+	}
+	env := []string{
+		"ARCHIVIST_S3_ENDPOINT=" + garageC + ":3900",
+		"ARCHIVIST_S3_ACCESS_KEY=" + s3KeyID,
+		"ARCHIVIST_S3_SECRET_KEY=" + s3Secret,
+		"ARCHIVIST_S3_BUCKET=" + bucket,
+		"ARCHIVIST_S3_REGION=garage",
+		"ARCHIVIST_S3_USE_SSL=false",
+		"ARCHIVIST_ADMIN_EMAIL=" + adminMail,
+		"ARCHIVIST_ADMIN_PASSWORD=" + adminPass,
+		"ARCHIVIST_CONFIG=/config/config.jsonc",
+		// Never fires (February 31st): the timing stays deterministic.
+		"ARCHIVIST_POLL_INTERVAL=0 0 31 2 *",
+	}
+	env = append(env, extraEnv...)
+	args := []string{"run", "-d", "--name", name, "--network", network,
+		"-p", "127.0.0.1:" + hostPort + ":8090",
+		"-v", configDir + ":/config",
+		"-v", dataPath + ":/pb_data",
+		"-v", dataPath + ":/app/pb_data"}
+	for _, e := range env {
+		args = append(args, "-e", e)
+	}
+	args = append(args, appImage)
+	if out, err := run("docker", args...); err != nil {
+		return "", nil, fmt.Errorf("side app container: %w: %s", err, strings.TrimSpace(out))
+	}
+	cleanup := func() {
+		run("docker", "rm", "-f", name)
+		os.RemoveAll(configDir)
+		os.RemoveAll(dataPath)
+	}
+	return base, cleanup, nil
 }
 
 func teardown() {
@@ -595,6 +672,44 @@ func unauth(t *testing.T, method, path string, body any) (int, map[string]any) {
 		t.Fatalf("%s %s: %v", method, path, err)
 	}
 	return status, out
+}
+
+// addDirectRecord creates a documents record straight through the PocketBase
+// API (like the recovery scenario does), with the pipeline's mandatory fields.
+func addDirectRecord(t *testing.T, fileKey, sha, status string, fields map[string]any) map[string]any {
+	t.Helper()
+	body := map[string]any{"sha256": sha, "file_key": fileKey, "status": status}
+	for k, v := range fields {
+		body[k] = v
+	}
+	return oneCall(t, http.MethodPost, "/api/collections/documents/records", body, 200, "direct record creation")
+}
+
+// jobState polls a tools job until it leaves the running state and returns
+// its final state (US-40 polling contract).
+func jobState(t *testing.T, jobID string) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(90 * time.Second)
+	for {
+		out := oneCall(t, http.MethodGet, "/api/archivist/tools/jobs/"+url.PathEscape(jobID), nil, 200, "job state")
+		if s, _ := out["status"].(string); s != "running" && s != "" {
+			return out
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job %s still running after 90s: %v", jobID, out)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// oneCall performs one API call and requires the given status.
+func oneCall(t *testing.T, method, path string, body any, want int, what string) map[string]any {
+	t.Helper()
+	status, out := call(t, method, path, body)
+	if status != want {
+		t.Fatalf("%s: status %d, want %d: %v", what, status, want, out)
+	}
+	return out
 }
 
 func TestE2E(t *testing.T) {
@@ -1309,6 +1424,206 @@ func TestE2E(t *testing.T) {
 		}
 	})
 
+	// 17. Tools (US-40, US-41, US-43): descriptors and refusals, the
+	// find-lost scan with its dry-run, then the re-filing with its dry-run.
+	t.Run("tools: descriptors and refusals", func(t *testing.T) {
+		status, out := call(t, http.MethodGet, "/api/archivist/tools", nil)
+		if status != 200 {
+			t.Fatalf("tools route: status %d: %v", status, out)
+		}
+		tools, _ := out["tools"].([]any)
+		if len(tools) != 2 {
+			t.Fatalf("want 2 tool descriptors, got %d", len(tools))
+		}
+		ids := []string{}
+		for _, tl := range tools {
+			m, _ := tl.(map[string]any)
+			ids = append(ids, m["id"].(string))
+		}
+		sort.Strings(ids)
+		if ids[0] != "find-lost-files" || ids[1] != "refile-all" {
+			t.Fatalf("tool ids: %v", ids)
+		}
+		if status, _ = unauth(t, http.MethodGet, "/api/archivist/tools", nil); status != 403 {
+			t.Fatalf("tools without superuser auth: want 403, got %d", status)
+		}
+		if status, _ = unauth(t, http.MethodPost, "/api/archivist/tools/find-lost-files/run", nil); status != 403 {
+			t.Fatalf("run without superuser auth: want 403, got %d", status)
+		}
+		if status, _ = call(t, http.MethodPost, "/api/archivist/tools/nope/run", nil); status != 409 {
+			t.Fatalf("unknown tool must be refused with 409, got %d", status)
+		}
+		if status, _ = call(t, http.MethodGet, "/api/archivist/tools/jobs/unknown", nil); status != 404 {
+			t.Fatalf("unknown job must be refused with 404, got %d", status)
+		}
+		if status, _ = call(t, http.MethodPost, "/api/archivist/tools/jobs/unknown/cancel", nil); status != 404 {
+			t.Fatalf("unknown job cancel must be refused with 404, got %d", status)
+		}
+	})
+
+	t.Run("tools: find-lost scan and its dry-run", func(t *testing.T) {
+		hashInPlace := putPDF(t, "files/inplace.pdf", "releve inplace")
+		addDirectRecord(t, "files/inplace.pdf", hashInPlace, "processed",
+			map[string]any{"template": "bank_statement", "emittingCompany": "BRED",
+				"documentType": "Releve inplace", "emissionDate": "2026-06-01", "bankAccount": "Nadine"})
+		hashRel := putPDF(t, "files/new/moved.pdf", "releve relocation")
+		recRel := addDirectRecord(t, "files/gone/moved.pdf", hashRel, "validated",
+			map[string]any{"template": "bank_statement", "emittingCompany": "BRED",
+				"documentType": "Releve relocation", "emissionDate": "2026-06-02", "bankAccount": "Nadine"})
+		putPDF(t, "files/stranger.pdf", "objet sans record")
+		missingSHA := sha256.Sum256([]byte("archivist-e2e-missing-object"))
+		recMiss := addDirectRecord(t, "files/lost/moved.pdf", hex.EncodeToString(missingSHA[:]), "processed",
+			map[string]any{"template": "bank_statement", "emittingCompany": "BRED",
+				"documentType": "Releve lost", "emissionDate": "2026-06-03", "bankAccount": "Nadine"})
+
+		// Dry-run first: every outcome is computed and counted, nothing is
+		// written.
+		status, out := call(t, http.MethodPost, "/api/archivist/tools/find-lost-files/run",
+			map[string]any{"dry_run": true})
+		if status != 200 {
+			t.Fatalf("find-lost dry-run: status %d: %v", status, out)
+		}
+		job := jobState(t, out["id"].(string))
+		if job["dry_run"] != true {
+			t.Fatalf("dry-run flag lost in job state: %v", job)
+		}
+		summary, _ := job["summary"].(map[string]any)
+		if summary["corrected"].(float64) < 1 || summary["moved"].(float64) < 1 || summary["missing"].(float64) < 1 {
+			t.Fatalf("dry-run summary = %v, want corrected/moved/missing >= 1", summary)
+		}
+		if !s3Exists(t, "files/new/moved.pdf") || !s3Exists(t, "files/stranger.pdf") {
+			t.Fatal("dry-run moved an object")
+		}
+		if s3Exists(t, "inbox/stranger.pdf") {
+			t.Fatal("dry-run created the inbox move")
+		}
+		if got := oneRecord(t, "documents", "(id='"+recRel["id"].(string)+"')")["file_key"]; got != "files/gone/moved.pdf" {
+			t.Fatalf("dry-run corrected file_key: %v", got)
+		}
+		missing, _ := job["missing"].([]any)
+		if !containsAny(missing, "files/lost/moved.pdf") {
+			t.Fatalf("dry-run missing list = %v", missing)
+		}
+
+		// Real run.
+		status, out = call(t, http.MethodPost, "/api/archivist/tools/find-lost-files/run", nil)
+		if status != 200 {
+			t.Fatalf("find-lost run: status %d: %v", status, out)
+		}
+		job = jobState(t, out["id"].(string))
+		if job["dry_run"] != false {
+			t.Fatalf("real run flagged as dry-run: %v", job["dry_run"])
+		}
+		if !s3Exists(t, "files/new/moved.pdf") || s3Exists(t, "files/stranger.pdf") || !s3Exists(t, "inbox/stranger.pdf") {
+			t.Fatal("the real scan did not perform the planned actions")
+		}
+		if got := oneRecord(t, "documents", "(id='"+recRel["id"].(string)+"')")["file_key"]; got != "files/new/moved.pdf" {
+			t.Fatalf("file_key not corrected: %v", got)
+		}
+		ev := eventPayloadOfType(t, eventsOf(t, recRel["id"].(string)), "relocated")
+		if after, _ := ev["after"].(map[string]any); after["file_key"] != "files/new/moved.pdf" {
+			t.Fatalf("relocated payload = %v", ev)
+		}
+		missing, _ = job["missing"].([]any)
+		if !containsAny(missing, "files/lost/moved.pdf") {
+			t.Fatalf("missing list = %v", missing)
+		}
+
+		// The missing record becomes pending so the re-filing below never
+		// touches the object that does not exist.
+		status, out = call(t, http.MethodPatch, "/api/collections/documents/records/"+recMiss["id"].(string),
+			map[string]any{"status": "pending"})
+		if status != 200 {
+			t.Fatalf("pending patch: status %d: %v", status, out)
+		}
+	})
+
+	t.Run("tools: refile-all, collision mention and its dry-run", func(t *testing.T) {
+		hashOne := putPDF(t, "files/old/Refile.pdf", "releve refile un")
+		recOne := addDirectRecord(t, "files/old/Refile.pdf", hashOne, "processed",
+			map[string]any{"template": "bank_statement", "emittingCompany": "BRED",
+				"documentType": "Refile un", "emissionDate": "2026-07-01", "bankAccount": "Nadine"})
+		hashTwo := putPDF(t, "files/old/Refile2.pdf", "releve refile deux")
+		recTwo := addDirectRecord(t, "files/old/Refile2.pdf", hashTwo, "processed",
+			map[string]any{"template": "bank_statement", "emittingCompany": "BRED",
+				"documentType": "Refile deux", "emissionDate": "2026-07-02", "bankAccount": "Nadine"})
+		// The target of the second document is already occupied: the real
+		// run must apply a conflict suffix, the dry-run must say so.
+		putPDF(t, "files/BRED/2026-07_Refile deux_Nadine.pdf", "occupant")
+
+		// Dry-run first.
+		status, out := call(t, http.MethodPost, "/api/archivist/tools/refile-all/run",
+			map[string]any{"dry_run": true})
+		if status != 200 {
+			t.Fatalf("refile-all dry-run: status %d: %v", status, out)
+		}
+		job := jobState(t, out["id"].(string))
+		if job["dry_run"] != true {
+			t.Fatalf("dry-run flag lost in job state: %v", job)
+		}
+		planned, _ := job["planned"].([]any)
+		if !containsAny(planned, "files/old/Refile.pdf → files/BRED/2026-07_Refile un_Nadine.pdf") {
+			t.Fatalf("planned moves = %v", planned)
+		}
+		if !containsAny(planned, "files/old/Refile2.pdf → files/BRED/2026-07_Refile deux_Nadine (1).pdf (collision : suffixe de conflit appliqué)") {
+			t.Fatalf("collision not reported in planned moves: %v", planned)
+		}
+		// Nothing moved, nothing written.
+		if !s3Exists(t, "files/old/Refile.pdf") || !s3Exists(t, "files/old/Refile2.pdf") ||
+			!s3Exists(t, "files/BRED/2026-07_Refile deux_Nadine.pdf") {
+			t.Fatal("dry-run moved an object")
+		}
+		if s3Exists(t, "files/BRED/2026-07_Refile un_Nadine.pdf") ||
+			s3Exists(t, "files/BRED/2026-07_Refile deux_Nadine (1).pdf") {
+			t.Fatal("dry-run performed the planned moves")
+		}
+		if got := oneRecord(t, "documents", "(id='"+recOne["id"].(string)+"')")["file_key"]; got != "files/old/Refile.pdf" {
+			t.Fatalf("dry-run changed file_key: %v", got)
+		}
+		if evs := eventsOf(t, recOne["id"].(string)); len(evs) != 0 {
+			t.Fatalf("no event expected from a dry-run, got %d", len(evs))
+		}
+
+		// Real run.
+		status, out = call(t, http.MethodPost, "/api/archivist/tools/refile-all/run", nil)
+		if status != 200 {
+			t.Fatalf("refile-all run: status %d: %v", status, out)
+		}
+		job = jobState(t, out["id"].(string))
+		if job["dry_run"] != false {
+			t.Fatalf("real run flagged as dry-run: %v", job["dry_run"])
+		}
+		if !s3Exists(t, "files/BRED/2026-07_Refile un_Nadine.pdf") ||
+			!s3Exists(t, "files/BRED/2026-07_Refile deux_Nadine (1).pdf") {
+			t.Fatal("the real run did not perform the planned moves")
+		}
+		if s3Exists(t, "files/old/Refile.pdf") || s3Exists(t, "files/old/Refile2.pdf") {
+			t.Fatal("the old objects were not removed")
+		}
+		if s3Exists(t, "files/BRED/2026-07_Refile deux_Nadine.pdf") {
+			t.Fatal("the occupying object must not be overwritten by the move")
+		}
+		if got := oneRecord(t, "documents", "(id='"+recOne["id"].(string)+"')")["file_key"]; got != "files/BRED/2026-07_Refile un_Nadine.pdf" {
+			t.Fatalf("file_key not updated: %v", got)
+		}
+		if got := oneRecord(t, "documents", "(id='"+recTwo["id"].(string)+"')")["file_key"]; got != "files/BRED/2026-07_Refile deux_Nadine (1).pdf" {
+			t.Fatalf("file_key not updated with conflict suffix: %v", got)
+		}
+		afterOf := func(ev map[string]any) string {
+			after, _ := ev["after"].(map[string]any)
+			k, _ := after["file_key"].(string)
+			return k
+		}
+		evOne := eventPayloadOfType(t, eventsOf(t, recOne["id"].(string)), "relocated")
+		if afterOf(evOne) != "files/BRED/2026-07_Refile un_Nadine.pdf" {
+			t.Fatalf("relocated payload = %v", evOne)
+		}
+		evTwo := eventPayloadOfType(t, eventsOf(t, recTwo["id"].(string)), "relocated")
+		if afterOf(evTwo) != "files/BRED/2026-07_Refile deux_Nadine (1).pdf" {
+			t.Fatalf("relocated payload = %v", evTwo)
+		}
+	})
+	// 18. Configuration editor (US-50 to US-52).
 	t.Run("config editor: dry-run and activate validated drafts", func(t *testing.T) {
 		status, out := call(t, http.MethodGet, "/api/archivist/config/source", nil)
 		if status != 200 {
@@ -1380,6 +1695,67 @@ func TestE2E(t *testing.T) {
 		activeFields, _ := out["fields"].(map[string]any)
 		if activeFields["statementType"] != "checking" {
 			t.Fatalf("document route did not use active config: %v", activeFields)
+		}
+	})
+
+	// 19. Prefixes (US-01): a second container with custom prefixes and files
+	// at the bucket root files an import without the historical files prefix;
+	// a container with an invalid pending prefix refuses to start.
+	t.Run("prefixes: custom prefixes files at the bucket root", func(t *testing.T) {
+		side, cleanup, err := startSideApp("archivist-e2e-app-custom",
+			"ARCHIVIST_S3_INBOX_PREFIX=in/",
+			"ARCHIVIST_S3_PENDING_PREFIX=wait/",
+			"ARCHIVIST_S3_FILES_PREFIX=/")
+		if err != nil {
+			t.Fatalf("side app: %v", err)
+		}
+		defer cleanup()
+
+		savedURL, savedToken := baseURL, token
+		baseURL, token = side, ""
+		defer func() { baseURL, token = savedURL, savedToken }()
+		if err := authenticate(); err != nil {
+			t.Fatalf("side app authentication: %v", err)
+		}
+
+		hash := putPDF(t, "in/custom-root.pdf",
+			"BRED", "Releve de compte", "Date : 01/04/2026", "Compte Nadia")
+		poll(t) // size/ETag stability
+		poll(t) // the import itself
+		want := "BRED/2026-04_Releve de compte_Nadia.pdf"
+		doc := oneRecord(t, "documents", "(sha256='"+hash+"')")
+		if doc["file_key"] != want {
+			t.Fatalf("file_key = %v, want %v (files at the bucket root)", doc["file_key"], want)
+		}
+		if !s3Exists(t, want) || s3Exists(t, "in/custom-root.pdf") {
+			t.Fatal("the object was not filed at the bucket root")
+		}
+	})
+
+	t.Run("prefixes: an invalid pending prefix refuses to start", func(t *testing.T) {
+		name := "archivist-e2e-app-badprefix"
+		_, cleanup, err := startSideApp(name,
+			"ARCHIVIST_S3_PENDING_PREFIX=/")
+		if err != nil {
+			t.Fatalf("side app: %v", err)
+		}
+		defer cleanup()
+
+		deadline := time.Now().Add(30 * time.Second)
+		logs := ""
+		for {
+			status, _ := run("docker", "inspect", "-f", "{{.State.Status}}", name)
+			if strings.TrimSpace(status) == "exited" {
+				logs, _ = run("docker", "logs", name)
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the app neither exited nor became healthy with an invalid prefix")
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		if !strings.Contains(logs, "ARCHIVIST_S3_PENDING_PREFIX") {
+			t.Fatalf("no explicit prefix error in the startup logs:\n%s", logs)
 		}
 	})
 }

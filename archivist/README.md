@@ -167,7 +167,7 @@ Mount the S3 bucket as Nextcloud external storage. Users drop files into `inbox/
 
 ## E2E tests
 
-A single-file end-to-end suite runs a built image against a disposable Garage container and follows documents through the whole pipeline (import, duplicate, pending, correction, validation, append-only, recovery, restart):
+A single-file end-to-end suite runs a built image against a disposable Garage container and follows documents through the whole pipeline (import, duplicate, pending, correction, validation, append-only, recovery, restart, maintenance tools with their simulation mode, custom S3 prefixes with files at the bucket root):
 
 ```
 cd archivist
