@@ -52,7 +52,7 @@ func TestEditorSourcePreservesRuleSectionComments(t *testing.T) {
 }
 
 func TestEditorRoundTripsProjectConfig(t *testing.T) {
-	source, err := os.ReadFile("../../tests/config.jsonc")
+	source, err := os.ReadFile("../../config.jsonc")
 	if err != nil {
 		t.Fatalf("read project test config: %v", err)
 	}
