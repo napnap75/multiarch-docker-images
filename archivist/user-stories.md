@@ -298,6 +298,8 @@ Acceptance criteria:
 - Given the list, when I select rows (page or whole filtered set), then a bulk action proposes choosing a declared field and a new value in a control matching the field type, and shows the number of impacted documents.
 - Given the bulk action is confirmed, when it runs, then it issues one standard PATCH per document — the US-22 hook applies per record: a `corrected` event each, no re-filing, no status change.
 - Given one document of the selection fails, when the bulk action finishes, then the others are applied and the failure is reported with its error.
+- Given the bulk action, when the recompute mode is chosen instead of a manual value, then for each selected document the classification dry-run of US-35 (no body) re-runs the rule tree against the stored pages and the field takes the proposed value — only when that proposal differs from the document's current value; a document with no proposal for the field is left untouched, and a document whose proposal equals its current value counts as unchanged (no PATCH, no event).
+- Given the recompute mode updates a document, when it saves, then it goes through the same standard PATCH as a manual value (US-22 hook: `corrected` event alone), and an enum value missing from the field's list is registered first (US-37), like the import and correction paths.
 
 ### US-34 — Preview a document and correct each field
 
