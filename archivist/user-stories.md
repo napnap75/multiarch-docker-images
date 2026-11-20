@@ -426,6 +426,22 @@ Acceptance criteria:
 - Given a per-document failure (S3 error, lookup error), when it occurs, then it is logged, counted in the summary and listed, and the re-filing continues with the next document.
 - Given the tool runs in simulation mode, when it re-files, then every target is computed and checked (rendering, files prefix, collision resolution against the current bucket contents) but nothing is written: the object stays in place, `file_key` keeps its value and no `relocated` event is appended; the planned moves are listed old key → new key, with a collision mention when the target key is already occupied.
 
+### US-44 — Re-file a selection of documents from the list
+
+As the user,
+I want to re-file just the documents I selected in the list — the same re-filing as the refile-all tool, applied to the selection only,
+so that I can apply a configuration change to a handful of documents without running a full re-filing pass.
+
+Acceptance criteria:
+
+- Given the list, when a selection exists, then a fifth action, separated from the field-editing actions, triggers the re-file of the selected documents after a confirmation.
+- Given a selected document, when the action reaches it, then it runs through `POST /api/archivist/documents/{id}/refile`, one request per document: the per-document re-file of US-43, driven by the same shared logic as the refile-all tool (no parallel business logic) — the stored template (the `default` one when absent) rendered from the stored fields under the active compiled configuration, the object moved when the target differs (conflict suffix on collision, copy first, existence verified, source removed), the record's `file_key` updated and a `relocated` event appended in one transaction, with a best-effort S3 rollback when the save fails.
+- Given a document already where its name says, when the action reaches it, then nothing moves or is written (`unchanged`), and the summary counts it.
+- Given a document whose stored template does not exist in the active configuration, or whose render fails or renders an empty key, when the action reaches it, then the document is left in place and reported as skipped with the reason; a skip is not an error.
+- Given a `pending` document in the selection, when the action reaches it, then the route refuses it: review-queue documents are never moved (US-43).
+- Given the action runs, when it finishes, then the summary shows the moved, unchanged, skipped and failed counts, one failure does not stop the rest, and the selection is cleared.
+- Given an unauthenticated client, when it calls the route, then it is refused.
+
 ## Epic: Configuration Editor
 
 ### US-50 — Edit the active functional configuration
