@@ -255,6 +255,7 @@ The review dashboard is a static frontend — plain HTML/CSS/JS files, no build 
 - Quick tabs with the per-status counts pre-filter the review queue (`pending` first).
 - Full-text search: a field above the table searches case-insensitively across every page in `pages`; after 1.5 seconds without typing, it adds a server-side PocketBase contains filter on `pages`. It combines with status tabs and per-column filters, returns matching documents without excerpts, and uses no dedicated route or FTS index.
 - Bulk edit (US-33): row selection — page or whole filtered set — then one declared field and its new value in a control matching the type; applied as one standard PATCH per document, so the US-22 hook runs per record: a `corrected` event each, no re-filing, no status change; per-document success and failure are reported, one failure does not stop the rest.
+- Bulk recompute (US-33): instead of a manual value, the recompute mode takes the field's proposal from the classification dry-run of US-35 (no body, re-run against the stored pages) per selected document, and PATCHes only the documents whose current value differs from it; missing proposals and equal values leave the document untouched, an enum proposal is registered in the field's list first (US-37), and no route beyond the existing dry-run and PATCH is needed.
 
 ### 7.2 Document detail (US-34 to US-36)
 

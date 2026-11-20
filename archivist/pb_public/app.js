@@ -370,6 +370,7 @@ function bindBulk() {
   sel.innerHTML = "";
   state.config.fields.forEach(function (f) { addOption(sel, f.name, f.french); });
   sel.addEventListener("change", rebuildBulkValue);
+  $("bulkrecalc").addEventListener("click", applyRecalc);
   $("bulkapply").addEventListener("click", applyBulk);
   $("bulkclear").addEventListener("click", function () {
     state.selected = {};
@@ -441,6 +442,86 @@ async function applyBulk() {
   state.selected = {};
   await loadCounts();
   await loadDocs();
+}
+
+// normalizedValue renders a value the same way whatever its origin (the
+// dry-run proposal or the stored record) so the comparison of the bulk
+// recompute never depends on the JSON typing of either side.
+function normalizedValue(f, v) {
+  if (v === null || v === undefined) {
+    return f.type === "boolean" ? false : "";
+  }
+  switch (f.type) {
+  case "boolean": return v === true;
+  case "number": return v === "" ? "" : Number(v);
+  case "date": return pbDateInput(v);
+  default: return String(v);
+  }
+}
+
+// applyRecalc recomputes the chosen field of the selection from the rule
+// engine: the classification dry-run of US-35 (no body) re-evaluates the
+// rules against the stored pages, and only the documents whose current
+// value differs from the proposal are updated through a standard PATCH
+// (US-33): a corrected event each, no re-filing, no status change.
+async function applyRecalc() {
+  var f = bulkField();
+  if (!f) { alert("Choisissez un champ."); return; }
+  var ids = Object.keys(state.selected);
+  if (!ids.length) { alert("Aucun document sélectionné."); return; }
+  if (!confirm("Recalculer « " + fieldLabel(f) + " » pour " + ids.length +
+    " document(s) à partir des règles ?\n" +
+    "Seuls les documents dont la valeur diffère de celle proposée par les règles seront modifiés.")) return;
+  $("bulkresult").textContent = "…";
+  var ok = 0;
+  var skipped = 0;
+  var failed = [];
+  for (var i = 0; i < ids.length; i++) {
+    var res = await recalcOne(f, ids[i]);
+    if (res === "ok") ok++;
+    else if (res === "skipped") skipped++;
+    else failed.push(ids[i] + " : " + res);
+  }
+  $("bulkresult").textContent = ok + " document(s) recalculé(s), " + skipped + " inchangé(s)" +
+    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : "");
+  state.selected = {};
+  await loadCounts();
+  await loadDocs();
+}
+
+// recalcOne recomputes one document: the dry-run proposal of the field
+// (nothing proposed, nothing touched), registered in the enum list when
+// needed (US-37), compared to the current value, then the standard PATCH
+// when they differ. Returns "ok", "skipped", or the error message.
+async function recalcOne(f, id) {
+  var rec = await api("GET", "/api/collections/documents/records/" + id + "?fields=id," + f.name);
+  if (rec.status !== 200) return errMsg(rec);
+  var dry = await api("POST", "/api/archivist/documents/" + id + "/dry-run");
+  if (dry.status !== 200) return errMsg(dry);
+  var proposal = (dry.data.fields || {})[f.name];
+  if (proposal === null || proposal === undefined) return "skipped";
+  if (normalizedValue(f, proposal) === normalizedValue(f, rec.data[f.name])) return "skipped";
+  var value;
+  switch (f.type) {
+  case "boolean": value = proposal === true; break;
+  case "number": value = Number(proposal); break;
+  case "date": value = pbDateInput(proposal); break;
+  default: value = String(proposal);
+  }
+  if (f.type === "enum") {
+    var vocab = state.config.enums || (state.config.enums = {});
+    var list = vocab[f.name] = vocab[f.name] || [];
+    if (!list.includes(value)) {
+      var reg = await api("POST", "/api/archivist/fields/" + encodeURIComponent(f.name) + "/values", { value: value });
+      if (reg.status !== 200) return errMsg(reg);
+      list.push(value);
+    }
+  }
+  var body = {};
+  body[f.name] = value;
+  var res = await api("PATCH", "/api/collections/documents/records/" + id, body);
+  if (res.status !== 200) return errMsg(res);
+  return "ok";
 }
 
 function renderBulkbar() {
