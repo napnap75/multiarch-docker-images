@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Archivist</title>
 <link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/fontawesome/css/all.min.css">
 <script>(function(){try{var t=localStorage.getItem("archivist.theme");var d=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.className=d?"dark":"light";}catch(e){document.documentElement.className="light";}})();</script>
 </head>
 <body class="archivist-dashboard index-page">
@@ -37,10 +38,10 @@
     <span id="bulkcount"></span>
     <label>Champ <select id="bulkfield"></select></label>
     <span id="bulkvalue"></span>
-    <button id="bulkrecalc" type="button" class="btn secondary" title="Recalcule le champ choisi avec les règles actuelles (dry-run de classification) et ne modifie que les documents dont la valeur diffère de la valeur proposée">Recalculer (règles)</button>
-    <button id="bulkapply" type="button" class="btn primary">Appliquer</button>
-    <button id="bulkall" type="button" class="btn secondary">Sélection filtrée entière</button>
-    <button id="bulkclear" type="button" class="btn secondary">Effacer la sélection</button>
+    <button id="bulkapply" type="button" class="btn iconbtn primary" title="Appliquer la valeur saisie au champ choisi pour la sélection" aria-label="Appliquer"><i class="fa-solid fa-check" aria-hidden="true"></i><span class="sr-only">Appliquer</span></button>
+    <button id="bulkrecalc" type="button" class="btn iconbtn secondary" title="Recalcule le champ choisi avec les règles actuelles (dry-run de classification) et ne modifie que les documents dont la valeur diffère de la valeur proposée" aria-label="Recalculer (règles)"><i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i><span class="sr-only">Recalculer (règles)</span></button>
+    <button id="bulkall" type="button" class="btn iconbtn secondary" title="Sélectionner tous les documents du filtre actuel" aria-label="Sélectionner tous les documents du filtre actuel"><i class="fa-solid fa-check-double" aria-hidden="true"></i><span class="sr-only">Sélectionner tout</span></button>
+    <button id="bulkclear" type="button" class="btn iconbtn secondary" title="Effacer la sélection" aria-label="Effacer la sélection"><i class="fa-solid fa-eraser" aria-hidden="true"></i><span class="sr-only">Effacer la sélection</span></button>
     <span id="bulkresult"></span>
   </div>
   <div class="fulltext-search">
