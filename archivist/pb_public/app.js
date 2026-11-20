@@ -378,6 +378,7 @@ function bindBulk() {
     renderBulkbar();
   });
   $("bulkall").addEventListener("click", selectAllFiltered);
+  $("bulkrefile").addEventListener("click", applyRefile);
   rebuildBulkValue();
 }
 
@@ -483,6 +484,38 @@ async function applyRecalc() {
     else failed.push(ids[i] + " : " + res);
   }
   $("bulkresult").textContent = ok + " document(s) recalculé(s), " + skipped + " inchangé(s)" +
+    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : "");
+  state.selected = {};
+  await loadCounts();
+  await loadDocs();
+}
+
+// applyRefile re-files the selection through the refile route (US-44):
+// the per-document re-file of US-43, one request per document; a document
+// already where its name says is unchanged, one the active configuration
+// cannot re-file is skipped, a pending document is refused, and one
+// failure never stops the rest.
+async function applyRefile() {
+  var ids = Object.keys(state.selected);
+  if (!ids.length) { alert("Aucun document sélectionné."); return; }
+  if (!confirm("Re-filer " + ids.length + " document(s) d'après la configuration active ?\n" +
+    "Un document déjà bien classé ne bouge pas ; les documents pending sont refusés.")) return;
+  $("bulkresult").textContent = "…";
+  var moved = 0;
+  var unchanged = 0;
+  var skipped = [];
+  var failed = [];
+  for (var i = 0; i < ids.length; i++) {
+    var res = await api("POST", "/api/archivist/documents/" + ids[i] + "/refile");
+    if (res.status !== 200) { failed.push(ids[i] + " : " + errMsg(res)); continue; }
+    switch (res.data.outcome) {
+    case "moved": moved++; break;
+    case "unchanged": unchanged++; break;
+    default: skipped.push(res.data.reason || ids[i]);
+    }
+  }
+  $("bulkresult").textContent = moved + " déplacé(s), " + unchanged + " inchangé(s)" +
+    (skipped.length ? ", " + skipped.length + " ignoré(s) — " + skipped[0] : "") +
     (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : "");
   state.selected = {};
   await loadCounts();

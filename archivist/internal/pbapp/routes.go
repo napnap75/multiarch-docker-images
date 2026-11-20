@@ -66,6 +66,11 @@ func BindRoutes(app core.App, manager *config.Manager, configPath string, s3 *st
 				return handleDryRun(re, snapshot.Config, s3.Prefixes().Files)
 			})
 		})
+		e.Router.POST("/api/archivist/documents/{id}/refile", func(re *core.RequestEvent) error {
+			return manager.Read(func(snapshot *config.Snapshot) error {
+				return handleRefile(re, snapshot.Config, s3)
+			})
+		})
 		e.Router.POST("/api/archivist/documents/{id}/correct", func(re *core.RequestEvent) error {
 			return manager.Read(func(snapshot *config.Snapshot) error {
 				return handleCorrect(re, snapshot.Config, s3)
@@ -256,6 +261,34 @@ func handleDryRun(re *core.RequestEvent, cfg *config.Config, filesPrefix string)
 		Rendered: withFilesPrefix(filesPrefix, rendered),
 		Errors:   nonNil(append(convErrs, evalErrs...)),
 	})
+}
+
+// handleRefile re-files one document chosen from the list page (US-44):
+// the per-document re-file of US-43 through RefileOne. Pending documents
+// are refused: they stay in the review queue (US-43).
+func handleRefile(re *core.RequestEvent, cfg *config.Config, s3 *storage.Client) error {
+	if !re.HasSuperuserAuth() {
+		return re.ForbiddenError("superusers only", nil)
+	}
+	record, err := re.App.FindRecordById("documents", re.Request.PathValue("id"))
+	if err != nil {
+		return re.JSON(404, map[string]any{"message": "document not found"})
+	}
+	if record.GetString("status") == "pending" {
+		return re.JSON(400, map[string]any{"message": "refused: a pending document stays in the review queue"})
+	}
+	result, err := RefileOne(re.Request.Context(), re.App, s3, cfg, record, false)
+	if err != nil {
+		return re.JSON(500, map[string]any{"message": "refile failed", "error": err.Error()})
+	}
+	res := map[string]any{"id": record.Id, "outcome": result.Outcome, "file_key": record.GetString("file_key")}
+	if result.Outcome == "moved" {
+		res["target"] = result.FinalKey
+	}
+	if result.Outcome == "skipped" {
+		res["reason"] = result.Reason
+	}
+	return re.JSON(200, res)
 }
 
 // handleCorrect is the full correction of US-36: conversion, render,

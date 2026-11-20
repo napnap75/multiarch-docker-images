@@ -568,67 +568,40 @@ func refileAll(ctx context.Context, app core.App, s3 S3Store, cfg *config.Config
 // longer exists, or a failing or empty render, leaves the object in place
 // and is reported (skipped); a skip is not an error. In dry-run mode the
 // move is only planned: the target is computed and the collision resolved
-// (read-only), the object, the record and the history stay untouched.
+// (read-only), the object, the record and the history stay untouched. The
+// per-document logic is the shared RefileOne of the list-page re-file
+// (US-44); this wrapper only feeds the job's summary and lists.
 func refileRecord(ctx context.Context, app core.App, s3 S3Store, cfg *config.Config, job *Job, record *core.Record, dryRun bool) error {
 	oldKey := record.GetString("file_key")
 	job.set(func() { job.Summary["scanned"]++ })
-
-	tplName := record.GetString("template")
-	if tplName == "" {
-		tplName = "default"
-	}
-	tpl, ok := cfg.Templates[tplName]
-	if !ok {
-		return jobSkip(job, oldKey, "template "+tplName+" introuvable dans la configuration active")
-	}
-	rendered, err := tpl.Render(pbapp.FieldsFromRecord(cfg, record), nil)
+	result, err := pbapp.RefileOne(ctx, app, s3, cfg, record, dryRun)
 	if err != nil {
-		return jobSkip(job, oldKey, "rendu échoué: "+err.Error())
-	}
-	if rendered == "" {
-		return jobSkip(job, oldKey, "rendu vide")
-	}
-	target := s3.Prefixes().Files + rendered
-	if target == oldKey {
-		job.set(func() { job.Summary["unchanged"]++ })
-		return nil
-	}
-	finalKey, err := s3.ResolveConflict(ctx, target)
-	if err != nil {
-		return fmt.Errorf("conflict resolution: %w", err)
-	}
-	if dryRun {
-		planned := oldKey + " → " + finalKey
-		if finalKey != target {
-			planned += " (collision : suffixe de conflit appliqué)"
-		}
-		job.set(func() {
-			if job.Planned == nil {
-				job.Planned = []string{}
-			}
-			job.Planned = append(job.Planned, planned)
-			job.Summary["moved"]++
-		})
-		app.Logger().Info("refile-all dry-run: document would be re-filed", "record", record.Id, "from", oldKey, "to", finalKey)
-		return nil
-	}
-	if err := moveObject(ctx, s3, oldKey, finalKey); err != nil {
 		return err
 	}
-	txErr := app.RunInTransaction(func(tx core.App) error {
-		record.Set("file_key", finalKey)
-		if err := tx.Save(record); err != nil {
-			return err
+	switch result.Outcome {
+	case "unchanged":
+		job.set(func() { job.Summary["unchanged"]++ })
+	case "skipped":
+		jobSkip(job, oldKey, result.Reason)
+	case "moved":
+		if dryRun {
+			planned := oldKey + " \u2192 " + result.FinalKey
+			if result.Collision {
+				planned += " (collision : suffixe de conflit appliqu\u00e9)"
+			}
+			job.set(func() {
+				if job.Planned == nil {
+					job.Planned = []string{}
+				}
+				job.Planned = append(job.Planned, planned)
+				job.Summary["moved"]++
+			})
+			app.Logger().Info("refile-all dry-run: document would be re-filed", "record", record.Id, "from", oldKey, "to", result.FinalKey)
+			return nil
 		}
-		return pbapp.AppendEvent(tx, record.Id, "relocated", pbapp.Snapshot{"file_key": oldKey}, pbapp.Snapshot{"file_key": finalKey}, nil)
-	})
-	if txErr != nil {
-		_ = s3.Copy(ctx, finalKey, oldKey) // best-effort rollback of the move
-		_ = s3.Remove(ctx, finalKey)
-		return fmt.Errorf("relocation save: %w", txErr)
+		app.Logger().Info("refile-all: document re-filed", "record", record.Id, "from", oldKey, "to", result.FinalKey)
+		job.set(func() { job.Summary["moved"]++ })
 	}
-	app.Logger().Info("refile-all: document re-filed", "record", record.Id, "from", oldKey, "to", finalKey)
-	job.set(func() { job.Summary["moved"]++ })
 	return nil
 }
 

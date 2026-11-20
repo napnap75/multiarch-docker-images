@@ -1638,6 +1638,60 @@ func TestE2E(t *testing.T) {
 			t.Fatalf("relocated payload = %v", evTwo)
 		}
 	})
+	// 17b. List-page re-file (US-44): the per-document re-file of the
+	// refile-all tool, for one document of the dashboard selection.
+	t.Run("list refile: one document, unchanged second call, pending refused", func(t *testing.T) {
+		hash := putPDF(t, "files/old/Single.pdf", "releve refile single")
+		rec := addDirectRecord(t, "files/old/Single.pdf", hash, "processed",
+			map[string]any{"template": "bank_statement", "emittingCompany": "BRED",
+				"documentType": "Single", "emissionDate": "2026-07-03", "bankAccount": "Nadine"})
+		pendingHash := putPDF(t, "files/old/PendingRefile.pdf", "releve refile pending")
+		pendingRec := addDirectRecord(t, "files/old/PendingRefile.pdf", pendingHash, "pending",
+			map[string]any{"emittingCompany": "BRED"})
+
+		// Unauthenticated calls are refused, like every application route.
+		status, out := unauth(t, http.MethodPost, "/api/archivist/documents/"+rec["id"].(string)+"/refile", nil)
+		if status != 403 {
+			t.Fatalf("unauthenticated refile: status %d: %v", status, out)
+		}
+		// A pending document stays in the review queue (US-43).
+		status, out = call(t, http.MethodPost, "/api/archivist/documents/"+pendingRec["id"].(string)+"/refile", nil)
+		if status != 400 {
+			t.Fatalf("pending refile: status %d: %v", status, out)
+		}
+		if !s3Exists(t, "files/old/PendingRefile.pdf") {
+			t.Fatal("the pending object must stay in place")
+		}
+		if got := oneRecord(t, "documents", "(id='"+pendingRec["id"].(string)+"')")["file_key"]; got != "files/old/PendingRefile.pdf" {
+			t.Fatalf("pending file_key changed: %v", got)
+		}
+
+		// The processed document moves under the active template.
+		status, out = call(t, http.MethodPost, "/api/archivist/documents/"+rec["id"].(string)+"/refile", nil)
+		if status != 200 {
+			t.Fatalf("refile route: status %d: %v", status, out)
+		}
+		if out["outcome"] != "moved" || out["target"] != "files/BRED/2026-07_Single_Nadine.pdf" {
+			t.Fatalf("refile response = %v", out)
+		}
+		if !s3Exists(t, "files/BRED/2026-07_Single_Nadine.pdf") || s3Exists(t, "files/old/Single.pdf") {
+			t.Fatal("the object was not moved")
+		}
+		if got := oneRecord(t, "documents", "(id='"+rec["id"].(string)+"')")["file_key"]; got != "files/BRED/2026-07_Single_Nadine.pdf" {
+			t.Fatalf("file_key not updated: %v", got)
+		}
+		ev := eventPayloadOfType(t, eventsOf(t, rec["id"].(string)), "relocated")
+		after, _ := ev["after"].(map[string]any)
+		if k, _ := after["file_key"].(string); k != "files/BRED/2026-07_Single_Nadine.pdf" {
+			t.Fatalf("relocated payload = %v", ev)
+		}
+
+		// A document already where its name says is unchanged.
+		status, out = call(t, http.MethodPost, "/api/archivist/documents/"+rec["id"].(string)+"/refile", nil)
+		if status != 200 || out["outcome"] != "unchanged" {
+			t.Fatalf("second refile should be unchanged: status %d: %v", status, out)
+		}
+	})
 	// 18. Configuration editor (US-50 to US-52).
 	t.Run("config editor: dry-run and activate validated drafts", func(t *testing.T) {
 		status, out := call(t, http.MethodGet, "/api/archivist/config/source", nil)
