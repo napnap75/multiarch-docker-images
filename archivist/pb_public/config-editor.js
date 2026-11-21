@@ -375,6 +375,12 @@ function sameValue(left, right) {
   if (typeof left === "object" || typeof right === "object") {
     return JSON.stringify(left) === JSON.stringify(right);
   }
+  // A stored date and its dry-run proposal can spell the same instant
+  // differently (PocketBase record vs RFC 3339): compare at the display
+  // precision so an equal date never shows the proposal highlight.
+  if (isDateString(left) && isDateString(right)) {
+    return fmtDate(left) === fmtDate(right);
+  }
   return String(left) === String(right);
 }
 

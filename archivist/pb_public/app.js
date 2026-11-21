@@ -399,7 +399,7 @@ function rebuildBulkValue() {
   if (!f) return;
   if (f.name === "status") {
     var sel = document.createElement("select");
-    addOption(sel, "", "\u2014");
+    addOption(sel, "", "—");
     addOption(sel, "validated", "validated");
     addOption(sel, "processed", "processed");
     holder.appendChild(sel);
