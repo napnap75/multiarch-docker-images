@@ -245,7 +245,7 @@ Acceptance criteria:
 - Given the bucket is versioned, when the object is deleted, then a delete marker keeps it recoverable; without versioning the deletion is final (same caveat as US-01).
 - Given a superuser issues the DELETE, when the hook runs, then the hook applies: like the append-only protection of US-04, it cannot rely on API rules alone.
 
-## Epic: Review Dashboard (US-30 to US-42)
+## Epic: Review Dashboard (US-30 to US-42, US-45)
 
 The static frontend served from `pb_public/` (arch.md section 7): document list, document detail, tools and configuration-editor pages, driven by the configuration metadata route. No build toolchain, vendored dependencies only (100% offline). Document persistence goes through the standard PocketBase API and its hooks; application routes handle operations the standard API cannot express (config metadata, PDF proxy, dry-run, full correction, enum value registration). The configuration editor is specified separately in US-50 to US-52.
 
@@ -372,6 +372,21 @@ Acceptance criteria:
 - Given the trace, when the panel is unfolded, then each entry shows the rule's `when` expression (rules carry no name), the field, the producing `eval` expression and the final value; deletions are marked as unset, failing rules show their error message.
 - Given the evaluation, when it runs, then nothing is persisted: the trace reflects what the rules would do today against the stored pages, not what happened at import.
 
+### US-45 — Delete a selection of documents from the list
+
+As the user,
+I want to delete the documents I selected in the list — the same deletion as US-24, applied to the whole selection at once,
+so that I can remove obsolete or wrongly imported documents without opening them one by one.
+
+Acceptance criteria:
+
+- Given the list, when a selection exists, then a delete icon, separated from the re-file action by a vertical bar, triggers the deletion of the selected documents after a confirmation.
+- Given the confirmation, when it opens, then it displays the number of documents about to be deleted and warns that the action is irreversible; without a confirmation nothing is deleted.
+- Given a selected document, when the action reaches it, then it runs through the standard `DELETE /api/collections/documents/records/{id}`: the US-24 hook applies — the S3 object at `file_key` is deleted before the record, the cascade delete of `document_events` removes the history with the record, and a refused deletion (S3 failure) leaves both the record and the object in place without stopping the rest.
+- Given the action runs, when it finishes, then the summary shows the deleted and failed counts, one failure does not stop the rest, and the selection is cleared.
+- Given no selection, when the delete action is used, then nothing is deleted and the user is told no document is selected.
+- Given an unauthenticated client, when it calls the delete route, then it is refused (same protection as US-24: the hook binds to superusers as well).
+
 ## Epic: Tools (dashboard)
 
 The tools page (arch.md section 7.5): maintenance tasks started by hand from a dedicated page — one card per tool with its description, a run button, live progress while the job runs, and a final summary. One job at a time, cancellable. The first tool reconciles the bucket with the database when files have been moved by hand (e.g. through Nextcloud); the second re-files every document after a change of the files prefix or of a naming template.
@@ -455,6 +470,7 @@ Acceptance criteria:
 - Given an authenticated superuser opens the configuration editor, when the page loads, then it fetches the complete active JSONC source from `GET /api/archivist/config/source`; unauthenticated requests are refused.
 - Given the source is displayed, when I edit it, then `fields` appears as a table of name, French title, type and mandatory controls; rows can be added or removed.
 - Given the rules are displayed, when I expand a section, then its JSONC rule text is editable; section headings and boundaries are determined by comments beginning `// --- `, and the original separator comments and group order are preserved when the draft is serialized.
+- Given a section heading, when I click its pencil icon, then a dialog offers the current section name for editing; on a non-empty confirmation the section's `// --- ` comment is rewritten and the draft is re-tested, and an empty name is refused.
 - Given the templates are displayed, when I edit them, then a table exposes each template name and template text; rows can be added or removed.
 - Given the page is opened from the document list, then the test input is empty and document navigation is hidden.
 - Given the page is opened from a document detail page, then the test input is initialized with that record's `pages` JSON array and previous/next navigation follows the same document order as the list.

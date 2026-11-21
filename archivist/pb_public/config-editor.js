@@ -114,7 +114,30 @@ function renderGroups() {
     details.className = "rule-group";
     details.open = index === 0;
     var summary = document.createElement("summary");
-    summary.textContent = groupTitle(group.header, index);
+    var title = document.createElement("span");
+    title.textContent = groupTitle(group.header, index);
+    summary.appendChild(title);
+
+    var rename = document.createElement("button");
+    rename.type = "button";
+    rename.className = "icon-control group-rename";
+    rename.setAttribute("aria-label", "Renommer la section " + groupTitle(group.header, index));
+    rename.title = "Renommer la section";
+    rename.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" aria-hidden="true"><path d="M362.7 19.3L314.3 67.7 444.3 197.7l48.4-48.4c25-25 25-65.5 0-90.5L453.3 19.3c-25-25-65.5-25-90.5 0zm-71 71L58.6 323.5c-10.4 10.4-18 23.3-22.2 37.4L1 437.3c-2.9 9.6-.3 20 6.9 27.2s17.5 9.8 27.2 6.9l76.3-25.3c14.1-4.2 27-11.8 37.4-22.2L384 190.7 291.7 98.3z"/></svg>';
+    // The rename rewrites the section's separator comment, the pair a
+    // click on the icon must not toggle the collapsible (US-50).
+    rename.addEventListener("click", function (event) {
+      event.preventDefault();
+      var name = prompt("Nom de la section :", groupTitle(group.header, index));
+      if (name === null) return;
+      name = name.trim();
+      if (!name) { alert("Le nom d'une section ne peut pas être vide."); return; }
+      syncDraftState();
+      state.groups[index].header = "// --- " + name;
+      renderGroups();
+      scheduleDryRun();
+    });
+    summary.appendChild(rename);
     details.appendChild(summary);
 
     var textarea = document.createElement("textarea");

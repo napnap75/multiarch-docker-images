@@ -379,6 +379,7 @@ function bindBulk() {
   });
   $("bulkall").addEventListener("click", selectAllFiltered);
   $("bulkrefile").addEventListener("click", applyRefile);
+  $("bulkdelete").addEventListener("click", applyDelete);
   rebuildBulkValue();
 }
 
@@ -516,6 +517,32 @@ async function applyRefile() {
   }
   $("bulkresult").textContent = moved + " déplacé(s), " + unchanged + " inchangé(s)" +
     (skipped.length ? ", " + skipped.length + " ignoré(s) — " + skipped[0] : "") +
+    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : "");
+  state.selected = {};
+  await loadCounts();
+  await loadDocs();
+}
+
+// applyDelete deletes the selection through the standard delete route
+// (US-45, US-24): one request per document, and a confirmation dialog
+// showing the number of documents first. The US-24 hook deletes the S3
+// object before the record and refuses the whole deletion when that
+// fails; the cascade delete of document_events removes the history with
+// the record.
+async function applyDelete() {
+  var ids = Object.keys(state.selected);
+  if (!ids.length) { alert("Aucun document sélectionné."); return; }
+  if (!confirm("Supprimer définitivement " + ids.length + " document(s) ?\n" +
+    "Chaque document, son historique et le fichier correspondant du bucket S3 seront supprimés. Cette action est irréversible.")) return;
+  $("bulkresult").textContent = "…";
+  var ok = 0;
+  var failed = [];
+  for (var i = 0; i < ids.length; i++) {
+    var res = await api("DELETE", "/api/collections/documents/records/" + ids[i]);
+    if (res.status === 200 || res.status === 204) ok++;
+    else failed.push(ids[i] + " : " + errMsg(res));
+  }
+  $("bulkresult").textContent = ok + " document(s) supprimé(s)" +
     (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : "");
   state.selected = {};
   await loadCounts();
