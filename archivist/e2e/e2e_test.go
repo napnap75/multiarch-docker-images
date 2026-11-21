@@ -942,6 +942,30 @@ func TestE2E(t *testing.T) {
 		if _, has := before["file_key"]; has {
 			t.Fatal("validated snapshots carry the status alone")
 		}
+
+		// Back to processed (US-23): the reverse transition appends the
+		// reprocessed event, still without touching file_key; pending is
+		// refused on its own.
+		status, out = call(t, http.MethodPatch, "/api/collections/documents/records/"+id,
+			map[string]any{"status": "processed"})
+		if status != 200 {
+			t.Fatalf("reopening refused: %d %v", status, out)
+		}
+		doc = oneRecord(t, "documents", "(id='"+id+"')")
+		if doc["file_key"] != oldKey {
+			t.Fatalf("file_key must not change on reopening: %v -> %v", oldKey, doc["file_key"])
+		}
+		p = eventPayloadOfType(t, eventsOf(t, id), "reprocessed")
+		before, _ = p["before"].(map[string]any)
+		after, _ = p["after"].(map[string]any)
+		if before["status"] != "validated" || after["status"] != "processed" {
+			t.Fatalf("reprocessed snapshots: %v -> %v", before, after)
+		}
+		status, _ = call(t, http.MethodPatch, "/api/collections/documents/records/"+id,
+			map[string]any{"status": "pending"})
+		if status == 200 {
+			t.Fatal("a status change to pending must be refused")
+		}
 	})
 
 	// 7. Append-only (US-04): PATCH and DELETE on document_events are

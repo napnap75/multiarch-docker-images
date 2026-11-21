@@ -216,19 +216,20 @@ Acceptance criteria:
 - Given a document, when I edit one or more declared fields in the collections UI and save, then the `OnRecordUpdateRequest` hook on `documents` persists the new values as they are: no template evaluation, no re-filing, no `file_key` change, no status change.
 - Given a field edit is saved, when the record is persisted, then a `corrected` event is appended whose `before`/`after` diff (section-4 format) carries the changed fields only; `file_key` and `status` do not appear since they did not change.
 - Given a save where no declared field actually changed, when the hook runs, then no event is appended.
-- Given the save also changes the status, when the hook runs, then the status rules of US-23 apply on their own: `processed` → `validated` is appended as a separate `validated` event, anything else is refused.
+- Given the save also changes the status, when the hook runs, then the status rules of US-23 apply on their own: `processed` → `validated` appends a separate `validated` event, `validated` → `processed` a separate `reprocessed` event, anything else is refused.
 - Given a `pending` document, when fields are edited this way, then it stays `pending` and its object stays in the pending prefix; leaving the review queue requires the full correction of the review dashboard (US-36), whose form shows all fields and the resulting name before saving.
 
-### US-23 — Validate a document from the standard PocketBase UI
+### US-23 — Validate or reopen a document from the standard PocketBase UI
 
 As the user,
-I want to change a document's status to `validated` directly in the collections UI,
-so that the validation is traced as a `validated` event without a custom interface.
+I want to change a document's status to `validated` — or back to `processed` when I reopen it — directly in the collections UI,
+so that the transition is traced as a `validated`/`reprocessed` event without a custom interface.
 
 Acceptance criteria:
 
 - Given a `processed` document, when I set its status to `validated` in the collections UI and save, then the update hook appends a `validated` event with the section-4 payload (snapshots carrying the status change alone) and persists the new status.
-- Given any update that tries a status change other than the allowed transition (`processed`→`validated`), when the hook runs, then the save is refused with an explicit error.
+- Given a `validated` document, when I set its status back to `processed` and save, then the update hook appends a `reprocessed` event with the same payload shape and persists the new status; no re-filing occurs and the `file_key` is untouched.
+- Given any update that tries a status change other than the allowed transitions (`processed`→`validated`, `validated`→`processed` — anything touching `pending` included), when the hook runs, then the save is refused with an explicit error.
 - Given a status change to `validated`, when no field changed, then no re-filing occurs and the `file_key` is untouched.
 
 ### US-24 — Delete a document and its S3 object together
@@ -290,7 +291,7 @@ Acceptance criteria:
 ### US-33 — Change one field for a selection of documents
 
 As the user,
-I want to select several documents and change one declared field for all of them,
+I want to select several documents and change one declared field — or the status — for all of them,
 so that a systematic correction does not require opening every document.
 
 Acceptance criteria:
@@ -300,6 +301,7 @@ Acceptance criteria:
 - Given one document of the selection fails, when the bulk action finishes, then the others are applied and the failure is reported with its error.
 - Given the bulk action, when the recompute mode is chosen instead of a manual value, then for each selected document the classification dry-run of US-35 (no body) re-runs the rule tree against the stored pages and the field takes the proposed value — only when that proposal differs from the document's current value; a document with no proposal for the field is left untouched, and a document whose proposal equals its current value counts as unchanged (no PATCH, no event).
 - Given the recompute mode updates a document, when it saves, then it goes through the same standard PATCH as a manual value (US-22 hook: `corrected` event alone), and an enum value missing from the field's list is registered first (US-37), like the import and correction paths.
+- Given the field dropdown, when it opens, then it also proposes the `status` field — not a declared field — with only the `validated` and `processed` values in its control: applying it issues the same one standard PATCH per document and the US-23 hook traces each change (`validated` or `reprocessed` event, no re-filing); the recalculate action does not apply to it.
 
 ### US-34 — Preview a document and correct each field
 

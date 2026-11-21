@@ -369,6 +369,7 @@ function bindBulk() {
   var sel = $("bulkfield");
   sel.innerHTML = "";
   state.config.fields.forEach(function (f) { addOption(sel, f.name, f.french); });
+  addOption(sel, "status", "Statut");
   sel.addEventListener("change", rebuildBulkValue);
   $("bulkrecalc").addEventListener("click", applyRecalc);
   $("bulkapply").addEventListener("click", applyBulk);
@@ -385,18 +386,25 @@ function bindBulk() {
 }
 
 function bulkField() {
-  var name = $("bulkfield").value;
-  for (var i = 0; i < state.config.fields.length; i++) {
-    if (state.config.fields[i].name === name) return state.config.fields[i];
-  }
-  return null;
+  return fieldMeta($("bulkfield").value);
 }
 
 function rebuildBulkValue() {
   var holder = $("bulkvalue");
   holder.innerHTML = "";
   var f = bulkField();
+  // The recalc action only makes sense for declared fields: disabled for
+  // the status, whose direct changes are validated and reprocessed (US-23).
+  $("bulkrecalc").disabled = !f || f.name === "status";
   if (!f) return;
+  if (f.name === "status") {
+    var sel = document.createElement("select");
+    addOption(sel, "", "\u2014");
+    addOption(sel, "validated", "validated");
+    addOption(sel, "processed", "processed");
+    holder.appendChild(sel);
+    return;
+  }
   holder.appendChild(buildValueControl(f, (state.config.enums || {})[f.name] || [], null));
 }
 
@@ -422,7 +430,7 @@ async function applyBulk() {
   try {
     var r = readValueControl(f, el);
     if (r.clear) {
-      if (f.mandatory) { alert("Ce champ est obligatoire : une valeur est requise."); return; }
+      if (f.mandatory || f.name === "status") { alert("Ce champ est obligatoire : une valeur est requise."); return; }
       value = null;
     } else {
       value = r.value;

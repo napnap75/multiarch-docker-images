@@ -15,7 +15,7 @@ const eventsName = "document_events"
 
 // EventTypes is the official event_type vocabulary. It grows with the
 // application: existing collections are migrated at startup (ensureEvents).
-var EventTypes = []string{"imported", "corrected", "validated", "relocated"}
+var EventTypes = []string{"imported", "corrected", "validated", "relocated", "reprocessed"}
 
 // Setup ensures the collections and the superuser account (US-03, US-04, US-01).
 func Setup(app core.App, adminEmail, adminPassword string, cfg *config.Config) error {

@@ -58,13 +58,13 @@ One row per processed PDF file:
 The append-only `document_events` collection is the single source of truth for a document's history; no history is stored on the `documents` record itself.
 
 ### `document_events`
-Append-only history: `document`, `event_type` (`imported`, `corrected`, `validated`, `relocated`), `payload` as JSON, `timestamp`, plus the standard `created`/`updated` autodate columns; the event's business timestamp is `timestamp`, mirrored in the payload.
+Append-only history: `document`, `event_type` (`imported`, `corrected`, `validated`, `relocated`, `reprocessed`), `payload` as JSON, `timestamp`, plus the standard `created`/`updated` autodate columns; the event's business timestamp is `timestamp`, mirrored in the payload.
 
 The payload is self-contained: each event carries its own type, its own timestamp and the document state before and after, so a document's full history is reconstructed from this collection alone; the snapshots are stored as diffs — each `before`/`after` carries only the fields the event changes. All dates are RFC 3339; all S3 keys are complete, prefix included. The examples in this section use the default prefixes (section 3).
 
 Common payload keys:
 
-- `event_type`: `imported` | `corrected` | `validated` | `relocated`
+- `event_type`: `imported` | `corrected` | `validated` | `relocated` | `reprocessed`
 - `timestamp`: RFC 3339 date of the event
 - `before` / `after`: the event's diff, never full snapshots — a key appears on a side only when its value changes in the event: same value on both sides, it is omitted; absent from `before` and present in `after`, the field was added (every `after` key at import, since nothing existed before); present in `before` and absent from `after`, the field was deleted. `file_key` (the S3 key, unified with the `documents` record field) follows the same rule and appears only when the object actually moves; at import the status does not exist before, so `before` carries no `status`. A missing key means the value is unknown, there is no `null`
 
@@ -153,6 +153,21 @@ The diff is derived by comparing the two snapshots: a field present in `before` 
   },
   "after": {
     "status": "validated"
+  }
+}
+```
+
+`reprocessed` — the reverse transition, from `validated` back to `processed` (validation undone, from the bulk actions of the list page like the validation itself): no re-filing, no field change, the snapshots carry the status alone, and a `pending` status is never reachable this way:
+
+```json
+{
+  "event_type": "reprocessed",
+  "timestamp": "2026-01-21T09:02:45Z",
+  "before": {
+    "status": "validated"
+  },
+  "after": {
+    "status": "processed"
   }
 }
 ```
@@ -254,7 +269,7 @@ The review dashboard is a static frontend — plain HTML/CSS/JS files, no build 
 - Per-column filters, typed from the field declaration: contains for `text`, dropdown for `enum` and `status` (vocabulary from the config metadata route), date range for `date`, tri-state for `boolean`; translated client-side into a PocketBase filter expression.
 - Quick tabs with the per-status counts pre-filter the review queue (`pending` first).
 - Full-text search: a field above the table searches case-insensitively across every page in `pages`; after 1.5 seconds without typing, it adds a server-side PocketBase contains filter on `pages`. It combines with status tabs and per-column filters, returns matching documents without excerpts, and uses no dedicated route or FTS index.
-- Bulk edit (US-33): row selection — page or whole filtered set — then one declared field and its new value in a control matching the type; applied as one standard PATCH per document, so the US-22 hook runs per record: a `corrected` event each, no re-filing, no status change; per-document success and failure are reported, one failure does not stop the rest.
+- Bulk edit (US-33): row selection — page or whole filtered set — then one declared field and its new value in a control matching the type, or the `status` field whose dropdown offers `validated` and `processed`; applied as one standard PATCH per document, so the US-22/US-23 hook runs per record: a `corrected` event each (a `validated`/`reprocessed` event for the status), no re-filing; per-document success and failure are reported, one failure does not stop the rest.
 - Bulk recompute (US-33): instead of a manual value, the recompute mode takes the field's proposal from the classification dry-run of US-35 (no body, re-run against the stored pages) per selected document, and PATCHes only the documents whose current value differs from it; missing proposals and equal values leave the document untouched, an enum proposal is registered in the field's list first (US-37), and no route beyond the existing dry-run and PATCH is needed.
 - Selection re-file (US-44): a fifth icon action, separated from the field-editing actions by a vertical bar, re-files the selected documents through `POST /api/archivist/documents/{id}/refile` — one request per document, reusing the refile-all tool's shared per-document logic (`RefileOne`); pending documents are refused, unchanged documents are counted and untouched, skipped ones are reported with their reason, and the summary shows moved / unchanged / skipped / failed counts.
 - Selection re-run (US-46): a re-run button next to the re-file action re-runs the whole rule engine on the selected documents through `POST /api/archivist/documents/rerun/{id}` — one request per document, the same engine call as the import (`EvaluateWithTrace`) applied to the stored pages: the proposal replaces the declared fields, the status goes back to `processed`, and the object re-filing reuses `RefileOne`'s move sequence; a proposal with errors leaves the document untouched (`skipped`, a skip never counted as an error), an identical proposal is `unchanged`, a `pending` document is refused, and the summary shows updated / unchanged / skipped / failed counts.
@@ -287,7 +302,7 @@ Beyond the standard PocketBase API, authenticated only:
 ### 7.4 Standard collections UI and hooks
 
 - Correction: performed directly from the standard PocketBase collections UI (or any PocketBase client) by editing the extracted fields. The application's `OnRecordUpdateRequest` hook on `documents` intercepts the save and appends the `corrected` event carrying the field diff — and nothing else. The UI edits one field at a time with no preview of the resulting file name, so the hook deliberately performs no template evaluation and no re-filing, and the status does not move: an inconsistent draft cannot trigger irreversible side effects. The full correction — all fields at once, dry-run of the resulting name, re-filing and validation — is the dashboard's job (US-34 to US-36).
-- Validation: performed from the same interface by changing the status to `validated`; the hook appends the `validated` event, and any other status change is refused. A `pending` file can only leave the review queue through a full correction from the dashboard (US-36).
+- Validation: performed from the same interface by changing the status to `validated`; the hook appends the `validated` event. The reverse transition `validated` → `processed` is accepted the same way and appends a `reprocessed` event. Any other status change (`pending`, any third state) is refused. A `pending` file can only leave the review queue through a full correction from the dashboard (US-36).
 - Deletion: deleting a `documents` record from the same interface first deletes the S3 object at `file_key` (US-24); on S3 failure the deletion is refused and the record stays. The cascade delete of the `document_events` relation removes the history with the record; with versioning the object stays recoverable via its delete marker.
 
 The static pages themselves carry no data and are public by nature; every fetch is authenticated against the PocketBase API. An unauthenticated visitor is prompted to sign in with the superuser account; the dashboard exchanges those credentials through PocketBase's standard auth endpoint, stores the returned token locally, and retries the blocked request. The API continues to enforce superuser access. The configuration is loaded at startup and can also be replaced at runtime through the validated configuration editor save flow in section 7.6.
@@ -385,7 +400,7 @@ The scenarios form one narrative; each subtest names the US it proves:
 3. Duplicate — the same content re-uploaded is deleted from `inbox/`, no record, no event; a non-PDF object uploaded to `inbox/` is left in place, never imported (US-12).
 4. Pending — a missing mandatory date routes the document to `pending/` with `errors` in the imported event and the recognized fields kept (US-13 to US-15).
 5. Correction — a field PATCH through the API persists the values with no side effect (no re-filing, no status change), `corrected` event carrying the field diff (US-22).
-6. Validation — a status-only PATCH appends the `validated` event, `file_key` untouched (US-23).
+6. Validation — a status-only PATCH appends the `validated` event, `file_key` untouched; the reverse PATCH back to `processed` appends the `reprocessed` event and a change to `pending` is refused (US-23).
 7. Append-only — PATCH and DELETE on `document_events` are refused (US-04).
 8. Deletion — a deleted record removes the S3 object; the history follows via the cascade delete (US-24).
 9. Recovery — a stuck record (`file_key` still under `inbox/`, created directly through the API) is completed by the next pass (US-11).

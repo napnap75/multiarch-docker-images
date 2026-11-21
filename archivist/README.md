@@ -128,7 +128,7 @@ A commented `config.jsonc` example file is provided in the repository. The confi
 - Document list with status, filters, and combined search: full text (content of all pages) and fields.
 - Detail view with PDF preview (streamed from S3) and extracted fields. Debug mode shows the detail of every rule evaluation.
 - Correction: a form to edit the fields. A draft save is always possible: it persists the values with no side effect (no template evaluation, no re-filing, no status change). Only the full correction — re-filing and validation — is refused while the rendered name still has errors. A corrected file is re-filed and becomes `validated`; a corrected `pending` file leaves the review queue.
-- Validation: direct transition from `processed` to `validated`.
+- Validation: direct transition from `processed` to `validated`, and back to `processed`; both bulk-editable from the document list.
 - History: every document has a complete, timestamped trace (import, correction, validation) readable from its detail view.
 - Tools: maintenance tasks run by hand (see Tools below).
 - Configuration editor: edit fields, rules and templates, test against pasted or stored page text, and save a validated configuration without restarting the container.

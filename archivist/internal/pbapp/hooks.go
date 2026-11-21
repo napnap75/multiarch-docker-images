@@ -48,8 +48,8 @@ func BindHooks(app core.App, manager *config.Manager, s3 *storage.Client) {
 // template evaluation, no re-filing, no status change — the UI edits one
 // field at a time and shows no preview of the resulting file name. The full
 // correction (all fields, dry-run, re-filing, validation) is the custom
-// dashboard's job (US-36). The only direct status change is processed ->
-// validated (US-23).
+// dashboard's job (US-36). The direct status changes are processed ->
+// validated (validation) and validated -> processed (reopening) (US-23).
 func handleDocumentUpdate(app core.App, cfg *config.Config, e *core.RecordRequestEvent) error {
 	newRec := e.Record
 
@@ -69,9 +69,12 @@ func handleDocumentUpdate(app core.App, cfg *config.Config, e *core.RecordReques
 		}
 	}
 
-	// US-23: the only direct status change is processed -> validated.
-	if newStatus != oldStatus && (newStatus != "validated" || oldStatus != "processed") {
-		return fmt.Errorf("refused: the only direct status change is processed -> validated; full corrections belong to the review dashboard")
+	// US-23: the direct status changes are processed -> validated and
+	// validated -> processed; anything else (pending included) is refused.
+	if newStatus != oldStatus &&
+		!((oldStatus == "processed" && newStatus == "validated") ||
+			(oldStatus == "validated" && newStatus == "processed")) {
+		return fmt.Errorf("refused: the direct status changes are processed -> validated and validated -> processed; full corrections belong to the review dashboard")
 	}
 
 	// US-22: append the corrected event carrying the field diff alone;
@@ -85,11 +88,17 @@ func handleDocumentUpdate(app core.App, cfg *config.Config, e *core.RecordReques
 		}
 	}
 
-	// US-23: the validated event, snapshots carrying the status change alone.
+	// US-23: a direct status change appends its event — validated for the
+	// validation, reprocessed for the reopening — snapshots carrying the
+	// status change alone.
 	if newStatus != oldStatus {
+		eventType := "validated"
+		if newStatus == "processed" {
+			eventType = "reprocessed"
+		}
 		before := Snapshot{"status": oldStatus}
-		after := Snapshot{"status": "validated"}
-		if err := AppendEvent(app, newRec.Id, "validated", before, after, nil); err != nil {
+		after := Snapshot{"status": newStatus}
+		if err := AppendEvent(app, newRec.Id, eventType, before, after, nil); err != nil {
 			return err
 		}
 	}
