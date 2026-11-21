@@ -1699,15 +1699,15 @@ func TestE2E(t *testing.T) {
 		rec := addDirectRecord(t, "files/old/Rerun.pdf", hash, "validated",
 			map[string]any{"emittingCompany": "Inconnu", "documentType": "Wrong",
 				"emissionDate": "2026-07-04", "template": "",
-				"pages": []string{"BRED", "Releve de compte", "Date : 15/07/2026", "Compte Nadine"}})
+				"pages": []string{"BRED\nReleve de compte\nDate : 15/07/2026\nCompte Nadine"}})
 		skipHash := putPDF(t, "files/old/RerunSkipped.pdf", "aucune regle ici")
 		skipRec := addDirectRecord(t, "files/old/RerunSkipped.pdf", skipHash, "validated",
 			map[string]any{"documentType": "Carnet",
 				"pages": []string{"aucune regle ici"}})
-		pendingHash := putPDF(t, "files/old/PendingRerun.pdf", "BRED", "Releve de compte", "Date : 15/07/2026", "Compte Nadine")
+		pendingHash := putPDF(t, "files/old/PendingRerun.pdf", "BRED", "Releve de compte", "Date : 15/07/2026", "Compte Thomas")
 		pendingRec := addDirectRecord(t, "files/old/PendingRerun.pdf", pendingHash, "pending",
 			map[string]any{"emittingCompany": "BRED",
-				"pages": []string{"BRED", "Releve de compte", "Date : 15/07/2026", "Compte Nadine"}})
+				"pages": []string{"BRED\nReleve de compte\nDate : 15/07/2026\nCompte Thomas"}})
 
 		// Unauthenticated calls are refused, like every application route.
 		status, out := unauth(t, http.MethodPost, "/api/archivist/documents/"+rec["id"].(string)+"/rerun", nil)

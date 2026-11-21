@@ -427,13 +427,34 @@ func handleRerun(re *core.RequestEvent, cfg *config.Config, s3 *storage.Client) 
 
 // recordPages decodes the stored page texts of a document (US-13).
 func recordPages(record *core.Record) []string {
-	var pages []string
-	if raw := record.GetString("pages"); raw != "" {
-		if err := json.Unmarshal([]byte(raw), &pages); err != nil {
+	switch raw := record.Get("pages").(type) {
+	case []string:
+		return raw
+	case []any:
+		pages := make([]string, 0, len(raw))
+		for _, page := range raw {
+			if text, ok := page.(string); ok {
+				pages = append(pages, text)
+			}
+		}
+		return pages
+	case string:
+		var pages []string
+		if raw != "" && json.Unmarshal([]byte(raw), &pages) == nil {
+			return pages
+		}
+		return nil
+	default:
+		data, err := json.Marshal(raw)
+		if err != nil {
 			return nil
 		}
+		var pages []string
+		if json.Unmarshal(data, &pages) == nil {
+			return pages
+		}
+		return nil
 	}
-	return pages
 }
 
 // mergeSubmitted converts the submitted values to their native types and

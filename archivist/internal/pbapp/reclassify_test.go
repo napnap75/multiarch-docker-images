@@ -121,6 +121,27 @@ func reclassifyDocument(t *testing.T, app core.App, cfg *config.Config, fileKey,
 	return rec
 }
 
+func TestRecordPagesSupportsJSONAndSliceFormats(t *testing.T) {
+	app, _ := testReclassifyApp(t)
+	coll, err := app.FindCollectionByNameOrId("documents")
+	if err != nil {
+		t.Fatalf("find documents: %v", err)
+	}
+
+	for _, value := range []any{
+		`["BRED","Compte Nadine"]`,
+		[]string{"BRED", "Compte Nadine"},
+		[]any{"BRED", "Compte Nadine"},
+	} {
+		rec := core.NewRecord(coll)
+		rec.Set("pages", value)
+		pages := recordPages(rec)
+		if len(pages) != 2 || pages[0] != "BRED" || pages[1] != "Compte Nadine" {
+			t.Fatalf("recordPages(%T) = %v", value, pages)
+		}
+	}
+}
+
 func reclassifyEvents(t *testing.T, app core.App, documentId string) []map[string]any {
 	t.Helper()
 	recs, err := app.FindRecordsByFilter("document_events", "document = {:d}", "", 200, 0, map[string]any{"d": documentId})
