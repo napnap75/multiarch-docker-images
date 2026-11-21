@@ -76,6 +76,11 @@ func BindRoutes(app core.App, manager *config.Manager, configPath string, s3 *st
 				return handleCorrect(re, snapshot.Config, s3)
 			})
 		})
+		e.Router.POST("/api/archivist/documents/{id}/rerun", func(re *core.RequestEvent) error {
+			return manager.Read(func(snapshot *config.Snapshot) error {
+				return handleRerun(re, snapshot.Config, s3)
+			})
+		})
 		return e.Next()
 	})
 }
@@ -389,6 +394,35 @@ func handleCorrect(re *core.RequestEvent, cfg *config.Config, s3 *storage.Client
 		"rendered": target,
 		"fields":   merged,
 	})
+}
+
+// handleRerun re-runs the whole rule engine on one document chosen from
+// the list page (US-46): the classification of the import, re-evaluated
+// from the stored pages, then the re-filing of RefileOne. Pending
+// documents are refused: they stay in the review queue (US-43).
+func handleRerun(re *core.RequestEvent, cfg *config.Config, s3 *storage.Client) error {
+	if !re.HasSuperuserAuth() {
+		return re.ForbiddenError("superusers only", nil)
+	}
+	record, err := re.App.FindRecordById("documents", re.Request.PathValue("id"))
+	if err != nil {
+		return re.JSON(404, map[string]any{"message": "document not found"})
+	}
+	if record.GetString("status") == "pending" {
+		return re.JSON(400, map[string]any{"message": "refused: a pending document stays in the review queue"})
+	}
+	result, err := ReclassifyOne(re.Request.Context(), re.App, s3, cfg, record)
+	if err != nil {
+		return re.JSON(500, map[string]any{"message": "rerun failed", "error": err.Error()})
+	}
+	res := map[string]any{"id": record.Id, "outcome": result.Outcome, "file_key": record.GetString("file_key"), "status": record.GetString("status")}
+	if result.Outcome == "updated" {
+		res["target"] = result.FinalKey
+	}
+	if result.Outcome == "skipped" {
+		res["reason"] = result.Reason
+	}
+	return re.JSON(200, res)
 }
 
 // recordPages decodes the stored page texts of a document (US-13).
