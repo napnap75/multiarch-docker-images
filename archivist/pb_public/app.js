@@ -21,6 +21,9 @@ var state = {
   totalPages: 1,
   counts: {}
 };
+// EMPTY_FILTER is the sentinel value of the "vide" entry in the enum
+// filter dropdowns: it matches the documents whose field holds no value.
+var EMPTY_FILTER = "__archivist_empty__";
 var docsLoadSequence = 0;
 var pageSearchTimer = null;
 
@@ -170,7 +173,9 @@ function buildFilterQuery() {
     } else if (m.type === "boolean") {
       if (f.value === "true" || f.value === "false") parts.push("(" + name + "=" + f.value + ")");
     } else if (m.type === "enum") {
-      if (f.value) parts.push("(" + name + "='" + esc(f.value) + "')");
+      if (f.value === EMPTY_FILTER)
+        parts.push("(" + name + "='')");
+      else if (f.value) parts.push("(" + name + "='" + esc(f.value) + "')");
     } else {
       if (f.value) parts.push("(" + name + "~'" + esc(f.value) + "')");
     }
@@ -281,6 +286,7 @@ function buildFilterControl(m) {
   } else if (m.type === "enum") {
     var es = document.createElement("select");
     addOption(es, "", "—");
+    addOption(es, EMPTY_FILTER, "vide");
     ((state.config.enums || {})[m.name] || []).forEach(function (v) { addOption(es, v, v); });
     es.value = f.value || "";
     es.addEventListener("change", function () { f.value = es.value; state.page = 1; loadDocs(); });
