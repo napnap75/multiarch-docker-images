@@ -524,10 +524,11 @@ async function applyRefile() {
 }
 
 // applyDelete deletes the selection through the standard delete route
-// (US-24): one request per document, and a confirmation dialog showing
-// the number of documents first. The US-24 hook deletes the S3 object
-// before the record and refuses the whole deletion when that fails; the
-// cascade delete of document_events removes the history with the record.
+// (US-45, US-24): one request per document, and a confirmation dialog
+// showing the number of documents first. The US-24 hook deletes the S3
+// object before the record and refuses the whole deletion when that
+// fails; the cascade delete of document_events removes the history with
+// the record.
 async function applyDelete() {
   var ids = Object.keys(state.selected);
   if (!ids.length) { alert("Aucun document sélectionné."); return; }

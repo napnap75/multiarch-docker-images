@@ -245,7 +245,7 @@ Acceptance criteria:
 - Given the bucket is versioned, when the object is deleted, then a delete marker keeps it recoverable; without versioning the deletion is final (same caveat as US-01).
 - Given a superuser issues the DELETE, when the hook runs, then the hook applies: like the append-only protection of US-04, it cannot rely on API rules alone.
 
-## Epic: Review Dashboard (US-30 to US-42)
+## Epic: Review Dashboard (US-30 to US-42, US-45)
 
 The static frontend served from `pb_public/` (arch.md section 7): document list, document detail, tools and configuration-editor pages, driven by the configuration metadata route. No build toolchain, vendored dependencies only (100% offline). Document persistence goes through the standard PocketBase API and its hooks; application routes handle operations the standard API cannot express (config metadata, PDF proxy, dry-run, full correction, enum value registration). The configuration editor is specified separately in US-50 to US-52.
 
@@ -371,6 +371,21 @@ Acceptance criteria:
 - Given the panel header, when the dry-run returned errors (classification or name rendering), then they are displayed at the top of the panel in the existing error style, and the collapsed header shows a badge with their count.
 - Given the trace, when the panel is unfolded, then each entry shows the rule's `when` expression (rules carry no name), the field, the producing `eval` expression and the final value; deletions are marked as unset, failing rules show their error message.
 - Given the evaluation, when it runs, then nothing is persisted: the trace reflects what the rules would do today against the stored pages, not what happened at import.
+
+### US-45 — Delete a selection of documents from the list
+
+As the user,
+I want to delete the documents I selected in the list — the same deletion as US-24, applied to the whole selection at once,
+so that I can remove obsolete or wrongly imported documents without opening them one by one.
+
+Acceptance criteria:
+
+- Given the list, when a selection exists, then a delete icon, separated from the re-file action by a vertical bar, triggers the deletion of the selected documents after a confirmation.
+- Given the confirmation, when it opens, then it displays the number of documents about to be deleted and warns that the action is irreversible; without a confirmation nothing is deleted.
+- Given a selected document, when the action reaches it, then it runs through the standard `DELETE /api/collections/documents/records/{id}`: the US-24 hook applies — the S3 object at `file_key` is deleted before the record, the cascade delete of `document_events` removes the history with the record, and a refused deletion (S3 failure) leaves both the record and the object in place without stopping the rest.
+- Given the action runs, when it finishes, then the summary shows the deleted and failed counts, one failure does not stop the rest, and the selection is cleared.
+- Given no selection, when the delete action is used, then nothing is deleted and the user is told no document is selected.
+- Given an unauthenticated client, when it calls the delete route, then it is refused (same protection as US-24: the hook binds to superusers as well).
 
 ## Epic: Tools (dashboard)
 
