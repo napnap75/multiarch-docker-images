@@ -4,7 +4,7 @@
 // under test, then follows documents through the whole pipeline - import,
 // duplicate, pending, correction, validation, append-only, deletion, recovery,
 // restart, dashboard routes (config metadata, enum value registration, PDF
-// proxy, dry-run, full correction), the maintenance tools (find-lost-files,
+// proxy, dry-run, full correction, selection re-run), the maintenance tools (find-lost-files,
 // refile-all, and their dry-run mode), and the configurable S3 prefixes
 // (custom prefixes with files at the bucket root, invalid-prefix startup
 // refusal). It is a regression gate for dependency upgrades (PocketBase,
@@ -1690,6 +1690,90 @@ func TestE2E(t *testing.T) {
 		status, out = call(t, http.MethodPost, "/api/archivist/documents/"+rec["id"].(string)+"/refile", nil)
 		if status != 200 || out["outcome"] != "unchanged" {
 			t.Fatalf("second refile should be unchanged: status %d: %v", status, out)
+		}
+	})
+	// 17c. List-page re-run (US-46): the whole rule engine re-evaluated
+	// against the stored pages, then the re-filing of US-44, in one button.
+	t.Run("list rerun: re-classify, re-file and back to processed", func(t *testing.T) {
+		hash := putPDF(t, "files/old/Rerun.pdf", "BRED", "Releve de compte", "Date : 15/07/2026", "Compte Nadine")
+		rec := addDirectRecord(t, "files/old/Rerun.pdf", hash, "validated",
+			map[string]any{"emittingCompany": "Inconnu", "documentType": "Wrong",
+				"emissionDate": "2026-07-04", "template": "",
+				"pages": []string{"BRED\nReleve de compte\nDate : 15/07/2026\nCompte Nadine"}})
+		skipHash := putPDF(t, "files/old/RerunSkipped.pdf", "aucune regle ici")
+		skipRec := addDirectRecord(t, "files/old/RerunSkipped.pdf", skipHash, "validated",
+			map[string]any{"documentType": "Carnet",
+				"pages": []string{"aucune regle ici"}})
+		pendingHash := putPDF(t, "files/old/PendingRerun.pdf", "BRED", "Releve de compte", "Date : 15/07/2026", "Compte Thomas")
+		pendingRec := addDirectRecord(t, "files/old/PendingRerun.pdf", pendingHash, "pending",
+			map[string]any{"emittingCompany": "BRED",
+				"pages": []string{"BRED\nReleve de compte\nDate : 15/07/2026\nCompte Thomas"}})
+
+		// Unauthenticated calls are refused, like every application route.
+		status, out := unauth(t, http.MethodPost, "/api/archivist/documents/"+rec["id"].(string)+"/rerun", nil)
+		if status != 403 {
+			t.Fatalf("unauthenticated rerun: status %d: %v", status, out)
+		}
+		// A pending document stays in the review queue (US-43).
+		status, out = call(t, http.MethodPost, "/api/archivist/documents/"+pendingRec["id"].(string)+"/rerun", nil)
+		if status != 400 {
+			t.Fatalf("pending rerun: status %d: %v", status, out)
+		}
+		if got := oneRecord(t, "documents", "(id='"+pendingRec["id"].(string)+"')")["status"]; got != "pending" {
+			t.Fatalf("pending status changed: %v", got)
+		}
+
+		// A proposal with errors leaves the document untouched (skipped).
+		status, out = call(t, http.MethodPost, "/api/archivist/documents/"+skipRec["id"].(string)+"/rerun", nil)
+		if status != 200 || out["outcome"] != "skipped" || out["reason"] == "" {
+			t.Fatalf("rerun of a document the rules cannot classify: status %d: %v", status, out)
+		}
+		if !s3Exists(t, "files/old/RerunSkipped.pdf") {
+			t.Fatal("a skipped rerun must not move the object")
+		}
+		if got := oneRecord(t, "documents", "(id='"+skipRec["id"].(string)+"')")["status"]; got != "validated" {
+			t.Fatalf("a skipped rerun changed the status: %v", got)
+		}
+		if evs := eventsOf(t, skipRec["id"].(string)); len(evs) != 0 {
+			t.Fatalf("a skipped rerun appended %d event(s)", len(evs))
+		}
+
+		// The working document: the proposal replaces the stale fields,
+		// the status goes back to processed and the object moves.
+		status, out = call(t, http.MethodPost, "/api/archivist/documents/"+rec["id"].(string)+"/rerun", nil)
+		if status != 200 || out["outcome"] != "updated" {
+			t.Fatalf("rerun route: status %d: %v", status, out)
+		}
+		if out["target"] != "files/BRED/2026-07_Releve de compte_Nadine.pdf" {
+			t.Fatalf("rerun response = %v", out)
+		}
+		if !s3Exists(t, "files/BRED/2026-07_Releve de compte_Nadine.pdf") || s3Exists(t, "files/old/Rerun.pdf") {
+			t.Fatal("the object was not moved")
+		}
+		doc := oneRecord(t, "documents", "(id='"+rec["id"].(string)+"')")
+		if doc["file_key"] != "files/BRED/2026-07_Releve de compte_Nadine.pdf" {
+			t.Fatalf("file_key not updated: %v", doc["file_key"])
+		}
+		if doc["status"] != "processed" {
+			t.Fatalf("status after rerun = %v, want processed", doc["status"])
+		}
+		if doc["emittingCompany"] != "BRED" || doc["documentType"] != "Releve de compte" {
+			t.Fatalf("fields not re-classified: %v %v", doc["emittingCompany"], doc["documentType"])
+		}
+		ev := eventPayloadOfType(t, eventsOf(t, rec["id"].(string)), "corrected")
+		before, _ := ev["before"].(map[string]any)
+		after, _ := ev["after"].(map[string]any)
+		if before["status"] != "validated" || after["status"] != "processed" {
+			t.Fatalf("corrected payload statuses = %v / %v", before["status"], after["status"])
+		}
+		if k, _ := after["file_key"].(string); k != "files/BRED/2026-07_Releve de compte_Nadine.pdf" {
+			t.Fatalf("corrected payload file_key = %v", after["file_key"])
+		}
+
+		// A proposal identical to the stored state is unchanged.
+		status, out = call(t, http.MethodPost, "/api/archivist/documents/"+rec["id"].(string)+"/rerun", nil)
+		if status != 200 || out["outcome"] != "unchanged" {
+			t.Fatalf("second rerun should be unchanged: status %d: %v", status, out)
 		}
 	})
 	// 18. Configuration editor (US-50 to US-52).

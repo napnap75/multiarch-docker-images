@@ -245,7 +245,7 @@ Acceptance criteria:
 - Given the bucket is versioned, when the object is deleted, then a delete marker keeps it recoverable; without versioning the deletion is final (same caveat as US-01).
 - Given a superuser issues the DELETE, when the hook runs, then the hook applies: like the append-only protection of US-04, it cannot rely on API rules alone.
 
-## Epic: Review Dashboard (US-30 to US-42, US-45)
+## Epic: Review Dashboard (US-30 to US-42, US-45, US-46)
 
 The static frontend served from `pb_public/` (arch.md section 7): document list, document detail, tools and configuration-editor pages, driven by the configuration metadata route. No build toolchain, vendored dependencies only (100% offline). Document persistence goes through the standard PocketBase API and its hooks; application routes handle operations the standard API cannot express (config metadata, PDF proxy, dry-run, full correction, enum value registration). The configuration editor is specified separately in US-50 to US-52.
 
@@ -386,6 +386,22 @@ Acceptance criteria:
 - Given the action runs, when it finishes, then the summary shows the deleted and failed counts, one failure does not stop the rest, and the selection is cleared.
 - Given no selection, when the delete action is used, then nothing is deleted and the user is told no document is selected.
 - Given an unauthenticated client, when it calls the delete route, then it is refused (same protection as US-24: the hook binds to superusers as well).
+
+### US-46 — Re-run the rules on a selection of documents
+
+As the user,
+I want a button next to the selection re-file that re-runs the whole rule engine on the documents I selected in the list — the same classification as the import, from their stored pages, followed by the re-filing of US-44,
+so that a change of the rules applies to a handful of already classified documents without re-importing them by hand.
+
+Acceptance criteria:
+
+- Given the list, when a selection exists, then a re-run button, placed next to the re-file action, triggers the full re-classification of the selected documents after a confirmation.
+- Given a selected document, when the action reaches it, then it runs through `POST /api/archivist/documents/rerun/{id}`: the stored pages are re-classified by the active configuration (the same engine as the import), the declared fields are replaced by the proposal (a field the rules no longer produce is unset), the status goes back to `processed` like at import, and the object is re-filed under the rendered template like US-43 (conflict suffix on collision, copy first, existence verified, source removed), the record save and the `corrected` event carrying the full diff (fields, `file_key`, status) committing in one transaction, with a best-effort S3 rollback when the save fails.
+- Given a document whose new classification has errors (mandatory field missing, rule error, unknown template, render failure), when the action reaches it, then the document is left untouched — no field change, no move, no event — and reported as skipped with the reason; a skip is not an error.
+- Given a document whose re-classification changes nothing, when the action reaches it, then nothing moves or is written (`unchanged`), and the summary counts it.
+- Given a `pending` document in the selection, when the action reaches it, then the route refuses it: review-queue documents are never moved (US-43).
+- Given the action runs, when it finishes, then the summary shows the updated, unchanged, skipped and failed counts, one failure does not stop the rest, and the selection is cleared.
+- Given an unauthenticated client, when it calls the route, then it is refused.
 
 ## Epic: Tools (dashboard)
 

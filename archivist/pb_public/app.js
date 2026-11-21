@@ -379,6 +379,7 @@ function bindBulk() {
   });
   $("bulkall").addEventListener("click", selectAllFiltered);
   $("bulkrefile").addEventListener("click", applyRefile);
+  $("bulkrerun").addEventListener("click", applyRerun);
   $("bulkdelete").addEventListener("click", applyDelete);
   rebuildBulkValue();
 }
@@ -516,6 +517,40 @@ async function applyRefile() {
     }
   }
   $("bulkresult").textContent = moved + " déplacé(s), " + unchanged + " inchangé(s)" +
+    (skipped.length ? ", " + skipped.length + " ignoré(s) — " + skipped[0] : "") +
+    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : "");
+  state.selected = {};
+  await loadCounts();
+  await loadDocs();
+}
+
+// applyRerun re-runs the whole rule engine on the selection (US-46): the
+// classification of the import, re-evaluated against the stored pages,
+// then the re-filing of the refile route, one request per document; the
+// fields are replaced by the rule proposal, the status goes back to
+// processed, an unchanged proposal counts as unchanged, a proposal with
+// errors leaves the document untouched (skipped), a pending document is
+// refused, and one failure never stops the rest.
+async function applyRerun() {
+  var ids = Object.keys(state.selected);
+  if (!ids.length) { alert("Aucun document sélectionné."); return; }
+  if (!confirm("Relancer l'ensemble des règles pour " + ids.length + " document(s) ?\n" +
+    "Les champs seront remplacés par ce que produisent les règles actuelles, le fichier sera re-filé et son statut repassera à « processed » ; un document dont la nouvelle classification est en erreur est ignoré, les documents pending sont refusés.")) return;
+  $("bulkresult").textContent = "…";
+  var updated = 0;
+  var unchanged = 0;
+  var skipped = [];
+  var failed = [];
+  for (var i = 0; i < ids.length; i++) {
+    var res = await api("POST", "/api/archivist/documents/" + ids[i] + "/rerun");
+    if (res.status !== 200) { failed.push(ids[i] + " : " + errMsg(res)); continue; }
+    switch (res.data.outcome) {
+    case "updated": updated++; break;
+    case "unchanged": unchanged++; break;
+    default: skipped.push(res.data.reason || ids[i]);
+    }
+  }
+  $("bulkresult").textContent = updated + " relancé(s), " + unchanged + " inchangé(s)" +
     (skipped.length ? ", " + skipped.length + " ignoré(s) — " + skipped[0] : "") +
     (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : "");
   state.selected = {};
