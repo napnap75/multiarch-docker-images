@@ -455,6 +455,7 @@ Acceptance criteria:
 - Given an authenticated superuser opens the configuration editor, when the page loads, then it fetches the complete active JSONC source from `GET /api/archivist/config/source`; unauthenticated requests are refused.
 - Given the source is displayed, when I edit it, then `fields` appears as a table of name, French title, type and mandatory controls; rows can be added or removed.
 - Given the rules are displayed, when I expand a section, then its JSONC rule text is editable; section headings and boundaries are determined by comments beginning `// --- `, and the original separator comments and group order are preserved when the draft is serialized.
+- Given a section heading, when I click its pencil icon, then a dialog offers the current section name for editing; on a non-empty confirmation the section's `// --- ` comment is rewritten and the draft is re-tested, and an empty name is refused.
 - Given the templates are displayed, when I edit them, then a table exposes each template name and template text; rows can be added or removed.
 - Given the page is opened from the document list, then the test input is empty and document navigation is hidden.
 - Given the page is opened from a document detail page, then the test input is initialized with that record's `pages` JSON array and previous/next navigation follows the same document order as the list.
