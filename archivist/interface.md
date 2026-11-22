@@ -159,8 +159,10 @@ page, `common.js`, `styles.css`).
 - Progress and saving states use a dedicated muted status line
   (`role="status"`, `aria-live="polite"`) — "Test en cours…",
   "Modifications non activées" — and the bulk bar's result line reports
-  each batch through the same `role="status"`. No toast, no modal success
-  dialogs.
+  each batch through the same `role="status"`. The bulk bar stays visible
+  while its result line shows a message, even though the action has cleared
+  the selection, so the outcome remains readable without re-selecting. No
+  toast, no modal success dialogs.
 - Errors block what they invalidate: dry-run errors disable the correction,
   save errors re-enable editing and keep the draft, a failed filter or
   load leaves the previous view in place.

@@ -19,7 +19,8 @@ var state = {
   docs: [],
   total: 0,
   totalPages: 1,
-  counts: {}
+  counts: {},
+  bulkMessage: ""
 };
 // EMPTY_FILTER is the sentinel value of the "vide" entry in the enum
 // filter dropdowns: it matches the documents whose field holds no value.
@@ -444,7 +445,7 @@ async function applyBulk() {
   } catch (e) { alert(e.message); return; }
   var ids = Object.keys(state.selected);
   if (!ids.length) { alert("Aucun document sélectionné."); return; }
-  $("bulkresult").textContent = "…";
+  setBulkResult("…");
   var ok = 0;
   var failed = [];
   for (var i = 0; i < ids.length; i++) {
@@ -454,8 +455,8 @@ async function applyBulk() {
     if (res.status === 200) ok++;
     else failed.push(ids[i] + " : " + errMsg(res));
   }
-  $("bulkresult").textContent = ok + " document(s) modifié(s)" +
-    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : "");
+  setBulkResult(ok + " document(s) modifié(s)" +
+    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : ""));
   state.selected = {};
   await loadCounts();
   await loadDocs();
@@ -489,7 +490,7 @@ async function applyRecalc() {
   if (!confirm("Recalculer « " + fieldLabel(f) + " » pour " + ids.length +
     " document(s) à partir des règles ?\n" +
     "Seuls les documents dont la valeur diffère de celle proposée par les règles seront modifiés.")) return;
-  $("bulkresult").textContent = "…";
+  setBulkResult("…");
   var ok = 0;
   var skipped = 0;
   var failed = [];
@@ -499,8 +500,8 @@ async function applyRecalc() {
     else if (res === "skipped") skipped++;
     else failed.push(ids[i] + " : " + res);
   }
-  $("bulkresult").textContent = ok + " document(s) recalculé(s), " + skipped + " inchangé(s)" +
-    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : "");
+  setBulkResult(ok + " document(s) recalculé(s), " + skipped + " inchangé(s)" +
+    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : ""));
   state.selected = {};
   await loadCounts();
   await loadDocs();
@@ -516,7 +517,7 @@ async function applyRefile() {
   if (!ids.length) { alert("Aucun document sélectionné."); return; }
   if (!confirm("Re-filer " + ids.length + " document(s) d'après la configuration active ?\n" +
     "Un document déjà bien classé ne bouge pas ; les documents pending sont refusés.")) return;
-  $("bulkresult").textContent = "…";
+  setBulkResult("…");
   var moved = 0;
   var unchanged = 0;
   var skipped = [];
@@ -530,9 +531,9 @@ async function applyRefile() {
     default: skipped.push(res.data.reason || ids[i]);
     }
   }
-  $("bulkresult").textContent = moved + " déplacé(s), " + unchanged + " inchangé(s)" +
+  setBulkResult(moved + " déplacé(s), " + unchanged + " inchangé(s)" +
     (skipped.length ? ", " + skipped.length + " ignoré(s) — " + skipped[0] : "") +
-    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : "");
+    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : ""));
   state.selected = {};
   await loadCounts();
   await loadDocs();
@@ -550,7 +551,7 @@ async function applyRerun() {
   if (!ids.length) { alert("Aucun document sélectionné."); return; }
   if (!confirm("Relancer l'ensemble des règles pour " + ids.length + " document(s) ?\n" +
     "Les champs seront remplacés par ce que produisent les règles actuelles, le fichier sera re-filé et son statut repassera à « processed » ; un document dont la nouvelle classification est en erreur est ignoré, les documents pending sont refusés.")) return;
-  $("bulkresult").textContent = "…";
+  setBulkResult("…");
   var updated = 0;
   var unchanged = 0;
   var skipped = [];
@@ -564,9 +565,9 @@ async function applyRerun() {
     default: skipped.push(res.data.reason || ids[i]);
     }
   }
-  $("bulkresult").textContent = updated + " relancé(s), " + unchanged + " inchangé(s)" +
+  setBulkResult(updated + " relancé(s), " + unchanged + " inchangé(s)" +
     (skipped.length ? ", " + skipped.length + " ignoré(s) — " + skipped[0] : "") +
-    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : "");
+    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : ""));
   state.selected = {};
   await loadCounts();
   await loadDocs();
@@ -583,7 +584,7 @@ async function applyDelete() {
   if (!ids.length) { alert("Aucun document sélectionné."); return; }
   if (!confirm("Supprimer définitivement " + ids.length + " document(s) ?\n" +
     "Chaque document, son historique et le fichier correspondant du bucket S3 seront supprimés. Cette action est irréversible.")) return;
-  $("bulkresult").textContent = "…";
+  setBulkResult("…");
   var ok = 0;
   var failed = [];
   for (var i = 0; i < ids.length; i++) {
@@ -591,8 +592,8 @@ async function applyDelete() {
     if (res.status === 200 || res.status === 204) ok++;
     else failed.push(ids[i] + " : " + errMsg(res));
   }
-  $("bulkresult").textContent = ok + " document(s) supprimé(s)" +
-    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : "");
+  setBulkResult(ok + " document(s) supprimé(s)" +
+    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : ""));
   state.selected = {};
   await loadCounts();
   await loadDocs();
@@ -633,10 +634,21 @@ async function recalcOne(f, id) {
   return "ok";
 }
 
+// The bulk bar stays visible while a result line is displayed, even when
+// the action has cleared the selection: emptying it would hide the only
+// report of the action.
 function renderBulkbar() {
   var n = Object.keys(state.selected).length;
-  $("bulkbar").hidden = n === 0;
-  $("bulkcount").textContent = n + " document(s) sélectionné(s)";
+  $("bulkbar").hidden = n === 0 && !state.bulkMessage;
+  $("bulkcount").textContent = n ? n + " document(s) sélectionné(s)" : "";
+}
+
+// setBulkResult shows the outcome of a bulk action; the message persists
+// until the next action replaces it.
+function setBulkResult(text) {
+  state.bulkMessage = text || "";
+  $("bulkresult").textContent = state.bulkMessage;
+  renderBulkbar();
 }
 
 init();
