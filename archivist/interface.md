@@ -77,8 +77,8 @@ page, `common.js`, `styles.css`).
   committed data always asks for a confirmation naming the count and the
   consequences first (the bulk document delete), while removing an unsaved
   draft element — a field or template row, a rule section — is immediate,
-  because nothing is written until the explicit save; only the section-level
-  trash turns red on hover.
+  because nothing is written until the explicit save. Every trash icon turns
+  red on hover.
 
 ## 4. Typed controls and value conventions
 
@@ -154,12 +154,12 @@ page, `common.js`, `styles.css`).
   lines, one per error, honoring the backend error shape (`message` +
   `errors[]` for 422 responses, the message otherwise). The boxes that
   announce themselves carry `role="alert"` (the configuration editor's test
-  and popup error boxes, the modal error lines); the document detail page's
-  error boxes are plain.
+  and popup error boxes, the modal error lines, the detail page's error
+  boxes).
 - Progress and saving states use a dedicated muted status line
   (`role="status"`, `aria-live="polite"`) — "Test en cours…",
-  "Modifications non activées" — while bulk results are reported by an
-  adjacent muted line inside the bulk bar itself. No toast, no modal success
+  "Modifications non activées" — and the bulk bar's result line reports
+  each batch through the same `role="status"`. No toast, no modal success
   dialogs.
 - Errors block what they invalidate: dry-run errors disable the correction,
   save errors re-enable editing and keep the draft, a failed filter or
@@ -191,8 +191,8 @@ page, `common.js`, `styles.css`).
 - Every icon-only control: `aria-label` (+ `title`), a square touch target
   of 2rem or more (1.6rem only for the compact icons inside a rule section
   header), `:focus-visible` ring from the tokens.
-- Async regions announce through `aria-live` (status lines, popup results);
-  alerts use `role="alert"`; expandable panels and details expose
+- Async regions announce through `aria-live` (status lines, popup results,
+  bulk results); alerts use `role="alert"`; expandable panels and details expose
   `aria-expanded`/native summary semantics; disabled navigation links use
   `aria-disabled` and leave the tab order.
 - Native interactive elements (`dialog`, `details`, `input`, `select`,

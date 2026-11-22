@@ -330,7 +330,7 @@ h3 { margin: 0 0 .5rem; font-size: .9rem; }
 .when-result .mono { overflow-wrap: anywhere; }
 .when-status { margin-left: auto; font-size: .75rem; border: 1px solid var(--border); border-radius: 999px; padding: 0 .5rem; color: var(--muted-foreground); }
 .group-delete { margin-left: auto; }
-.group-delete:hover { color: var(--destructive, #b91c1c); }
+.config-remove:hover, .group-delete:hover { color: var(--destructive, #b91c1c); }
 .config-test { min-width: 0; }
 .pages-label { display: block; margin-bottom: .3rem; color: var(--muted-foreground); }
 .pages-input { display: block; width: 100%; min-height: 14rem; padding: .7rem; border: 1px solid var(--input); border-radius: calc(var(--radius) - 4px); background: var(--secondary); color: var(--secondary-foreground); resize: vertical; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
