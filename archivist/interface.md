@@ -44,7 +44,8 @@ page, `common.js`, `styles.css`).
 - The token is shared with the standard PocketBase admin UI through the
   `pocketbase_auth` localStorage entry, so signing in once covers both; a
   proactive silent refresh runs when the token expires within 24 hours.
-- On 401/403 the request triggers a blocking, non-cancellable login dialog
+- A 401 on any request, and a 403 on an application route
+  (`/api/archivist/…`), triggers a blocking, non-cancellable login dialog
   (native `<dialog>`), then the blocked request is retried once with the new
   token. Failures of that single retry are surfaced, never retried in loops.
 - Protected binary resources that must land in an `<iframe>` (the PDF
@@ -72,9 +73,12 @@ page, `common.js`, `styles.css`).
 - **Action idioms.** Text actions are `.btn` (`primary`/`secondary`); icon
   actions are square `.icon-control` / `.btn.iconbtn` buttons. The bulk bar
   groups its actions by family with vertical separators (field editing |
-  re-file & re-run | delete). A trash icon means irreversible destruction:
-  it turns red on hover and always asks for a confirmation naming the count
-  and the consequences before running.
+  re-file & re-run | delete). A trash icon means destruction. Destroying
+  committed data always asks for a confirmation naming the count and the
+  consequences first (the bulk document delete), while removing an unsaved
+  draft element — a field or template row, a rule section — is immediate,
+  because nothing is written until the explicit save; only the section-level
+  trash turns red on hover.
 
 ## 4. Typed controls and value conventions
 
@@ -146,13 +150,17 @@ page, `common.js`, `styles.css`).
 
 ## 6. Error and feedback display
 
-- Errors render in the shared `errbox` style (destructive color,
-  `role="alert"`) as plain lines, one per error, honoring the backend error shape
-  (`message` + `errors[]` for 422 responses, the message otherwise).
+- Errors render in the shared `errbox` style (destructive color) as plain
+  lines, one per error, honoring the backend error shape (`message` +
+  `errors[]` for 422 responses, the message otherwise). The boxes that
+  announce themselves carry `role="alert"` (the configuration editor's test
+  and popup error boxes, the modal error lines); the document detail page's
+  error boxes are plain.
 - Progress and saving states use a dedicated muted status line
-  (`role="status"`, `aria-live="polite"`): "Test en cours…",
-  "Modifications non activées", batch summaries, etc. No toast, no modal
-  success dialogs.
+  (`role="status"`, `aria-live="polite"`) — "Test en cours…",
+  "Modifications non activées" — while bulk results are reported by an
+  adjacent muted line inside the bulk bar itself. No toast, no modal success
+  dialogs.
 - Errors block what they invalidate: dry-run errors disable the correction,
   save errors re-enable editing and keep the draft, a failed filter or
   load leaves the previous view in place.
@@ -180,8 +188,9 @@ page, `common.js`, `styles.css`).
 
 ## 8. Accessibility
 
-- Every icon-only control: `aria-label` (+ `title`), minimum 2rem touch
-  target, `:focus-visible` ring from the tokens.
+- Every icon-only control: `aria-label` (+ `title`), a square touch target
+  of 2rem or more (1.6rem only for the compact icons inside a rule section
+  header), `:focus-visible` ring from the tokens.
 - Async regions announce through `aria-live` (status lines, popup results);
   alerts use `role="alert"`; expandable panels and details expose
   `aria-expanded`/native summary semantics; disabled navigation links use
