@@ -132,6 +132,11 @@ page, `common.js`, `styles.css`).
   one request per document, collects per-document successes, skips and
   failures, lets one failure never stop the rest, then refreshes the counts
   and the table and clears the selection.
+- **Filter-scoped selection.** The list selection belongs to the current
+  filter: changing the status tab, a column filter or the page search
+  empties it. The header checkbox cycles none → page → the whole filtered
+  set → none (indeterminate while the selection is partial), replacing a
+  dedicated select-all button.
 - **State boundaries.** The URL carries only the document context
   (`document.html?id=`, `config.html?id=`), maintained with `pushState` and
   `popstate`. Transient cross-page context (the current page's document ids,

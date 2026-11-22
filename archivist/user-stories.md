@@ -288,6 +288,7 @@ Acceptance criteria:
 - Given an `enum` filter dropdown, when the `empty` entry is chosen, then the list shows only the documents whose field holds no value (`(field='')` server-side); the `—` entry still clears the filter.
 - Given the list page, when I type a search term, then after a short pause the list shows documents where any page contains that term, case-insensitively, without displaying a text excerpt.
 - Given the list, when I open it, then quick tabs show the per-status counts and pre-filter the review queue (`pending` first).
+- Given the header checkbox, when I use it, then it cycles none → page → the whole filtered set → none (indeterminate display while the selection is partial or page-limited), and changing any filter (status tab, column filter, page search) empties the selection.
 
 ### US-33 — Change one field for a selection of documents
 
@@ -297,7 +298,7 @@ so that a systematic correction does not require opening every document.
 
 Acceptance criteria:
 
-- Given the list, when I select rows (page or whole filtered set), then a bulk action proposes choosing a declared field and a new value in a control matching the field type, and shows the number of impacted documents.
+- Given the list, when I select rows (page, or the whole filtered set through the header checkbox), then a bulk action proposes choosing a declared field and a new value in a control matching the field type, and shows the number of impacted documents.
 - Given the bulk action is confirmed, when it runs, then it issues one standard PATCH per document — the US-22 hook applies per record: a `corrected` event each, no re-filing, no status change.
 - Given one document of the selection fails, when the bulk action finishes, then the others are applied and the failure is reported with its error.
 - Given the bulk action, when the recompute mode is chosen instead of a manual value, then for each selected document the classification dry-run of US-35 (no body) re-runs the rule tree against the stored pages and the field takes the proposed value — only when that proposal differs from the document's current value; a document with no proposal for the field is left untouched, and a document whose proposal equals its current value counts as unchanged (no PATCH, no event).

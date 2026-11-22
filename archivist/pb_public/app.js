@@ -83,6 +83,7 @@ async function init() {
     if (pageSearchTimer) clearTimeout(pageSearchTimer);
     pageSearchTimer = setTimeout(function () {
       state.pageSearch = $("pageSearch").value.trim();
+      state.selected = {};
       state.page = 1;
       loadDocs();
     }, 1500);
@@ -137,6 +138,7 @@ function renderTabs() {
   all.textContent = "Tous";
   all.addEventListener("click", function () {
     state.statusTab = "";
+    state.selected = {};
     state.page = 1;
     loadDocs();
   });
@@ -152,6 +154,7 @@ function renderTabs() {
     b.appendChild(c);
     b.addEventListener("click", function () {
       state.statusTab = st;
+      state.selected = {};
       state.page = 1;
       loadDocs();
     });
@@ -215,10 +218,9 @@ function renderHead() {
   var cbAll = document.createElement("input");
   cbAll.type = "checkbox";
   cbAll.addEventListener("change", function () {
-    state.docs.forEach(function (d) {
-      if (cbAll.checked) state.selected[d.id] = true;
-      else delete state.selected[d.id];
-    });
+    if (!cbAll.checked) state.selected = {};
+    else if (headerSelectState() === "page") selectAllFiltered();
+    else state.docs.forEach(function (d) { state.selected[d.id] = true; });
     renderRows();
     renderBulkbar();
   });
@@ -272,8 +274,8 @@ function buildFilterControl(m) {
     var to = document.createElement("input");
     to.type = "date";
     to.value = f.to || "";
-    from.addEventListener("change", function () { f.from = from.value; state.page = 1; loadDocs(); });
-    to.addEventListener("change", function () { f.to = to.value; state.page = 1; loadDocs(); });
+    from.addEventListener("change", function () { f.from = from.value; state.selected = {}; state.page = 1; loadDocs(); });
+    to.addEventListener("change", function () { f.to = to.value; state.selected = {}; state.page = 1; loadDocs(); });
     wrap.appendChild(from);
     wrap.appendChild(to);
   } else if (m.type === "boolean") {
@@ -282,7 +284,7 @@ function buildFilterControl(m) {
     addOption(sel, "true", "oui");
     addOption(sel, "false", "non");
     sel.value = f.value || "";
-    sel.addEventListener("change", function () { f.value = sel.value; state.page = 1; loadDocs(); });
+    sel.addEventListener("change", function () { f.value = sel.value; state.selected = {}; state.page = 1; loadDocs(); });
     wrap.appendChild(sel);
   } else if (m.type === "enum") {
     var es = document.createElement("select");
@@ -290,7 +292,7 @@ function buildFilterControl(m) {
     addOption(es, EMPTY_FILTER, "vide");
     ((state.config.enums || {})[m.name] || []).forEach(function (v) { addOption(es, v, v); });
     es.value = f.value || "";
-    es.addEventListener("change", function () { f.value = es.value; state.page = 1; loadDocs(); });
+    es.addEventListener("change", function () { f.value = es.value; state.selected = {}; state.page = 1; loadDocs(); });
     wrap.appendChild(es);
   } else {
     var inp = document.createElement("input");
@@ -300,7 +302,7 @@ function buildFilterControl(m) {
     var timer = null;
     inp.addEventListener("input", function () {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(function () { f.value = inp.value; state.page = 1; loadDocs(); }, 300);
+      timer = setTimeout(function () { f.value = inp.value; state.selected = {}; state.page = 1; loadDocs(); }, 300);
     });
     wrap.appendChild(inp);
   }
@@ -385,7 +387,6 @@ function bindBulk() {
     renderRows();
     renderBulkbar();
   });
-  $("bulkall").addEventListener("click", selectAllFiltered);
   $("bulkrefile").addEventListener("click", applyRefile);
   $("bulkrerun").addEventListener("click", applyRerun);
   $("bulkdelete").addEventListener("click", applyDelete);
@@ -637,10 +638,51 @@ async function recalcOne(f, id) {
 // The bulk bar stays visible while a result line is displayed, even when
 // the action has cleared the selection: emptying it would hide the only
 // report of the action.
+// The list selection belongs to the current filter: changing the status
+// tab, a column filter or the page search empties it.
+function headerSelectBox() {
+  var thead = $("doctable").tHead;
+  return thead ? thead.querySelector("input[type=checkbox]") : null;
+}
+
+// headerSelectState reads the selection against the loaded page and the
+// filtered total: none, page (whole page selected, not the whole filter)
+// or all.
+function headerSelectState() {
+  var n = Object.keys(state.selected).length;
+  var allPage = state.docs.length > 0 && state.docs.every(function (d) {
+    return !!state.selected[d.id];
+  });
+  if (allPage && n >= state.total) return "all";
+  if (allPage) return "page";
+  return "none";
+}
+
+// syncHeaderSelect reflects the cycle on the header checkbox: unchecked
+// when empty, indeterminate while the selection is partial or page
+// limited, checked when the whole filtered set is selected; the tooltip
+// names the next step of the cycle.
+function syncHeaderSelect() {
+  var cb = headerSelectBox();
+  if (!cb) return;
+  var st = headerSelectState();
+  var n = Object.keys(state.selected).length;
+  cb.checked = st === "all";
+  cb.indeterminate = !cb.checked && n > 0;
+  var label = st === "all"
+    ? "Effacer la sélection (" + n + " document(s))"
+    : st === "page"
+      ? "Sélectionner tous les documents du filtre (" + state.total + ")"
+      : "Sélectionner les documents de la page";
+  cb.title = label;
+  cb.setAttribute("aria-label", label);
+}
+
 function renderBulkbar() {
   var n = Object.keys(state.selected).length;
   $("bulkbar").hidden = n === 0 && !state.bulkMessage;
   $("bulkcount").textContent = n ? n + " document(s) sélectionné(s)" : "";
+  syncHeaderSelect();
 }
 
 // setBulkResult shows the outcome of a bulk action; the message persists
