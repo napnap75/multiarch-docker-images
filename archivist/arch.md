@@ -260,7 +260,7 @@ When the bucket is versioned, any deletion creates a delete marker and the data 
 
 ## 7. Review Dashboard
 
-The review dashboard is a static frontend — plain HTML/CSS/JS files, no build toolchain, vendored dependencies only (no CDN: the application is 100% offline) — served by PocketBase's built-in static file serving from the `pb_public/` directory shipped in the image next to `pb_data/`. Four pages: the document list, the document detail, the tools page (section 7.5), and the configuration editor (section 7.6). Document data persists through the standard PocketBase API and its request hooks (US-22 / US-23 / US-24); the configuration editor uses dedicated superuser-only JSON routes because it edits and activates the functional configuration rather than a record.
+The review dashboard is a static frontend — plain HTML/CSS/JS files, no build toolchain, vendored dependencies only (no CDN: the application is 100% offline) — served by PocketBase's built-in static file serving from the `pb_public/` directory shipped in the image next to `pb_data/`. Four pages: the document list, the document detail, the tools page (section 7.5), and the configuration editor (section 7.6). document data persists through the standard PocketBase API and its request hooks (US-22 / US-23 / US-24); the configuration editor uses dedicated superuser-only JSON routes because it edits and activates the functional configuration rather than a record. The cross-cutting interface principles and conventions shared by these pages — technology, authentication, visual language, typed controls, interaction, error display, accessibility — are specified in `interface.md`, which this section does not repeat.
 
 ### 7.1 Document list (US-32 / US-33)
 
