@@ -60,7 +60,7 @@ function renderFields() {
     remove.className = "icon-control config-remove";
     remove.setAttribute("aria-label", "Supprimer le champ " + (field.name || index + 1));
     remove.title = "Supprimer le champ";
-    remove.textContent = "×";
+    remove.innerHTML = TRASH_SVG;
     remove.addEventListener("click", function () {
       syncDraftState();
       state.fields.splice(index, 1);
@@ -93,7 +93,7 @@ function renderTemplates() {
     remove.className = "icon-control config-remove";
     remove.setAttribute("aria-label", "Supprimer le modèle " + name);
     remove.title = "Supprimer le modèle";
-    remove.textContent = "×";
+    remove.innerHTML = TRASH_SVG;
     remove.addEventListener("click", function () {
       syncDraftState();
       delete state.templates[row.querySelector("input").value.trim()];
@@ -149,23 +149,28 @@ function renderGroups() {
     textarea.addEventListener("input", scheduleDryRun);
     details.appendChild(textarea);
 
-    var actions = document.createElement("div");
-    actions.className = "rule-group-actions";
     var remove = document.createElement("button");
     remove.type = "button";
-    remove.className = "btn secondary";
-    remove.textContent = "Supprimer la section";
-    remove.addEventListener("click", function () {
+    remove.className = "icon-control group-rename group-delete";
+    remove.setAttribute("aria-label", "Supprimer la section " + groupTitle(group.header, index));
+    remove.title = "Supprimer la section";
+    remove.innerHTML = TRASH_SVG;
+    remove.addEventListener("click", function (event) {
+      event.preventDefault();
       syncDraftState();
       state.groups.splice(index, 1);
       renderGroups();
       scheduleDryRun();
     });
-    actions.appendChild(remove);
-    details.appendChild(actions);
+    summary.appendChild(remove);
     container.appendChild(details);
   });
 }
+
+// TRASH_SVG is the shared delete icon of the config editor (field and
+// template rows, rule sections).
+var TRASH_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" aria-hidden="true"><path d="' +
+  'M135.2 17.7L128 32H32C14.3 32 0 46.3 0 64S14.3 96 32 96H416c17.7 0 32-14.3 32-32s-14.3-32-32-32H320l-7.2-14.3C307.4 6.8 296.3 0 284.5 0H163.5c-11.8 0-22.9 6.8-28.3 17.7zM416 128H32L53.2 467c1.6 25.3 22.6 45 47.9 45H346.9c25.3 0 46.3-19.7 47.9-45L416 128z"/></svg>';
 
 function groupTitle(header, index) {
   var title = String(header || "").replace(/^\/\/\s*---\s*/, "").replace(/\s*-+\s*$/, "").trim();
