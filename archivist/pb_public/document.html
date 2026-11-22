@@ -45,12 +45,12 @@
   <div class="detailgrid">
     <section class="card pdfpane">
       <iframe id="pdf" title="Aperçu du document"></iframe>
-      <div id="pdferror" class="errbox" hidden></div>
+      <div id="pdferror" class="errbox" role="alert" hidden></div>
     </section>
     <section>
       <div class="card">
         <div id="targetname" class="targetname"></div>
-        <div id="dryerrors" class="errbox" hidden></div>
+        <div id="dryerrors" class="errbox" role="alert" hidden></div>
         <form id="docform" class="formgrid" onsubmit="return false"></form>
         <div class="actions">
           <button id="correctBtn" type="button" class="btn primary">Valider</button>
@@ -81,7 +81,7 @@
           <button id="traceToggle" type="button" class="btn secondary panel-toggle" aria-expanded="false" aria-controls="tracePanel">Afficher</button>
         </div>
         <div id="tracePanel" hidden>
-          <div id="traceErrors" class="errbox" hidden></div>
+          <div id="traceErrors" class="errbox" role="alert" hidden></div>
           <div id="traceList" class="trace-list"></div>
         </div>
       </div>

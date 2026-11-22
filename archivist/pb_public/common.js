@@ -209,10 +209,17 @@ function fmtVal(v) {
   if (v === null || v === undefined || v === "") return "—";
   if (typeof v === "boolean") return v ? "true" : "false";
   if (typeof v === "string") {
-    if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return fmtDate(v);
+    if (isDateString(v)) return fmtDate(v);
     return v;
   }
   return String(v);
+}
+
+// isDateString recognizes both spellings of a stored date: the RFC 3339 of
+// the engine (dry-run proposals, event snapshots) and the space-separated
+// PocketBase record format ("2026-09-21 00:00:00.000Z").
+function isDateString(v) {
+  return /^\d{4}-\d{2}-\d{2}[T ]/.test(String(v));
 }
 
 function fmtDate(v) {

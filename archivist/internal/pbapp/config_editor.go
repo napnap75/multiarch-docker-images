@@ -254,6 +254,69 @@ func handleConfigDraft(re *core.RequestEvent, filesPrefix string) error {
 	})
 }
 
+// whenTestRequest is the body of the "impacted files" popup: the draft
+// source providing the declaration context (fields, their types) and the
+// ordered when chain — the parents first, the selected rule last.
+type whenTestRequest struct {
+	Source string   `json:"source"`
+	When   []string `json:"when"`
+}
+
+// whenTestMatch is one matching document of the when-test route.
+type whenTestMatch struct {
+	Id      string `json:"id"`
+	FileKey string `json:"file_key"`
+	Status  string `json:"status"`
+}
+
+// handleConfigWhenMatch answers the configuration editor's section popup:
+// it compiles the submitted draft (bad JSONC or invalid configuration =
+// validation errors, active state untouched) and evaluates the selected
+// when chain — parents first, chosen last, hierarchy applied (US-50) —
+// against every document's stored pages and fields, whatever its status.
+// It persists nothing and never touches S3.
+func handleConfigWhenMatch(re *core.RequestEvent) error {
+	if !re.HasSuperuserAuth() {
+		return re.ForbiddenError("superusers only", nil)
+	}
+	body, err := io.ReadAll(re.Request.Body)
+	if err != nil {
+		return re.JSON(400, map[string]any{"message": "unreadable body", "error": err.Error()})
+	}
+	var request whenTestRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		return re.JSON(400, map[string]any{"message": "invalid JSON body", "error": err.Error()})
+	}
+	if len(request.When) == 0 {
+		return re.JSON(422, map[string]any{"message": "no when selected", "errors": []string{"no when selected"}})
+	}
+	cfg, err := config.LoadSource([]byte(request.Source))
+	if err != nil {
+		return re.JSON(422, map[string]any{"message": "configuration is invalid", "errors": []string{err.Error()}})
+	}
+	programs, err := cfg.CompileWhenChain(request.When)
+	if err != nil {
+		return re.JSON(422, map[string]any{"message": "when expression is invalid", "errors": []string{fmt.Sprintf("when: %v", err)}})
+	}
+
+	records, err := re.App.FindRecordsByFilter("documents", "", "file_key", 0, 0)
+	if err != nil {
+		return re.JSON(500, map[string]any{"message": "document listing failed", "error": err.Error()})
+	}
+	matches := []whenTestMatch{}
+	for _, record := range records {
+		if !cfg.MatchWhenChain(programs, recordPages(record), FieldsFromRecord(cfg, record)) {
+			continue
+		}
+		matches = append(matches, whenTestMatch{
+			Id:      record.Id,
+			FileKey: record.GetString("file_key"),
+			Status:  record.GetString("status"),
+		})
+	}
+	return re.JSON(200, map[string]any{"documents": matches, "errors": []string{}})
+}
+
 func handleSaveConfig(re *core.RequestEvent, manager *config.Manager, path string) error {
 	if !re.HasSuperuserAuth() {
 		return re.ForbiddenError("superusers only", nil)

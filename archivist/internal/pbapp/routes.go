@@ -48,6 +48,9 @@ func BindRoutes(app core.App, manager *config.Manager, configPath string, s3 *st
 		e.Router.POST("/api/archivist/config/dry-run", func(re *core.RequestEvent) error {
 			return handleConfigDraft(re, s3.Prefixes().Files)
 		})
+		e.Router.POST("/api/archivist/config/when-match", func(re *core.RequestEvent) error {
+			return handleConfigWhenMatch(re)
+		})
 		e.Router.PUT("/api/archivist/config", func(re *core.RequestEvent) error {
 			return handleSaveConfig(re, manager, configPath)
 		})

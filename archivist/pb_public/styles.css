@@ -298,7 +298,8 @@ h3 { margin: 0 0 .5rem; font-size: .9rem; }
 .config-table td textarea { resize: vertical; font: inherit; }
 .config-check-cell { text-align: center; }
 .config-check-cell input { width: 1rem; height: 1rem; }
-.config-remove { width: 2rem; height: 2rem; border: 1px solid var(--border); background: var(--secondary); color: var(--secondary-foreground); cursor: pointer; }
+.config-remove { width: 2rem; height: 2rem; border: 1px solid var(--border); background: var(--secondary); color: var(--secondary-foreground); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+.config-remove svg { width: .85rem; height: .85rem; fill: currentColor; }
 .rule-groups { display: grid; gap: .5rem; }
 .rule-group { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); padding: .65rem .75rem; }
 .rule-group summary { display: flex; align-items: center; gap: .45rem; cursor: pointer; font-weight: 600; }
@@ -307,7 +308,29 @@ h3 { margin: 0 0 .5rem; font-size: .9rem; }
 .group-rename:hover { color: var(--primary); }
 .group-rename:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .rule-source { display: block; width: 100%; min-height: 12rem; margin-top: .6rem; padding: .65rem; border: 1px solid var(--input); border-radius: calc(var(--radius) - 4px); background: var(--secondary); color: var(--secondary-foreground); resize: vertical; }
-.rule-group-actions { display: flex; justify-content: flex-end; margin-top: .5rem; }
+.group-test { color: var(--muted-foreground); }
+.when-dialog {
+  width: min(48rem, calc(100vw - 2rem));
+  max-height: min(80vh, 46rem);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  background: var(--card);
+  color: var(--card-foreground);
+}
+.when-dialog::backdrop { background: hsl(220 8% 10% / .52); }
+.when-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.when-dialog-head h3 { margin: 0 0 .25rem; font-size: 1rem; }
+.when-rules { display: grid; gap: .2rem; margin: .5rem 0 .75rem; }
+.when-rule { display: flex; align-items: baseline; gap: .5rem; cursor: pointer; padding: .15rem 0; }
+.when-rule-text { overflow-wrap: anywhere; }
+.when-results-head { margin-top: .25rem; padding-top: .6rem; border-top: 1px solid var(--border); }
+.when-results { max-height: 38vh; overflow: auto; display: grid; gap: .2rem; padding-bottom: .25rem; }
+.when-result { display: flex; align-items: center; gap: .5rem; padding: .15rem 0; }
+.when-result .mono { overflow-wrap: anywhere; }
+.when-status { margin-left: auto; font-size: .75rem; border: 1px solid var(--border); border-radius: 999px; padding: 0 .5rem; color: var(--muted-foreground); }
+.group-delete { margin-left: auto; }
+.config-remove:hover, .group-delete:hover { color: var(--destructive, #b91c1c); }
 .config-test { min-width: 0; }
 .pages-label { display: block; margin-bottom: .3rem; color: var(--muted-foreground); }
 .pages-input { display: block; width: 100%; min-height: 14rem; padding: .7rem; border: 1px solid var(--input); border-radius: calc(var(--radius) - 4px); background: var(--secondary); color: var(--secondary-foreground); resize: vertical; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }

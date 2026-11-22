@@ -89,7 +89,7 @@ Three sections:
 - `rules`: an ordered tree of rules. Each rule activates if its `when` expression is true, then assigns fields (`set`), removes some (`delete`), and evaluates its child rules.
 - `templates`: naming templates. A template produces the full path under `files/`, with `{...}` expressions evaluated in the document context.
 
-A commented `config.jsonc` example file is provided in the repository. The configuration editor presents `fields` and `templates` as tables and `rules` as collapsible, editable sections grouped by `// --- ` comments. It can test a draft against pasted page JSON or a document's stored pages; the preview includes proposed fields, errors, rendered path and rule trace. Changes are activated only after an explicit save and full validation. Invalid drafts leave the active file and configuration unchanged.
+A commented `config.jsonc` example file is provided in the repository. The configuration editor presents `fields` and `templates` as tables and `rules` as collapsible, editable sections, each with a rename pencil, a magnifier opening an impacted-files popup — choose one of the section's `when` conditions in the upper part, the documents matching it (hierarchy of parents included) are listed with their status in the lower part — and a trash. It can test a draft against pasted page JSON or a document's stored pages; the preview includes proposed fields, errors, rendered path and rule trace. Changes are activated only after an explicit save and full validation. Invalid drafts leave the active file and configuration unchanged.
 
 ### Minimal example
 
@@ -128,7 +128,7 @@ A commented `config.jsonc` example file is provided in the repository. The confi
 - Document list with status, filters, and combined search: full text (content of all pages) and fields.
 - Detail view with PDF preview (streamed from S3) and extracted fields. Debug mode shows the detail of every rule evaluation.
 - Correction: a form to edit the fields. A draft save is always possible: it persists the values with no side effect (no template evaluation, no re-filing, no status change). Only the full correction — re-filing and validation — is refused while the rendered name still has errors. A corrected file is re-filed and becomes `validated`; a corrected `pending` file leaves the review queue.
-- Validation: direct transition from `processed` to `validated`.
+- Validation: direct transition from `processed` to `validated`, and back to `processed`; both bulk-editable from the document list.
 - History: every document has a complete, timestamped trace (import, correction, validation) readable from its detail view.
 - Tools: maintenance tasks run by hand (see Tools below).
 - Configuration editor: edit fields, rules and templates, test against pasted or stored page text, and save a validated configuration without restarting the container.

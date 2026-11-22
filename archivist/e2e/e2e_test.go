@@ -942,6 +942,30 @@ func TestE2E(t *testing.T) {
 		if _, has := before["file_key"]; has {
 			t.Fatal("validated snapshots carry the status alone")
 		}
+
+		// Back to processed (US-23): the reverse transition appends the
+		// reprocessed event, still without touching file_key; pending is
+		// refused on its own.
+		status, out = call(t, http.MethodPatch, "/api/collections/documents/records/"+id,
+			map[string]any{"status": "processed"})
+		if status != 200 {
+			t.Fatalf("reopening refused: %d %v", status, out)
+		}
+		doc = oneRecord(t, "documents", "(id='"+id+"')")
+		if doc["file_key"] != oldKey {
+			t.Fatalf("file_key must not change on reopening: %v -> %v", oldKey, doc["file_key"])
+		}
+		p = eventPayloadOfType(t, eventsOf(t, id), "reprocessed")
+		before, _ = p["before"].(map[string]any)
+		after, _ = p["after"].(map[string]any)
+		if before["status"] != "validated" || after["status"] != "processed" {
+			t.Fatalf("reprocessed snapshots: %v -> %v", before, after)
+		}
+		status, _ = call(t, http.MethodPatch, "/api/collections/documents/records/"+id,
+			map[string]any{"status": "pending"})
+		if status == 200 {
+			t.Fatal("a status change to pending must be refused")
+		}
 	})
 
 	// 7. Append-only (US-04): PATCH and DELETE on document_events are
@@ -1828,6 +1852,48 @@ func TestE2E(t *testing.T) {
 		if status, _ = unauth(t, http.MethodPut, "/api/archivist/config",
 			map[string]any{"source": source}); status != 403 {
 			t.Fatalf("config save without superuser auth: want 403, got %d", status)
+		}
+
+		// The "impacted files" popup route: the statement when matches the
+		// statements already filed, every entry carries key and status,
+		// and the refusals hold (US-50).
+		statementWhen := "pages[0] contains " + "`BRED`"
+		status, out = call(t, http.MethodPost, "/api/archivist/config/when-match", map[string]any{
+			"source": source,
+			"when":   []string{statementWhen},
+		})
+		if status != 200 {
+			t.Fatalf("when-match: status %d: %v", status, out)
+		}
+		matches, _ := out["documents"].([]any)
+		bredFiled := false
+		for _, m := range matches {
+			entry, ok := m.(map[string]any)
+			if !ok {
+				t.Fatalf("when-match document shape: %v", m)
+			}
+			key, _ := entry["file_key"].(string)
+			if _, has := entry["status"]; !has {
+				t.Fatalf("when-match document misses its status: %v", entry)
+			}
+			if strings.Contains(key, "BRED") {
+				bredFiled = true
+			}
+		}
+		if !bredFiled {
+			t.Fatalf("when-match found no filed BRED statement: %v", matches)
+		}
+		if status, _ = call(t, http.MethodPost, "/api/archivist/config/when-match",
+			map[string]any{"source": "{", "when": []string{statementWhen}}); status != 422 {
+			t.Fatalf("when-match with an invalid draft must be rejected with 422, got %d", status)
+		}
+		if status, _ = call(t, http.MethodPost, "/api/archivist/config/when-match",
+			map[string]any{"source": source, "when": []string{}}); status != 422 {
+			t.Fatalf("when-match with an empty chain must be rejected with 422, got %d", status)
+		}
+		if status, _ = unauth(t, http.MethodPost, "/api/archivist/config/when-match",
+			map[string]any{"source": source, "when": []string{statementWhen}}); status != 403 {
+			t.Fatalf("when-match without superuser auth: want 403, got %d", status)
 		}
 
 		updatedSource := strings.Replace(source, `"value": "bank"`, `"value": "checking"`, 1)

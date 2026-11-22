@@ -19,8 +19,12 @@ var state = {
   docs: [],
   total: 0,
   totalPages: 1,
-  counts: {}
+  counts: {},
+  bulkMessage: ""
 };
+// EMPTY_FILTER is the sentinel value of the "vide" entry in the enum
+// filter dropdowns: it matches the documents whose field holds no value.
+var EMPTY_FILTER = "__archivist_empty__";
 var docsLoadSequence = 0;
 var pageSearchTimer = null;
 
@@ -79,6 +83,7 @@ async function init() {
     if (pageSearchTimer) clearTimeout(pageSearchTimer);
     pageSearchTimer = setTimeout(function () {
       state.pageSearch = $("pageSearch").value.trim();
+      state.selected = {};
       state.page = 1;
       loadDocs();
     }, 1500);
@@ -133,6 +138,7 @@ function renderTabs() {
   all.textContent = "Tous";
   all.addEventListener("click", function () {
     state.statusTab = "";
+    state.selected = {};
     state.page = 1;
     loadDocs();
   });
@@ -148,6 +154,7 @@ function renderTabs() {
     b.appendChild(c);
     b.addEventListener("click", function () {
       state.statusTab = st;
+      state.selected = {};
       state.page = 1;
       loadDocs();
     });
@@ -170,7 +177,9 @@ function buildFilterQuery() {
     } else if (m.type === "boolean") {
       if (f.value === "true" || f.value === "false") parts.push("(" + name + "=" + f.value + ")");
     } else if (m.type === "enum") {
-      if (f.value) parts.push("(" + name + "='" + esc(f.value) + "')");
+      if (f.value === EMPTY_FILTER)
+        parts.push("(" + name + "='')");
+      else if (f.value) parts.push("(" + name + "='" + esc(f.value) + "')");
     } else {
       if (f.value) parts.push("(" + name + "~'" + esc(f.value) + "')");
     }
@@ -209,10 +218,9 @@ function renderHead() {
   var cbAll = document.createElement("input");
   cbAll.type = "checkbox";
   cbAll.addEventListener("change", function () {
-    state.docs.forEach(function (d) {
-      if (cbAll.checked) state.selected[d.id] = true;
-      else delete state.selected[d.id];
-    });
+    if (!cbAll.checked) state.selected = {};
+    else if (headerSelectState() === "page") selectAllFiltered();
+    else state.docs.forEach(function (d) { state.selected[d.id] = true; });
     renderRows();
     renderBulkbar();
   });
@@ -266,8 +274,8 @@ function buildFilterControl(m) {
     var to = document.createElement("input");
     to.type = "date";
     to.value = f.to || "";
-    from.addEventListener("change", function () { f.from = from.value; state.page = 1; loadDocs(); });
-    to.addEventListener("change", function () { f.to = to.value; state.page = 1; loadDocs(); });
+    from.addEventListener("change", function () { f.from = from.value; state.selected = {}; state.page = 1; loadDocs(); });
+    to.addEventListener("change", function () { f.to = to.value; state.selected = {}; state.page = 1; loadDocs(); });
     wrap.appendChild(from);
     wrap.appendChild(to);
   } else if (m.type === "boolean") {
@@ -276,14 +284,15 @@ function buildFilterControl(m) {
     addOption(sel, "true", "oui");
     addOption(sel, "false", "non");
     sel.value = f.value || "";
-    sel.addEventListener("change", function () { f.value = sel.value; state.page = 1; loadDocs(); });
+    sel.addEventListener("change", function () { f.value = sel.value; state.selected = {}; state.page = 1; loadDocs(); });
     wrap.appendChild(sel);
   } else if (m.type === "enum") {
     var es = document.createElement("select");
     addOption(es, "", "—");
+    addOption(es, EMPTY_FILTER, "vide");
     ((state.config.enums || {})[m.name] || []).forEach(function (v) { addOption(es, v, v); });
     es.value = f.value || "";
-    es.addEventListener("change", function () { f.value = es.value; state.page = 1; loadDocs(); });
+    es.addEventListener("change", function () { f.value = es.value; state.selected = {}; state.page = 1; loadDocs(); });
     wrap.appendChild(es);
   } else {
     var inp = document.createElement("input");
@@ -293,7 +302,7 @@ function buildFilterControl(m) {
     var timer = null;
     inp.addEventListener("input", function () {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(function () { f.value = inp.value; state.page = 1; loadDocs(); }, 300);
+      timer = setTimeout(function () { f.value = inp.value; state.selected = {}; state.page = 1; loadDocs(); }, 300);
     });
     wrap.appendChild(inp);
   }
@@ -369,15 +378,10 @@ function bindBulk() {
   var sel = $("bulkfield");
   sel.innerHTML = "";
   state.config.fields.forEach(function (f) { addOption(sel, f.name, f.french); });
+  addOption(sel, "status", "Statut");
   sel.addEventListener("change", rebuildBulkValue);
   $("bulkrecalc").addEventListener("click", applyRecalc);
   $("bulkapply").addEventListener("click", applyBulk);
-  $("bulkclear").addEventListener("click", function () {
-    state.selected = {};
-    renderRows();
-    renderBulkbar();
-  });
-  $("bulkall").addEventListener("click", selectAllFiltered);
   $("bulkrefile").addEventListener("click", applyRefile);
   $("bulkrerun").addEventListener("click", applyRerun);
   $("bulkdelete").addEventListener("click", applyDelete);
@@ -385,18 +389,25 @@ function bindBulk() {
 }
 
 function bulkField() {
-  var name = $("bulkfield").value;
-  for (var i = 0; i < state.config.fields.length; i++) {
-    if (state.config.fields[i].name === name) return state.config.fields[i];
-  }
-  return null;
+  return fieldMeta($("bulkfield").value);
 }
 
 function rebuildBulkValue() {
   var holder = $("bulkvalue");
   holder.innerHTML = "";
   var f = bulkField();
+  // The recalc action only makes sense for declared fields: disabled for
+  // the status, whose direct changes are validated and reprocessed (US-23).
+  $("bulkrecalc").disabled = !f || f.name === "status";
   if (!f) return;
+  if (f.name === "status") {
+    var sel = document.createElement("select");
+    addOption(sel, "", "—");
+    addOption(sel, "validated", "validated");
+    addOption(sel, "processed", "processed");
+    holder.appendChild(sel);
+    return;
+  }
   holder.appendChild(buildValueControl(f, (state.config.enums || {})[f.name] || [], null));
 }
 
@@ -422,7 +433,7 @@ async function applyBulk() {
   try {
     var r = readValueControl(f, el);
     if (r.clear) {
-      if (f.mandatory) { alert("Ce champ est obligatoire : une valeur est requise."); return; }
+      if (f.mandatory || f.name === "status") { alert("Ce champ est obligatoire : une valeur est requise."); return; }
       value = null;
     } else {
       value = r.value;
@@ -430,7 +441,7 @@ async function applyBulk() {
   } catch (e) { alert(e.message); return; }
   var ids = Object.keys(state.selected);
   if (!ids.length) { alert("Aucun document sélectionné."); return; }
-  $("bulkresult").textContent = "…";
+  setBulkResult("…");
   var ok = 0;
   var failed = [];
   for (var i = 0; i < ids.length; i++) {
@@ -440,8 +451,8 @@ async function applyBulk() {
     if (res.status === 200) ok++;
     else failed.push(ids[i] + " : " + errMsg(res));
   }
-  $("bulkresult").textContent = ok + " document(s) modifié(s)" +
-    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : "");
+  setBulkResult(ok + " document(s) modifié(s)" +
+    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : ""));
   state.selected = {};
   await loadCounts();
   await loadDocs();
@@ -475,7 +486,7 @@ async function applyRecalc() {
   if (!confirm("Recalculer « " + fieldLabel(f) + " » pour " + ids.length +
     " document(s) à partir des règles ?\n" +
     "Seuls les documents dont la valeur diffère de celle proposée par les règles seront modifiés.")) return;
-  $("bulkresult").textContent = "…";
+  setBulkResult("…");
   var ok = 0;
   var skipped = 0;
   var failed = [];
@@ -485,8 +496,8 @@ async function applyRecalc() {
     else if (res === "skipped") skipped++;
     else failed.push(ids[i] + " : " + res);
   }
-  $("bulkresult").textContent = ok + " document(s) recalculé(s), " + skipped + " inchangé(s)" +
-    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : "");
+  setBulkResult(ok + " document(s) recalculé(s), " + skipped + " inchangé(s)" +
+    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : ""));
   state.selected = {};
   await loadCounts();
   await loadDocs();
@@ -502,7 +513,7 @@ async function applyRefile() {
   if (!ids.length) { alert("Aucun document sélectionné."); return; }
   if (!confirm("Re-filer " + ids.length + " document(s) d'après la configuration active ?\n" +
     "Un document déjà bien classé ne bouge pas ; les documents pending sont refusés.")) return;
-  $("bulkresult").textContent = "…";
+  setBulkResult("…");
   var moved = 0;
   var unchanged = 0;
   var skipped = [];
@@ -516,9 +527,9 @@ async function applyRefile() {
     default: skipped.push(res.data.reason || ids[i]);
     }
   }
-  $("bulkresult").textContent = moved + " déplacé(s), " + unchanged + " inchangé(s)" +
+  setBulkResult(moved + " déplacé(s), " + unchanged + " inchangé(s)" +
     (skipped.length ? ", " + skipped.length + " ignoré(s) — " + skipped[0] : "") +
-    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : "");
+    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : ""));
   state.selected = {};
   await loadCounts();
   await loadDocs();
@@ -536,7 +547,7 @@ async function applyRerun() {
   if (!ids.length) { alert("Aucun document sélectionné."); return; }
   if (!confirm("Relancer l'ensemble des règles pour " + ids.length + " document(s) ?\n" +
     "Les champs seront remplacés par ce que produisent les règles actuelles, le fichier sera re-filé et son statut repassera à « processed » ; un document dont la nouvelle classification est en erreur est ignoré, les documents pending sont refusés.")) return;
-  $("bulkresult").textContent = "…";
+  setBulkResult("…");
   var updated = 0;
   var unchanged = 0;
   var skipped = [];
@@ -550,9 +561,9 @@ async function applyRerun() {
     default: skipped.push(res.data.reason || ids[i]);
     }
   }
-  $("bulkresult").textContent = updated + " relancé(s), " + unchanged + " inchangé(s)" +
+  setBulkResult(updated + " relancé(s), " + unchanged + " inchangé(s)" +
     (skipped.length ? ", " + skipped.length + " ignoré(s) — " + skipped[0] : "") +
-    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : "");
+    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : ""));
   state.selected = {};
   await loadCounts();
   await loadDocs();
@@ -569,7 +580,7 @@ async function applyDelete() {
   if (!ids.length) { alert("Aucun document sélectionné."); return; }
   if (!confirm("Supprimer définitivement " + ids.length + " document(s) ?\n" +
     "Chaque document, son historique et le fichier correspondant du bucket S3 seront supprimés. Cette action est irréversible.")) return;
-  $("bulkresult").textContent = "…";
+  setBulkResult("…");
   var ok = 0;
   var failed = [];
   for (var i = 0; i < ids.length; i++) {
@@ -577,8 +588,8 @@ async function applyDelete() {
     if (res.status === 200 || res.status === 204) ok++;
     else failed.push(ids[i] + " : " + errMsg(res));
   }
-  $("bulkresult").textContent = ok + " document(s) supprimé(s)" +
-    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : "");
+  setBulkResult(ok + " document(s) supprimé(s)" +
+    (failed.length ? ", " + failed.length + " échec(s) — " + failed[0] : ""));
   state.selected = {};
   await loadCounts();
   await loadDocs();
@@ -619,10 +630,62 @@ async function recalcOne(f, id) {
   return "ok";
 }
 
+// The bulk bar stays visible while a result line is displayed, even when
+// the action has cleared the selection: emptying it would hide the only
+// report of the action.
+// The list selection belongs to the current filter: changing the status
+// tab, a column filter or the page search empties it.
+function headerSelectBox() {
+  var thead = $("doctable").tHead;
+  return thead ? thead.querySelector("input[type=checkbox]") : null;
+}
+
+// headerSelectState reads the selection against the loaded page and the
+// filtered total: none, page (whole page selected, not the whole filter)
+// or all.
+function headerSelectState() {
+  var n = Object.keys(state.selected).length;
+  var allPage = state.docs.length > 0 && state.docs.every(function (d) {
+    return !!state.selected[d.id];
+  });
+  if (allPage && n >= state.total) return "all";
+  if (allPage) return "page";
+  return "none";
+}
+
+// syncHeaderSelect reflects the cycle on the header checkbox: unchecked
+// when empty, indeterminate while the selection is partial or page
+// limited, checked when the whole filtered set is selected; the tooltip
+// names the next step of the cycle.
+function syncHeaderSelect() {
+  var cb = headerSelectBox();
+  if (!cb) return;
+  var st = headerSelectState();
+  var n = Object.keys(state.selected).length;
+  cb.checked = st === "all";
+  cb.indeterminate = !cb.checked && n > 0;
+  var label = st === "all"
+    ? "Effacer la sélection (" + n + " document(s))"
+    : st === "page"
+      ? "Sélectionner tous les documents du filtre (" + state.total + ")"
+      : "Sélectionner les documents de la page";
+  cb.title = label;
+  cb.setAttribute("aria-label", label);
+}
+
 function renderBulkbar() {
   var n = Object.keys(state.selected).length;
-  $("bulkbar").hidden = n === 0;
-  $("bulkcount").textContent = n + " document(s) sélectionné(s)";
+  $("bulkbar").hidden = n === 0 && !state.bulkMessage;
+  $("bulkcount").textContent = n ? n + " document(s) sélectionné(s)" : "";
+  syncHeaderSelect();
+}
+
+// setBulkResult shows the outcome of a bulk action; the message persists
+// until the next action replaces it.
+function setBulkResult(text) {
+  state.bulkMessage = text || "";
+  $("bulkresult").textContent = state.bulkMessage;
+  renderBulkbar();
 }
 
 init();

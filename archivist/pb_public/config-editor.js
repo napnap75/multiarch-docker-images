@@ -11,7 +11,10 @@ var state = {
   timer: null,
   draftValid: false,
   dirty: false,
-  configVersion: 0
+  configVersion: 0,
+  whenGroup: -1,
+  whenChainKey: null,
+  whenSequence: 0
 };
 
 function $(id) { return document.getElementById(id); }
@@ -60,7 +63,7 @@ function renderFields() {
     remove.className = "icon-control config-remove";
     remove.setAttribute("aria-label", "Supprimer le champ " + (field.name || index + 1));
     remove.title = "Supprimer le champ";
-    remove.textContent = "×";
+    remove.innerHTML = TRASH_SVG;
     remove.addEventListener("click", function () {
       syncDraftState();
       state.fields.splice(index, 1);
@@ -93,7 +96,7 @@ function renderTemplates() {
     remove.className = "icon-control config-remove";
     remove.setAttribute("aria-label", "Supprimer le modèle " + name);
     remove.title = "Supprimer le modèle";
-    remove.textContent = "×";
+    remove.innerHTML = TRASH_SVG;
     remove.addEventListener("click", function () {
       syncDraftState();
       delete state.templates[row.querySelector("input").value.trim()];
@@ -149,21 +152,176 @@ function renderGroups() {
     textarea.addEventListener("input", scheduleDryRun);
     details.appendChild(textarea);
 
-    var actions = document.createElement("div");
-    actions.className = "rule-group-actions";
     var remove = document.createElement("button");
     remove.type = "button";
-    remove.className = "btn secondary";
-    remove.textContent = "Supprimer la section";
-    remove.addEventListener("click", function () {
+    remove.className = "icon-control group-rename group-delete";
+    remove.setAttribute("aria-label", "Supprimer la section " + groupTitle(group.header, index));
+    var test = document.createElement("button");
+    test.type = "button";
+    test.className = "icon-control group-rename group-test";
+    test.setAttribute("aria-label", "Voir les documents concernés par la section " + groupTitle(group.header, index));
+    test.title = "Voir les documents concernés";
+    test.innerHTML = GLASS_SVG;
+    test.addEventListener("click", function (event) {
+      event.preventDefault();
+      openWhenDialog(index);
+    });
+    summary.appendChild(test);
+    remove.title = "Supprimer la section";
+    remove.innerHTML = TRASH_SVG;
+    remove.addEventListener("click", function (event) {
+      event.preventDefault();
       syncDraftState();
       state.groups.splice(index, 1);
       renderGroups();
       scheduleDryRun();
     });
-    actions.appendChild(remove);
-    details.appendChild(actions);
+    summary.appendChild(remove);
     container.appendChild(details);
+  });
+}
+
+// GLASS_SVG is the "impacted files" icon of the rule sections.
+var GLASS_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" aria-hidden="true"><path d="' +
+  'M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352a144 144 0 1 0 0-288 144 144 0 1 0 0 288z"/></svg>';
+
+// TRASH_SVG is the shared delete icon of the config editor (field and
+// template rows, rule sections).
+var TRASH_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" aria-hidden="true"><path d="' +
+  'M135.2 17.7L128 32H32C14.3 32 0 46.3 0 64S14.3 96 32 96H416c17.7 0 32-14.3 32-32s-14.3-32-32-32H320l-7.2-14.3C307.4 6.8 296.3 0 284.5 0H163.5c-11.8 0-22.9 6.8-28.3 17.7zM416 128H32L53.2 467c1.6 25.3 22.6 45 47.9 45H346.9c25.3 0 46.3-19.7 47.9-45L416 128z"/></svg>';
+
+// The section popup lists the when chain of every rule of the section
+// (hierarchy flattened, sub-rules indented under their parents) as radio
+// buttons, and shows the documents matching the selected chain: parents
+// evaluated before the chosen rule, against the stored pages and fields
+// of every document, under the current draft configuration.
+
+function openWhenDialog(groupIndex) {
+  syncDraftState();
+  state.whenGroup = groupIndex;
+  renderWhenRules();
+  renderWhenResults(null);
+  $("whenResultsHead").textContent = "";
+  $("whenDialog").showModal();
+}
+
+function renderWhenRules() {
+  var box = $("whenRules");
+  box.innerHTML = "";
+  var rules = state.groups[state.whenGroup] ? state.groups[state.whenGroup].rules : "[]";
+  var entries = [];
+  try {
+    var parsed = JSON.parse(rules || "[]");
+    if (!Array.isArray(parsed)) throw new Error("tableau attendu");
+    (function walk(list, chain, depth) {
+      list.forEach(function (rule) {
+        if (!rule || typeof rule.when !== "string" || !rule.when) return;
+        var next = chain.concat([rule.when]);
+        entries.push({ when: rule.when, chain: next, depth: depth });
+        if (Array.isArray(rule.rules)) walk(rule.rules, next, depth + 1);
+      });
+    })(parsed, [], 0);
+  } catch (error) {
+    showWhenErrors(["Règles de la section invalides : " + error.message]);
+    return;
+  }
+  if (!entries.length) {
+    showWhenErrors(["La section ne contient aucune règle."]);
+    return;
+  }
+  showWhenErrors([]);
+  var selected = null;
+  entries.forEach(function (entry, index) {
+    var label = document.createElement("label");
+    label.className = "when-rule";
+    label.style.paddingLeft = (entry.depth * 1.25) + "rem";
+    var radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "whenSelect";
+    radio.value = String(index);
+    var chainKey = JSON.stringify(entry.chain);
+    if (chainKey === state.whenChainKey) {
+      radio.checked = true;
+      selected = entry;
+    }
+    radio.addEventListener("change", function () { runWhenTest(entry.chain); });
+    label.appendChild(radio);
+    var text = document.createElement("span");
+    text.className = "mono when-rule-text";
+    text.textContent = entry.when;
+    label.appendChild(text);
+    box.appendChild(label);
+  });
+  if (selected) runWhenTest(selected.chain);
+}
+
+async function runWhenTest(chain) {
+  state.whenChainKey = JSON.stringify(chain);
+  var sequence = ++state.whenSequence;
+  var source;
+  try { source = composeSource(readDraft()); }
+  catch (error) {
+    showWhenErrors([error.message]);
+    renderWhenResults(null);
+    $("whenResultsHead").textContent = "";
+    return;
+  }
+  $("whenResults").innerHTML = "";
+  $("whenResultsHead").textContent = "Recherche…";
+  var result = await api("POST", "/api/archivist/config/when-match", { source: source, when: chain });
+  if (sequence !== state.whenSequence) return;
+  if (result.status !== 200) {
+    showWhenErrors((result.data && result.data.errors) || [errMsg(result)]);
+    renderWhenResults(null);
+    $("whenResultsHead").textContent = "";
+    return;
+  }
+  showWhenErrors([]);
+  var docs = result.data.documents || [];
+  $("whenResultsHead").textContent = docs.length + " document(s) concerné(s) :";
+  renderWhenResults(docs);
+}
+
+function renderWhenResults(documents) {
+  var box = $("whenResults");
+  box.innerHTML = "";
+  if (!documents) {
+    box.appendChild(document.createTextNode("Sélectionnez une condition ci-dessus."));
+    return;
+  }
+  if (!documents.length) {
+    box.className = "when-results muted";
+    box.appendChild(document.createTextNode("Aucun document concerné."));
+    return;
+  }
+  box.className = "when-results";
+  documents.forEach(function (doc) {
+    var line = document.createElement("div");
+    line.className = "when-result";
+    var key = document.createElement("span");
+    key.className = "mono";
+    key.textContent = doc.file_key || doc.id;
+    var badge = document.createElement("span");
+    badge.className = "when-status";
+    badge.textContent = doc.status;
+    line.appendChild(key);
+    line.appendChild(badge);
+    box.appendChild(line);
+  });
+}
+
+function showWhenErrors(errors) {
+  var box = $("whenErrors");
+  box.innerHTML = "";
+  if (!errors || !errors.length) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  errors.forEach(function (message) {
+    var line = document.createElement("div");
+    line.textContent = message;
+    box.appendChild(line);
   });
 }
 
@@ -375,6 +533,12 @@ function sameValue(left, right) {
   if (typeof left === "object" || typeof right === "object") {
     return JSON.stringify(left) === JSON.stringify(right);
   }
+  // A stored date and its dry-run proposal can spell the same instant
+  // differently (PocketBase record vs RFC 3339): compare at the display
+  // precision so an equal date never shows the proposal highlight.
+  if (isDateString(left) && isDateString(right)) {
+    return fmtDate(left) === fmtDate(right);
+  }
   return String(left) === String(right);
 }
 
@@ -543,6 +707,7 @@ function bindActions() {
     scheduleDryRun();
   });
   $("saveConfig").addEventListener("click", saveConfig);
+  $("whenClose").addEventListener("click", function () { $("whenDialog").close(); });
   window.addEventListener("popstate", function () {
     var id = new URLSearchParams(window.location.search).get("id");
     loadDocument(id, true).then(function () { scheduleDryRun(false); });

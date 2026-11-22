@@ -216,19 +216,20 @@ Acceptance criteria:
 - Given a document, when I edit one or more declared fields in the collections UI and save, then the `OnRecordUpdateRequest` hook on `documents` persists the new values as they are: no template evaluation, no re-filing, no `file_key` change, no status change.
 - Given a field edit is saved, when the record is persisted, then a `corrected` event is appended whose `before`/`after` diff (section-4 format) carries the changed fields only; `file_key` and `status` do not appear since they did not change.
 - Given a save where no declared field actually changed, when the hook runs, then no event is appended.
-- Given the save also changes the status, when the hook runs, then the status rules of US-23 apply on their own: `processed` → `validated` is appended as a separate `validated` event, anything else is refused.
+- Given the save also changes the status, when the hook runs, then the status rules of US-23 apply on their own: `processed` → `validated` appends a separate `validated` event, `validated` → `processed` a separate `reprocessed` event, anything else is refused.
 - Given a `pending` document, when fields are edited this way, then it stays `pending` and its object stays in the pending prefix; leaving the review queue requires the full correction of the review dashboard (US-36), whose form shows all fields and the resulting name before saving.
 
-### US-23 — Validate a document from the standard PocketBase UI
+### US-23 — Validate or reopen a document from the standard PocketBase UI
 
 As the user,
-I want to change a document's status to `validated` directly in the collections UI,
-so that the validation is traced as a `validated` event without a custom interface.
+I want to change a document's status to `validated` — or back to `processed` when I reopen it — directly in the collections UI,
+so that the transition is traced as a `validated`/`reprocessed` event without a custom interface.
 
 Acceptance criteria:
 
 - Given a `processed` document, when I set its status to `validated` in the collections UI and save, then the update hook appends a `validated` event with the section-4 payload (snapshots carrying the status change alone) and persists the new status.
-- Given any update that tries a status change other than the allowed transition (`processed`→`validated`), when the hook runs, then the save is refused with an explicit error.
+- Given a `validated` document, when I set its status back to `processed` and save, then the update hook appends a `reprocessed` event with the same payload shape and persists the new status; no re-filing occurs and the `file_key` is untouched.
+- Given any update that tries a status change other than the allowed transitions (`processed`→`validated`, `validated`→`processed` — anything touching `pending` included), when the hook runs, then the save is refused with an explicit error.
 - Given a status change to `validated`, when no field changed, then no re-filing occurs and the `file_key` is untouched.
 
 ### US-24 — Delete a document and its S3 object together
@@ -284,22 +285,25 @@ Acceptance criteria:
 - Given the list page, when it opens, then it shows a paginated table whose default columns are all mandatory fields plus `status` and `file_key`, and a column chooser exposing every declared field plus `created`/`updated`; the choice persists in the browser.
 - Given a column header, when I click it, then the list is sorted by that column server-side and the state persists.
 - Given a column, when I open its filter, then the control matches the field type (contains for `text`, dropdown for `enum` and `status`, range for `date`, tri-state for `boolean`) and the filter is applied server-side through a PocketBase filter expression.
+- Given an `enum` filter dropdown, when the `empty` entry is chosen, then the list shows only the documents whose field holds no value (`(field='')` server-side); the `—` entry still clears the filter.
 - Given the list page, when I type a search term, then after a short pause the list shows documents where any page contains that term, case-insensitively, without displaying a text excerpt.
 - Given the list, when I open it, then quick tabs show the per-status counts and pre-filter the review queue (`pending` first).
+- Given the header checkbox, when I use it, then it cycles none → page → the whole filtered set → none (indeterminate display while the selection is partial or page-limited), and changing any filter (status tab, column filter, page search) empties the selection; no dedicated select-all or clear button is needed.
 
 ### US-33 — Change one field for a selection of documents
 
 As the user,
-I want to select several documents and change one declared field for all of them,
+I want to select several documents and change one declared field — or the status — for all of them,
 so that a systematic correction does not require opening every document.
 
 Acceptance criteria:
 
-- Given the list, when I select rows (page or whole filtered set), then a bulk action proposes choosing a declared field and a new value in a control matching the field type, and shows the number of impacted documents.
+- Given the list, when I select rows (page, or the whole filtered set through the header checkbox), then a bulk action proposes choosing a declared field and a new value in a control matching the field type, and shows the number of impacted documents.
 - Given the bulk action is confirmed, when it runs, then it issues one standard PATCH per document — the US-22 hook applies per record: a `corrected` event each, no re-filing, no status change.
 - Given one document of the selection fails, when the bulk action finishes, then the others are applied and the failure is reported with its error.
 - Given the bulk action, when the recompute mode is chosen instead of a manual value, then for each selected document the classification dry-run of US-35 (no body) re-runs the rule tree against the stored pages and the field takes the proposed value — only when that proposal differs from the document's current value; a document with no proposal for the field is left untouched, and a document whose proposal equals its current value counts as unchanged (no PATCH, no event).
 - Given the recompute mode updates a document, when it saves, then it goes through the same standard PATCH as a manual value (US-22 hook: `corrected` event alone), and an enum value missing from the field's list is registered first (US-37), like the import and correction paths.
+- Given the field dropdown, when it opens, then it also proposes the `status` field — not a declared field — with only the `validated` and `processed` values in its control: applying it issues the same one standard PATCH per document and the US-23 hook traces each change (`validated` or `reprocessed` event, no re-filing); the recalculate action does not apply to it.
 
 ### US-34 — Preview a document and correct each field
 
@@ -487,6 +491,9 @@ Acceptance criteria:
 - Given the source is displayed, when I edit it, then `fields` appears as a table of name, French title, type and mandatory controls; rows can be added or removed.
 - Given the rules are displayed, when I expand a section, then its JSONC rule text is editable; section headings and boundaries are determined by comments beginning `// --- `, and the original separator comments and group order are preserved when the draft is serialized.
 - Given a section heading, when I click its pencil icon, then a dialog offers the current section name for editing; on a non-empty confirmation the section's `// --- ` comment is rewritten and the draft is re-tested, and an empty name is refused.
+- Given a section heading, when I click its magnifier icon — a button between the pencil and the trash — then a popup opens whose upper part lists every when of the section, sub-rules indented under their parents, as single-selection radio choices.
+- Given a chosen when in the popup, when the evaluation returns, then the lower part shows the documents matching the full when chain — parents evaluated before the chosen rule, hierarchy applied — with their `file_key` and status, over every document whatever its status, under the current draft configuration; the chain is evaluated in document context against the stored pages and fields, and nothing is persisted.
+- Given an invalid section JSON, an invalid draft configuration or an invalid when expression, when the popup reacts, then the errors are displayed in the popup and no result list is shown as if it came from the draft.
 - Given the templates are displayed, when I edit them, then a table exposes each template name and template text; rows can be added or removed.
 - Given the page is opened from the document list, then the test input is empty and document navigation is hidden.
 - Given the page is opened from a document detail page, then the test input is initialized with that record's `pages` JSON array and previous/next navigation follows the same document order as the list.
