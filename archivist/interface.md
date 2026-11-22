@@ -135,8 +135,8 @@ page, `common.js`, `styles.css`).
 - **Filter-scoped selection.** The list selection belongs to the current
   filter: changing the status tab, a column filter or the page search
   empties it. The header checkbox cycles none → page → the whole filtered
-  set → none (indeterminate while the selection is partial), replacing a
-  dedicated select-all button.
+  set → none (indeterminate while the selection is partial), so the bulk
+  bar needs no dedicated select-all or clear-selection button.
 - **State boundaries.** The URL carries only the document context
   (`document.html?id=`, `config.html?id=`), maintained with `pushState` and
   `popstate`. Transient cross-page context (the current page's document ids,

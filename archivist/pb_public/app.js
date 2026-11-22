@@ -382,11 +382,6 @@ function bindBulk() {
   sel.addEventListener("change", rebuildBulkValue);
   $("bulkrecalc").addEventListener("click", applyRecalc);
   $("bulkapply").addEventListener("click", applyBulk);
-  $("bulkclear").addEventListener("click", function () {
-    state.selected = {};
-    renderRows();
-    renderBulkbar();
-  });
   $("bulkrefile").addEventListener("click", applyRefile);
   $("bulkrerun").addEventListener("click", applyRerun);
   $("bulkdelete").addEventListener("click", applyDelete);

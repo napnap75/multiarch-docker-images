@@ -288,7 +288,7 @@ Acceptance criteria:
 - Given an `enum` filter dropdown, when the `empty` entry is chosen, then the list shows only the documents whose field holds no value (`(field='')` server-side); the `—` entry still clears the filter.
 - Given the list page, when I type a search term, then after a short pause the list shows documents where any page contains that term, case-insensitively, without displaying a text excerpt.
 - Given the list, when I open it, then quick tabs show the per-status counts and pre-filter the review queue (`pending` first).
-- Given the header checkbox, when I use it, then it cycles none → page → the whole filtered set → none (indeterminate display while the selection is partial or page-limited), and changing any filter (status tab, column filter, page search) empties the selection.
+- Given the header checkbox, when I use it, then it cycles none → page → the whole filtered set → none (indeterminate display while the selection is partial or page-limited), and changing any filter (status tab, column filter, page search) empties the selection; no dedicated select-all or clear button is needed.
 
 ### US-33 — Change one field for a selection of documents
 
