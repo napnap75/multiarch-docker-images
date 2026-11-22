@@ -89,7 +89,7 @@ Three sections:
 - `rules`: an ordered tree of rules. Each rule activates if its `when` expression is true, then assigns fields (`set`), removes some (`delete`), and evaluates its child rules.
 - `templates`: naming templates. A template produces the full path under `files/`, with `{...}` expressions evaluated in the document context.
 
-A commented `config.jsonc` example file is provided in the repository. The configuration editor presents `fields` and `templates` as tables and `rules` as collapsible, editable sections grouped by `// --- ` comments. It can test a draft against pasted page JSON or a document's stored pages; the preview includes proposed fields, errors, rendered path and rule trace. Changes are activated only after an explicit save and full validation. Invalid drafts leave the active file and configuration unchanged.
+A commented `config.jsonc` example file is provided in the repository. The configuration editor presents `fields` and `templates` as tables and `rules` as collapsible, editable sections, each with a rename pencil, a magnifier opening an impacted-files popup — choose one of the section's `when` conditions in the upper part, the documents matching it (hierarchy of parents included) are listed with their status in the lower part — and a trash. It can test a draft against pasted page JSON or a document's stored pages; the preview includes proposed fields, errors, rendered path and rule trace. Changes are activated only after an explicit save and full validation. Invalid drafts leave the active file and configuration unchanged.
 
 ### Minimal example
 

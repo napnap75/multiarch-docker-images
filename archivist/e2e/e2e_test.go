@@ -1854,6 +1854,48 @@ func TestE2E(t *testing.T) {
 			t.Fatalf("config save without superuser auth: want 403, got %d", status)
 		}
 
+		// The "impacted files" popup route: the statement when matches the
+		// statements already filed, every entry carries key and status,
+		// and the refusals hold (US-50).
+		statementWhen := "pages[0] contains " + "`BRED`"
+		status, out = call(t, http.MethodPost, "/api/archivist/config/when-match", map[string]any{
+			"source": source,
+			"when":   []string{statementWhen},
+		})
+		if status != 200 {
+			t.Fatalf("when-match: status %d: %v", status, out)
+		}
+		matches, _ := out["documents"].([]any)
+		bredFiled := false
+		for _, m := range matches {
+			entry, ok := m.(map[string]any)
+			if !ok {
+				t.Fatalf("when-match document shape: %v", m)
+			}
+			key, _ := entry["file_key"].(string)
+			if _, has := entry["status"]; !has {
+				t.Fatalf("when-match document misses its status: %v", entry)
+			}
+			if strings.Contains(key, "BRED") {
+				bredFiled = true
+			}
+		}
+		if !bredFiled {
+			t.Fatalf("when-match found no filed BRED statement: %v", matches)
+		}
+		if status, _ = call(t, http.MethodPost, "/api/archivist/config/when-match",
+			map[string]any{"source": "{", "when": []string{statementWhen}}); status != 422 {
+			t.Fatalf("when-match with an invalid draft must be rejected with 422, got %d", status)
+		}
+		if status, _ = call(t, http.MethodPost, "/api/archivist/config/when-match",
+			map[string]any{"source": source, "when": []string{}}); status != 422 {
+			t.Fatalf("when-match with an empty chain must be rejected with 422, got %d", status)
+		}
+		if status, _ = unauth(t, http.MethodPost, "/api/archivist/config/when-match",
+			map[string]any{"source": source, "when": []string{statementWhen}}); status != 403 {
+			t.Fatalf("when-match without superuser auth: want 403, got %d", status)
+		}
+
 		updatedSource := strings.Replace(source, `"value": "bank"`, `"value": "checking"`, 1)
 		if updatedSource == source {
 			t.Fatal("could not find the test rule to update")

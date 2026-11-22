@@ -110,6 +110,16 @@
     </section>
   </div>
 </main>
+<dialog id="whenDialog" class="when-dialog" aria-label="Documents concernés par la condition">
+  <div class="when-dialog-head">
+    <h3>Documents concernés par la condition</h3>
+    <button id="whenClose" class="btn secondary" type="button">Fermer</button>
+  </div>
+  <div id="whenErrors" class="errbox" role="alert" hidden></div>
+  <div id="whenRules" class="when-rules" aria-label="Conditions de la section"></div>
+  <div id="whenResultsHead" class="when-results-head muted"></div>
+  <div id="whenResults" class="when-results" aria-live="polite"></div>
+</dialog>
 <script src="/common.js"></script>
 <script src="/config-editor.js"></script>
 </body>

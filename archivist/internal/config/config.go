@@ -355,6 +355,38 @@ func (c *Config) Evaluate(pages []string) (map[string]any, string, []string) {
 	return fields, rendered, errs
 }
 
+// CompileWhenChain compiles the ordered when chain of one rule — the
+// parents first, the selected rule last, hierarchy applied — in the same
+// declaration context as a rule's when. The chain is compiled once, then
+// evaluated per document by MatchWhenChain (the "impacted files" test of
+// the configuration editor).
+func (c *Config) CompileWhenChain(whens []string) ([]*vm.Program, error) {
+	programs := make([]*vm.Program, len(whens))
+	for i, w := range whens {
+		program, err := compileExpr(w, c.FieldList)
+		if err != nil {
+			return nil, err
+		}
+		programs[i] = program
+	}
+	return programs, nil
+}
+
+// MatchWhenChain evaluates the compiled when chain against pages and
+// fields: the document matches when every link of the chain holds (parents
+// evaluated in order before the selected rule). An evaluation error is a
+// non-match, like the classification refusals of the pipeline.
+func (c *Config) MatchWhenChain(programs []*vm.Program, pages []string, fields map[string]any) bool {
+	env := exprEnv(pages, fields, c.FieldList)
+	for _, program := range programs {
+		res, err := expr.Run(program, env)
+		if err != nil || !truthy(res) {
+			return false
+		}
+	}
+	return true
+}
+
 // EvaluateWithTrace is Evaluate with the rule evaluation trace (US-42).
 func (c *Config) EvaluateWithTrace(pages []string) (map[string]any, string, []string, []TraceEntry) {
 	fields, errs, trace := c.ClassifyTraced(pages)

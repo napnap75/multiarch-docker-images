@@ -129,3 +129,45 @@ func TestFrPeriodUsesFrenchMonthNames(t *testing.T) {
 		t.Fatalf("frPeriod = %q, want %q", got, "Septembre 2026")
 	}
 }
+
+// TestMatchWhenChainAppliesHierarchy covers the "impacted files" test of
+// the configuration editor: the chain is evaluated parents first, the
+// document matches only when every link holds, and an evaluation error
+// (unknown reference, type mismatch) is a non-match like in the pipeline.
+func TestMatchWhenChainAppliesHierarchy(t *testing.T) {
+	cfg, err := LoadSource([]byte(`{
+		"fields": [
+			{"name":"company","french":"Société","type":"text"},
+			{"name":"amount","french":"Montant","type":"number"}
+		],
+		"rules": [],
+		"templates": {"default":"{company}.pdf"}
+	}`))
+	if err != nil {
+		t.Fatalf("load source: %v", err)
+	}
+
+	chain := []string{"pages[0] contains " + "`Acme`", "amount > 100"}
+	programs, err := cfg.CompileWhenChain(chain)
+	if err != nil {
+		t.Fatalf("compile when chain: %v", err)
+	}
+
+	matching := cfg.MatchWhenChain(programs, []string{"Acme invoice"}, map[string]any{"amount": float64(150)})
+	if !matching {
+		t.Fatal("parent true && child true must match")
+	}
+	if cfg.MatchWhenChain(programs, []string{"Acme invoice"}, map[string]any{"amount": float64(10)}) {
+		t.Fatal("child condition false must not match")
+	}
+	if cfg.MatchWhenChain(programs, []string{"Other invoice"}, map[string]any{"amount": float64(150)}) {
+		t.Fatal("parent condition false must not match even with a true child")
+	}
+	if cfg.MatchWhenChain(programs, []string{"Acme invoice"}, map[string]any{}) {
+		t.Fatal("unknown field reference in evaluation must be a non-match")
+	}
+
+	if _, err := cfg.CompileWhenChain([]string{"nosuchfield == 1"}); err == nil {
+		t.Fatal("a when referencing an undeclared field must refuse to compile")
+	}
+}
