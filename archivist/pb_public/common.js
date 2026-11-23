@@ -217,9 +217,12 @@ function fmtVal(v) {
 
 // isDateString recognizes both spellings of a stored date: the RFC 3339 of
 // the engine (dry-run proposals, event snapshots) and the space-separated
-// PocketBase record format ("2026-09-21 00:00:00.000Z").
+// PocketBase record format ("2026-09-21 00:00:00.000Z"). Both spellings
+// always carry the full time with seconds, so requiring it keeps plain
+// strings that merely begin like a date (file names, free text) outside
+// the date formatting path.
 function isDateString(v) {
-  return /^\d{4}-\d{2}-\d{2}[T ]/.test(String(v));
+  return /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(String(v));
 }
 
 function fmtDate(v) {

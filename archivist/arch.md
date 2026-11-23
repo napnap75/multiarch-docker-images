@@ -220,10 +220,12 @@ A `config.jsonc` file kept alongside the binary, reloaded on restart. Three sect
      - any list of strings
      - when omitted, the whole document is searched
      Parsing an empty result with `date()` is a rule error and routes the document to `pending/`.
-   - `frDate(text)`: extracts and parses a French natural-language date — the layout Go cannot express, since `date(value, layout)` only knows English month names.
+   - `frDate(text)`: extracts and parses a French date — the layout Go cannot express for the natural-language form, since `date(value, layout)` only knows English month names.
      - It matches `le 19 janvier 2026`; the day and the leading `le` are optional (`Janvier 2026` gives the first of the month), `1er` and abbreviated month names like `févr.` are accepted, accents are optional.
+     - It also matches a numeric date `jj/mm/aaaa` or `jj/mm/aa` (e.g. `Le : 25/09/26` or `du 15/01/2026`); a two-digit year follows Go's `06` convention (00–68 → the 2000s, 69–99 → the 1900s).
+     - When the text holds several dates, the earliest occurrence wins, the natural-language form taking precedence when both start at the same position; an impossible numeric date (`31/02/26`) behaves like an impossible natural-language one (31 février).
      - It returns a native date — e.g. `frDate(firstMatch(`(?:le )?\d{1,2} \S+ \d{4}`, pages[0]))`, or `frDate(pages[0])` when the first French-looking date of the page is the right one.
-     - A text containing no French date, or an impossible date (31 février), is a rule error and routes the document to `pending/`.
+     - A text containing no French date, or an impossible date (31 février, 31/02/26), is a rule error and routes the document to `pending/`.
    - `frPeriod(value, unit, shift, layout?)`: renders a period instead of a raw date.
      - `value`: a native date (e.g. `emissionDate`); a missing or invalid date is a rule error and routes the document to `pending/`.
      - `unit`: `month` | `quarter` | `half` | `year`.

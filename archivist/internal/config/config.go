@@ -468,9 +468,12 @@ func toString(v any) string {
 }
 
 // frDateRe matches a French natural-language date, with or without a day:
-// "le 19 janvier 2026", "Janvier 2026", "1er févr. 2026". Abbreviated month
-// names are accepted, accents are optional.
-var frDateRe = regexp.MustCompile(`(?i)(?:le\s+)?(?:(1er|\d{1,2})\s+)?(janv\.?|janvier|f[eé]vr\.?|f[eé]vrier|mars|avr\.?|avril|mai|juin|juil\.?|juillet|ao[uû]t|sept\.?|septembre|oct\.?|octobre|nov\.?|novembre|d[eé]c\.?|d[eé]cembre)\s+(\d{4})`)
+// "le 19 janvier 2026", "Janvier 2026", "1er févr. 2026", or a numeric date
+// "Le : 25/09/26", "du 15/01/2026" (day/month, two- or four-digit year).
+// Abbreviated month names are accepted, accents are optional. The leftmost
+// occurrence in the text wins; the natural-language form has precedence
+// when both start at the same position.
+var frDateRe = regexp.MustCompile(`(?i)(?:le\s+)?(?:(1er|\d{1,2})\s+)?(janv\.?|janvier|f[eé]vr\.?|f[eé]vrier|mars|avr\.?|avril|mai|juin|juil\.?|juillet|ao[uû]t|sept\.?|septembre|oct\.?|octobre|nov\.?|novembre|d[eé]c\.?|d[eé]cembre)\s+(\d{4})|\b(\d{1,2})/(\d{1,2})/(\d{2}|\d{4})\b`)
 
 // frMonths maps the folded month names to their numbers. Keys are lowercase
 // and unaccented; foldFrench normalizes what the regex captured.
@@ -503,10 +506,13 @@ func foldFrench(s string) string {
 // FrenchDate is the frDate(text) helper (arch.md §5). It extracts and
 // parses a French natural-language date — "le 19 janvier 2026", the day
 // being optional ("Janvier 2026" gives the first of the month) and
-// abbreviated month names accepted ("1er févr. 2026") — into a native
-// date. Go layouts only know English month names, so date(value, layout)
-// cannot parse these. Missing or invalid dates return an empty string so
-// rules can test for a match and continue to later rules.
+// abbreviated month names accepted ("1er févr. 2026") — or a numeric
+// date "jj/mm/aaaa" / "jj/mm/aa" ("Le : 25/09/26"; a two-digit year
+// follows Go's `06` convention: 00-68 → the 2000s, 69-99 → the 1900s)
+// into a native date. Go layouts only know English month names, so
+// date(value, layout) cannot parse the natural-language form. Missing
+// or invalid dates return an empty string so rules can test for a match
+// and continue to later rules.
 func FrenchDate(args ...any) (any, error) {
 	if len(args) == 0 {
 		return "", nil
@@ -518,6 +524,9 @@ func FrenchDate(args ...any) (any, error) {
 	m := frDateRe.FindStringSubmatch(text)
 	if m == nil {
 		return "", nil
+	}
+	if m[4] != "" {
+		return numericDate(m[4], m[5], m[6])
 	}
 	day := 1
 	if m[1] != "" && !strings.EqualFold(m[1], "1er") {
@@ -537,6 +546,36 @@ func FrenchDate(args ...any) (any, error) {
 	}
 	d := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 	if d.Month() != month || d.Day() != day {
+		return "", nil
+	}
+	return d, nil
+}
+
+// numericDate builds the time.Time of a "jj/mm/aa" or "jj/mm/aaaa" match,
+// expanding a two-digit year like Go's `06` layout does. Impossible dates
+// (day or month out of range) return an empty string.
+func numericDate(dayStr, monthStr, yearStr string) (any, error) {
+	day, err := strconv.Atoi(dayStr)
+	if err != nil {
+		return "", nil
+	}
+	month, err := strconv.Atoi(monthStr)
+	if err != nil {
+		return "", nil
+	}
+	year, err := strconv.Atoi(yearStr)
+	if err != nil {
+		return "", nil
+	}
+	if year < 100 {
+		if year >= 69 {
+			year += 1900
+		} else {
+			year += 2000
+		}
+	}
+	d := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+	if d.Day() != day || d.Month() != time.Month(month) {
 		return "", nil
 	}
 	return d, nil
