@@ -79,7 +79,13 @@ func TestFrenchDate(t *testing.T) {
 		{"le 1er févr. 2026", "01/02/2026"},
 		{"Janvier 2026", "01/01/2026"}, // no day: first of the month
 		{"Avis arrêté au 3 septembre 2026", "03/09/2026"},
-		{"Situation au 31 decembre 2026", "31/12/2026"}, // unaccented
+		{"Situation au 31 decembre 2026", "31/12/2026"},                // unaccented
+		{"Le : 25/09/26", "25/09/2026"},                                // numeric, two-digit year
+		{"Facture du 15/01/2026", "15/01/2026"},                        // numeric, four-digit year
+		{"du 1/2/26", "01/02/2026"},                                    // single-digit day and month
+		{"25/09/55", "25/09/2055"},                                     // two-digit year: 00-68 → 20xx
+		{"25/09/95", "25/09/1995"},                                     // two-digit year: 69-99 → 19xx
+		{"édité le 25/09/26, réglé le 1er janvier 2027", "25/09/2026"}, // earliest wins
 	}
 	for _, c := range cases {
 		v, err := FrenchDate(c.in)
@@ -91,7 +97,7 @@ func TestFrenchDate(t *testing.T) {
 			t.Fatalf("frDate(%q) = %v, want %s", c.in, v, c.want)
 		}
 	}
-	for _, text := range []string{"no date in this text 123", "le 31 février 2026"} {
+	for _, text := range []string{"no date in this text 123", "le 31 février 2026", "Le : 31/02/26", "Le : 13/13/26"} {
 		got, err := FrenchDate(text)
 		if err != nil || got != "" {
 			t.Fatalf("frDate(%q) = (%v, %v), want empty string and no error", text, got, err)

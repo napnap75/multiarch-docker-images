@@ -44,9 +44,11 @@
   //   the first page, pages[0:3] searches pages 1 to 3 (expr slice
   //   syntax, end exclusive), any list of strings works; omitted = the
   //   whole document.
-  //   frDate(text) parses a French natural-language date ("le 19 janvier
-  //   2026"; the day is optional and "1er" / abbreviated months are
-  //   accepted) into a native date, for documents whose date is not
+  //   frDate(text) parses a French date ("le 19 janvier 2026"; the day
+  //   is optional and "1er" / abbreviated months are accepted) or a
+  //   numeric one ("Le : 25/09/26"; "jj/mm/aaaa" or "jj/mm/aa", two-digit
+  //   years following Go's `06` convention: 00-68 → the 2000s, 69-99 →
+  //   the 1900s) into a native date, for documents whose date is not
   //   written in a Go layout format.
   //   frPeriod(value, unit, shift, layout?) renders a period instead of a
   //   raw date: unit = `month`|`quarter`|`half`|`year`, shift = -1/0/+1
